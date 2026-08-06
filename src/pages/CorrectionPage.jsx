@@ -28,6 +28,46 @@ function AnswerKeyStrip({ answerKey, limit, compact = false }) {
   )
 }
 
+function ResultBreakdown({ result, compact = false }) {
+  const total = result?.answers?.length || result?.total || 0
+  const score = total ? Math.round(((result?.correct || 0) / total) * 100) : 0
+  const metrics = [
+    { key: 'correct', label: 'Acertos', value: result?.correct || 0, tone: 'correct' },
+    { key: 'wrong', label: 'Erros', value: result?.wrong || 0, tone: 'wrong' },
+    { key: 'blank', label: 'Em branco', value: result?.blank || 0, tone: 'blank' },
+    { key: 'multiple', label: 'Múltiplas', value: result?.multiple || 0, tone: 'multiple' },
+    { key: 'uncertain', label: 'Incertas', value: result?.uncertain || 0, tone: 'uncertain' },
+  ]
+  return (
+    <div className={cn('result-breakdown', compact && 'is-compact')}>
+      <div className="result-breakdown-score"><small>APROVEITAMENTO</small><strong>{score}%</strong><span>{result?.correct || 0} de {total} questões</span></div>
+      {metrics.map((metric) => <div className={`result-breakdown-metric metric-${metric.tone}`} key={metric.key}><i /><p><small>{metric.label}</small><strong>{metric.value}</strong></p></div>)}
+    </div>
+  )
+}
+
+function DetailedAnswerList({ answers, assessment, questionAreas, onChange }) {
+  if (!answers.length) return <div className="answer-list-empty"><ListChecks size={22} /><p>Nenhuma questão corresponde a este filtro.</p></div>
+  return (
+    <div className="answer-review-list detailed-answer-list">
+      {answers.map((answer) => <div key={answer.question} className={cn('answer-review-row', `answer-${answer.status}`)}>
+        <div className="answer-question-label"><strong>{String(answer.question).padStart(2, '0')}</strong><small title={questionAreas[answer.question - 1]}>{questionAreas[answer.question - 1] || 'Sem área'}</small></div>
+        <div className="answer-choice-review">
+          <div className="answer-options">
+            {Array.from({ length: assessment.optionCount }, (_, index) => {
+              const letter = String.fromCharCode(65 + index)
+              return <button type="button" key={letter} className={cn(answer.selected.includes(letter) && 'marked', answer.expected === letter && 'expected')} onClick={() => onChange(answer.question - 1, letter)} aria-label={`Questão ${answer.question}, alternativa ${letter}`}>{letter}</button>
+            })}
+            <button type="button" className={answer.selected.length === 0 ? 'marked blank-choice' : 'blank-choice'} onClick={() => onChange(answer.question - 1, '')} aria-label={`Deixar questão ${answer.question} em branco`}>—</button>
+          </div>
+          <small>Marcada: {answer.selected.length ? answer.selected.join(' + ') : 'em branco'} · Gabarito: {answer.expected || '—'}</small>
+        </div>
+        <Badge tone={answerStatuses[answer.status]?.tone || 'neutral'}>{answerStatuses[answer.status]?.label || answer.status}</Badge>
+      </div>)}
+    </div>
+  )
+}
+
 function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
   const [assessmentId, setAssessmentId] = useState(initialAssessmentId || data.assessments[0]?.id)
   const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
@@ -239,6 +279,7 @@ export function CorrectionPage({ data, setData, notify }) {
   const [result, setResult] = useState(null)
   const [batch, setBatch] = useState(null)
   const [batchPreviewIndex, setBatchPreviewIndex] = useState(null)
+  const [batchFilter, setBatchFilter] = useState('all')
   const [fileName, setFileName] = useState('')
   const [filter, setFilter] = useState('all')
   const assessment = data.assessments.find((item) => item.id === assessmentId)
@@ -251,7 +292,12 @@ export function CorrectionPage({ data, setData, notify }) {
   const resultClassId = result?.classId || detectedStudent?.classId || classId
   const resultClassroom = data.classes.find((item) => item.id === resultClassId)
   const resultAnswerKey = getAnswerKeyForClass(resultAssessment, resultClassId)
+  const resultQuestionAreas = getQuestionAreas(resultAssessment)
   const resultEligibleStudents = data.students.filter((student) => resultAssessment?.classIds.includes(student.classId) && student.status === 'Ativo')
+  const resultClassCompatible = Boolean(detectedStudent && resultAssessment?.classIds.includes(detectedStudent.classId))
+  const existingResultSubmission = detectedStudent && resultAssessment
+    ? data.submissions.find((item) => item.assessmentId === resultAssessment.id && item.studentId === detectedStudent.id)
+    : null
   const recent = useMemo(() => [...data.submissions].sort((a, b) => new Date(b.correctedAt) - new Date(a.correctedAt)).slice(0, 8), [data.submissions])
   const batchRows = useMemo(() => {
     if (!batch) return []
@@ -260,6 +306,9 @@ export function CorrectionPage({ data, setData, notify }) {
       const itemAssessment = data.assessments.find((entry) => entry.id === item.assessmentId)
       const itemStudent = data.students.find((entry) => entry.id === item.identity?.studentId)
       const itemClass = data.classes.find((entry) => entry.id === itemStudent?.classId)
+      const existingSubmission = itemStudent && itemAssessment
+        ? data.submissions.find((entry) => entry.assessmentId === itemAssessment.id && entry.studentId === itemStudent.id)
+        : null
       let issue = item.error || ''
       if (!issue && !itemAssessment) issue = 'Simulado não encontrado'
       if (!issue && !itemStudent) issue = 'Aluno não identificado'
@@ -268,13 +317,25 @@ export function CorrectionPage({ data, setData, notify }) {
       if (!issue && seen.has(pairKey)) issue = 'Folha duplicada no PDF'
       if (!issue) seen.add(pairKey)
       const needsReview = !issue && (item.multiple > 0 || item.uncertain > 0 || item.markersFound < 4)
-      return { index, item, assessment: itemAssessment, student: itemStudent, classroom: itemClass, issue, pairKey, needsReview, valid: !issue }
+      return { index, item, assessment: itemAssessment, student: itemStudent, classroom: itemClass, existingSubmission, issue, pairKey, needsReview, valid: !issue }
     })
   }, [batch, data])
   const batchSaveable = batchRows.filter((row) => row.valid)
   const batchNeedsReview = batchSaveable.filter((row) => row.needsReview).length
+  const batchReplacements = batchSaveable.filter((row) => row.existingSubmission).length
   const batchUnresolved = batchRows.length - batchSaveable.length
   const batchPreview = batchPreviewIndex === null ? null : batchRows.find((row) => row.index === batchPreviewIndex)
+  const batchTotals = batchSaveable.reduce((summary, row) => ({
+    total: summary.total + (row.item.answers?.length || 0),
+    correct: summary.correct + (row.item.correct || 0),
+    wrong: summary.wrong + (row.item.wrong || 0),
+    blank: summary.blank + (row.item.blank || 0),
+    multiple: summary.multiple + (row.item.multiple || 0),
+    uncertain: summary.uncertain + (row.item.uncertain || 0),
+  }), { total: 0, correct: 0, wrong: 0, blank: 0, multiple: 0, uncertain: 0 })
+  const batchPreviewAreas = getQuestionAreas(batchPreview?.assessment)
+  const visibleBatchAnswers = batchPreview?.item.answers?.filter((answer) => batchFilter === 'all' || answer.status === batchFilter) || []
+  const batchPreviewEligibleStudents = data.students.filter((student) => batchPreview?.assessment?.classIds.includes(student.classId) && student.status === 'Ativo')
 
   function chooseAssessment(nextId) {
     const next = data.assessments.find((item) => item.id === nextId)
@@ -304,6 +365,7 @@ export function CorrectionPage({ data, setData, notify }) {
     setProcessingProgress({ current: 0, total: 0 })
     setResult(null)
     setBatch(null)
+    setBatchFilter('all')
     const items = []
     try {
       const { processPdfPages } = await import('../lib/pdf')
@@ -359,6 +421,7 @@ export function CorrectionPage({ data, setData, notify }) {
         data.settings?.omr,
         resolveRecognitionContext,
       )
+      setFilter('all')
       setResult(analyzed)
       if (!analyzed.qrFound && !studentId) notify('QR Code não identificado', 'Selecione o aluno antes de salvar a correção.', 'warning')
       else if (analyzed.qrFound && !data.students.some((item) => item.id === analyzed.identity?.studentId)) notify('Aluno não encontrado', 'O QR foi lido, mas o aluno não existe mais no banco local.', 'warning')
@@ -372,7 +435,7 @@ export function CorrectionPage({ data, setData, notify }) {
   function changeAnswer(questionIndex, letter) {
     setResult((current) => {
       const changed = current.answers.map((answer, index) => index === questionIndex ? { ...answer, selected: letter ? [letter] : [], status: !letter ? 'blank' : letter === resultAnswerKey[index] ? 'correct' : 'wrong', expected: resultAnswerKey[index] } : answer)
-      return { ...current, ...regradeAnswers(changed, resultAnswerKey, { preserveUncertain: false }), classId: resultClassId }
+      return { ...current, ...regradeAnswers(changed, resultAnswerKey), classId: resultClassId }
     })
   }
 
@@ -405,6 +468,28 @@ export function CorrectionPage({ data, setData, notify }) {
       }
       return { ...current, items: current.items.map((entry, itemIndex) => itemIndex === index ? updated : entry) }
     })
+  }
+
+  function changeBatchAnswer(itemIndex, questionIndex, letter) {
+    setBatch((current) => {
+      if (!current) return current
+      const item = current.items[itemIndex]
+      if (!item?.answers) return current
+      const itemAssessment = data.assessments.find((entry) => entry.id === item.assessmentId) || assessment
+      const itemStudent = data.students.find((entry) => entry.id === item.identity?.studentId)
+      const itemClassId = itemStudent?.classId || item.classId || classId
+      const itemAnswerKey = getAnswerKeyForClass(itemAssessment, itemClassId)
+      const changed = item.answers.map((answer, index) => index === questionIndex
+        ? { ...answer, selected: letter ? [letter] : [], expected: itemAnswerKey[index], status: !letter ? 'blank' : letter === itemAnswerKey[index] ? 'correct' : 'wrong' }
+        : answer)
+      const updated = { ...item, ...regradeAnswers(changed, itemAnswerKey), classId: itemClassId }
+      return { ...current, items: current.items.map((entry, index) => index === itemIndex ? updated : entry) }
+    })
+  }
+
+  function openBatchPreview(index) {
+    setBatchFilter('all')
+    setBatchPreviewIndex(index)
   }
 
   function saveCorrection() {
@@ -483,13 +568,25 @@ export function CorrectionPage({ data, setData, notify }) {
     }))
     const skippedMessage = batchUnresolved ? ` ${batchUnresolved} página(s) com pendência foram ignoradas.` : ''
     const reviewMessage = batchNeedsReview ? ` ${batchNeedsReview} correção(ões) foram enviadas para revisão.` : ''
-    notify('Lote de correções salvo', `${submissions.length} correção(ões) registradas.${reviewMessage}${skippedMessage}`, batchUnresolved ? 'warning' : 'success')
+    const replacementMessage = batchReplacements ? ` ${batchReplacements} resultado(s) anterior(es) foram atualizado(s).` : ''
+    notify('Lote de correções salvo', `${submissions.length} correção(ões) registradas.${replacementMessage}${reviewMessage}${skippedMessage}`, batchUnresolved ? 'warning' : 'success')
     setBatch(null)
     setBatchPreviewIndex(null)
     setFileName('')
   }
 
   const visibleAnswers = result?.answers.filter((answer) => filter === 'all' || answer.status === filter) || []
+  const resultReady = Boolean(result && detectedStudent && resultAssessment && resultClassCompatible)
+  const resultNeedsReview = Boolean(result && (result.multiple > 0 || result.uncertain > 0 || result.markersFound < 4))
+  const resultNoticeCount = result ? [
+    !detectedStudent,
+    !result.qrFound,
+    detectedStudent && !resultClassCompatible,
+    result.markersFound < 4,
+    result.multiple > 0,
+    result.uncertain > 0,
+    Boolean(existingResultSubmission),
+  ].filter(Boolean).length : 0
 
   return (
     <div className="page-stack correction-page">
@@ -534,6 +631,12 @@ export function CorrectionPage({ data, setData, notify }) {
         </div>
 
         {batchUnresolved > 0 && <div className="batch-alert"><AlertTriangle size={18} /><p><strong>Existem páginas que não serão salvas ainda.</strong>Selecione manualmente o aluno quando o QR não for reconhecido. Páginas inválidas ou duplicadas serão ignoradas.</p></div>}
+        {batchReplacements > 0 && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>{batchReplacements} correção(ões) já existente(s).</strong> Esses resultados serão atualizados quando o lote for salvo; as demais correções permanecerão intactas.</p></div>}
+
+        <section className="panel batch-performance-panel">
+          <header className="panel-header"><div><h3>Resultado consolidado do lote</h3><p>Contagem de respostas das páginas prontas para salvar</p></div><Badge tone={batchTotals.multiple + batchTotals.uncertain ? 'ochre' : 'green'}>{batchTotals.total} respostas analisadas</Badge></header>
+          <ResultBreakdown result={batchTotals} />
+        </section>
 
         <section className="panel batch-results-panel">
           <header className="panel-header"><div><h3>Folhas encontradas</h3><p>Confira a identificação e o resultado de cada página antes de salvar.</p></div><Badge tone={batchUnresolved ? 'ochre' : 'green'}>{batchSaveable.length} de {batch.totalPages} prontas</Badge></header>
@@ -545,9 +648,9 @@ export function CorrectionPage({ data, setData, notify }) {
                 <td>{row.item.error ? <span className="batch-error-text">Página não processada</span> : <select className="batch-student-select" value={row.student?.id || ''} onChange={(event) => assignBatchStudent(row.index, event.target.value)}><option value="">Identificar aluno...</option>{availableStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select>}</td>
                 <td>{row.classroom ? <span className="class-tag" style={{ '--class-color': row.classroom.color }}>{row.classroom.name}</span> : '—'}</td>
                 <td><strong>{row.assessment?.code || '—'}</strong><small className="cell-subtitle">{row.assessment?.title || ''}</small></td>
-                <td>{row.valid ? <><strong>{row.item.correct} / {row.assessment.questionCount}</strong><small className="cell-subtitle">{row.item.score}% de acertos</small></> : '—'}</td>
-                <td>{row.issue ? <Badge tone={row.issue.includes('duplicada') || row.item.error ? 'red' : 'ochre'}>{row.issue}</Badge> : row.needsReview ? <Badge tone="ochre">Revisar</Badge> : <Badge tone="green">Pronta</Badge>}</td>
-                <td><button className="icon-button" disabled={!row.item.previewUrl} onClick={() => setBatchPreviewIndex(row.index)} aria-label={`Visualizar página ${row.item.pageNumber}`}><Eye size={17} /></button></td>
+                <td>{row.valid ? <div className="batch-result-cell"><strong>{row.item.score}%</strong><span><b className="is-correct">{row.item.correct} A</b><b className="is-wrong">{row.item.wrong} E</b><b>{row.item.blank} B</b><b className="is-review">{row.item.multiple + row.item.uncertain} R</b></span></div> : '—'}</td>
+                <td>{row.issue ? <Badge tone={row.issue.includes('duplicada') || row.item.error ? 'red' : 'ochre'}>{row.issue}</Badge> : row.needsReview ? <Badge tone="ochre">Revisar marcações</Badge> : row.existingSubmission ? <Badge tone="blue">Atualizará existente</Badge> : <Badge tone="green">Pronta</Badge>}</td>
+                <td><button className="icon-button" disabled={!row.item.previewUrl} onClick={() => openBatchPreview(row.index)} aria-label={`Visualizar página ${row.item.pageNumber}`} title="Ver identificação e respostas"><Eye size={17} /></button></td>
               </tr>
             })}
           </tbody></table></div>
@@ -555,14 +658,77 @@ export function CorrectionPage({ data, setData, notify }) {
       </section>}
 
       {result && <section className="scan-result">
-        <header className="scan-result-header"><div><button className="back-link" onClick={() => setResult(null)}><X size={16} /> Fechar leitura</button><h2>Revisão da folha</h2><p>{fileName} · análise concluída</p></div><div className="scan-header-actions"><Button variant="secondary" icon={RotateCcw} onClick={() => setResult(null)}>Ler novamente</Button><Button icon={Save} onClick={saveCorrection}>Confirmar correção</Button></div></header>
-        <div className="recognition-strip"><span className={cn('recognition-status', result.qrFound ? 'success' : 'warning')}><QrCode size={18} /></span><div><small>ALUNO IDENTIFICADO</small><strong>{detectedStudent?.name || 'Selecione o aluno abaixo'}</strong><p>{detectedStudent?.registration || 'QR Code não reconhecido'}</p></div>{!detectedStudent && <select value={studentId} onChange={(event) => assignManualStudent(event.target.value)}><option value="">Selecione o aluno</option>{resultEligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {data.classes.find((item) => item.id === student.classId)?.name}</option>)}</select>}<div className="recognition-metrics"><span><small>TURMA / GABARITO</small><b>{resultClassroom?.name || '—'}</b></span><span><small>QR CODE</small><b>{result.qrFound ? 'Lido' : 'Manual'}</b></span><span><small>MARCADORES</small><b>{result.markersFound}/4</b></span><span><small>CONFIANÇA</small><b>{result.confidence}%</b></span></div></div>
+        <header className="scan-result-header">
+          <div><button className="back-link" onClick={() => setResult(null)}><X size={16} /> Fechar leitura</button><h2>Conferência completa da folha</h2><p>{fileName} · confira a identificação e cada resposta antes de salvar</p></div>
+          <div className="scan-header-actions"><Button variant="secondary" icon={RotateCcw} onClick={() => setResult(null)}>Escolher outro arquivo</Button><Button icon={Save} disabled={!resultReady} onClick={saveCorrection}>{existingResultSubmission ? 'Atualizar correção' : 'Confirmar correção'}</Button></div>
+        </header>
+
+        <div className="scan-photo-workspace">
+          <aside className="image-preview-panel panel scan-photo-panel"><header><div><h3>Folha enviada</h3><p>Use a imagem como referência durante a conferência.</p></div><Badge tone={result.markersFound === 4 ? 'green' : 'ochre'}>{result.markersFound === 4 ? 'Enquadrada' : 'Enquadramento estimado'}</Badge></header><div className="scan-image"><img src={result.previewUrl} alt="Folha digitalizada" /><i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" /></div></aside>
+
+          <aside className="scan-review-sidebar">
+            <section className={cn('scan-verdict', !resultReady ? 'is-pending' : resultNeedsReview ? 'needs-review' : 'is-ready')}>
+              <span>{!resultReady || resultNeedsReview ? <AlertTriangle size={22} /> : <CheckCircle2 size={22} />}</span>
+              <div><small>RESULTADO DA LEITURA</small><strong>{!resultReady ? 'Identificação pendente' : resultNeedsReview ? 'Confira os avisos abaixo' : 'Pronta para salvar'}</strong><p>{!resultReady ? 'Complete os dados para aplicar o gabarito correto.' : resultNeedsReview ? 'A nota foi calculada, mas há ocorrências para revisar.' : 'Aluno, prova e respostas foram reconhecidos.'}</p></div>
+              <Badge tone={!resultReady || resultNeedsReview ? 'ochre' : 'green'}>{resultNoticeCount ? `${resultNoticeCount} aviso${resultNoticeCount !== 1 ? 's' : ''}` : 'Sem pendências'}</Badge>
+            </section>
+
+            <section className="panel scan-identity-panel">
+              <header><h3>Identificação encontrada</h3><p>Dados usados para selecionar o gabarito</p></header>
+              <div className={cn('scan-identity-row', !detectedStudent && 'identification-missing')}><span><UsersRound size={18} /></span><div><small>ALUNO</small><strong>{detectedStudent?.name || 'Não identificado'}</strong><p>{detectedStudent ? `Matrícula ${detectedStudent.registration}` : 'Selecione o aluno para continuar'}</p>{!detectedStudent && <select value={studentId} onChange={(event) => assignManualStudent(event.target.value)}><option value="">Selecionar aluno...</option>{resultEligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {data.classes.find((item) => item.id === student.classId)?.name}</option>)}</select>}</div><Badge tone={detectedStudent && result.qrFound ? 'green' : 'ochre'}>{detectedStudent && result.qrFound ? 'QR' : detectedStudent ? 'Manual' : 'Pendente'}</Badge></div>
+              <div className="scan-identity-row"><span><FileText size={18} /></span><div><small>SIMULADO / PROVA</small><strong>{resultAssessment?.title || 'Não encontrado'}</strong><p>{resultAssessment ? `${resultAssessment.code} · ${resultAssessment.questionCount} questões` : 'Confira o QR Code'}</p></div><Badge tone={result.qrFound && result.identity?.assessmentId === resultAssessment?.id ? 'green' : 'blue'}>{result.qrFound && result.identity?.assessmentId === resultAssessment?.id ? 'QR' : 'Selecionada'}</Badge></div>
+              <div className={cn('scan-identity-row', detectedStudent && !resultClassCompatible && 'identification-missing')}><span><ClipboardList size={18} /></span><div><small>TURMA / GABARITO</small><strong>{resultClassroom?.name || 'Turma não definida'}</strong><p>{resultClassroom ? `${resultClassroom.shift} · ${hasCustomAnswerKey(resultAssessment, resultClassId) ? 'versão específica' : 'versão padrão'}` : 'Gabarito não definido'}</p></div><Badge tone={resultClassCompatible ? 'green' : 'ochre'}>{resultClassCompatible ? 'Compatível' : 'Conferir'}</Badge></div>
+              <div className="scan-identity-row"><span><ScanLine size={18} /></span><div><small>QUALIDADE</small><strong>{result.confidence}% de confiança</strong><p>QR {result.qrFound ? 'lido' : 'não lido'} · {result.markersFound}/4 marcadores</p></div><Badge tone={result.qrFound && result.markersFound === 4 ? 'green' : 'ochre'}>{result.markersFound === 4 ? 'Boa' : 'Estimada'}</Badge></div>
+            </section>
+
+            <ResultBreakdown result={result} compact />
+
+            <div className="scan-notice-stack compact-notices">
+              {!detectedStudent && <div className="scan-notice is-warning"><UsersRound size={17} /><p><strong>Aluno não encontrado.</strong> Faça a identificação manual acima.</p></div>}
+              {!result.qrFound && <div className="scan-notice is-warning"><QrCode size={17} /><p><strong>QR não reconhecido.</strong> A prova selecionada foi usada como referência.</p></div>}
+              {detectedStudent && !resultClassCompatible && <div className="scan-notice is-error"><AlertTriangle size={17} /><p><strong>Turma incompatível.</strong> Este aluno não pertence às turmas do simulado.</p></div>}
+              {result.markersFound < 4 && <div className="scan-notice is-warning"><Focus size={17} /><p><strong>Enquadramento estimado.</strong> {result.markersFound} de 4 marcadores encontrados.</p></div>}
+              {result.multiple > 0 && <div className="scan-notice is-error"><CircleDot size={17} /><p><strong>{result.multiple} múltipla(s).</strong> Mais de uma alternativa detectada.</p></div>}
+              {result.uncertain > 0 && <div className="scan-notice is-warning"><AlertTriangle size={17} /><p><strong>{result.uncertain} incerta(s).</strong> Confira as marcações destacadas.</p></div>}
+              {existingResultSubmission && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>Já existe uma correção.</strong> O resultado anterior será substituído.</p></div>}
+              {!resultNoticeCount && <div className="scan-notice is-success"><CheckCircle2 size={17} /><p><strong>Nenhuma inconsistência encontrada.</strong></p></div>}
+            </div>
+          </aside>
+        </div>
+
         <div className="applied-key-banner"><ClipboardList size={17} /><div><strong>Gabarito aplicado: {resultAssessment?.title} · {resultClassroom?.name}</strong><p>{hasCustomAnswerKey(resultAssessment, resultClassId) ? 'Versão específica desta turma' : 'Gabarito padrão do simulado'}</p></div><AnswerKeyStrip answerKey={resultAnswerKey} limit={10} compact /></div>
-        <div className="review-grid"><aside className="image-preview-panel panel"><header><h3>Imagem enviada</h3><Badge tone={result.markersFound === 4 ? 'green' : 'ochre'}>{result.markersFound === 4 ? 'Enquadramento detectado' : 'Enquadramento estimado'}</Badge></header><div className="scan-image"><img src={result.previewUrl} alt="Folha digitalizada" /><i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" /></div></aside><div className="answer-review-panel panel"><div className="result-score-row"><div className="score-ring" style={{ '--score': `${result.score * 3.6}deg` }}><span><strong>{result.score}%</strong><small>desempenho</small></span></div><div className="score-counts"><span className="correct"><i /> <strong>{result.correct}</strong> corretas</span><span className="wrong"><i /> <strong>{result.wrong}</strong> incorretas</span><span><i /> <strong>{result.blank}</strong> em branco</span><span className="review"><i /> <strong>{result.multiple + result.uncertain}</strong> revisar</span></div></div>{(result.multiple > 0 || result.uncertain > 0) && <div className="review-alert"><AlertTriangle size={18} /><p><strong>Atenção a {result.multiple + result.uncertain} marcação(ões)</strong>Revise as questões destacadas antes de confirmar.</p></div>}<div className="answer-filters"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todas <span>{result.answers.length}</span></button><button className={filter === 'multiple' ? 'active' : ''} onClick={() => setFilter('multiple')}>Múltiplas <span>{result.multiple}</span></button><button className={filter === 'uncertain' ? 'active' : ''} onClick={() => setFilter('uncertain')}>Incertas <span>{result.uncertain}</span></button><button className={filter === 'wrong' ? 'active' : ''} onClick={() => setFilter('wrong')}>Incorretas <span>{result.wrong}</span></button></div><div className="answer-review-list">{visibleAnswers.map((answer) => <div key={answer.question} className={cn('answer-review-row', `answer-${answer.status}`)}><strong>{String(answer.question).padStart(2, '0')}</strong><div className="answer-options">{Array.from({ length: resultAssessment.optionCount }, (_, index) => { const letter = String.fromCharCode(65 + index); return <button key={letter} className={cn(answer.selected.includes(letter) && 'marked', answer.expected === letter && 'expected')} onClick={() => changeAnswer(answer.question - 1, letter)}>{letter}</button> })}<button className={answer.selected.length === 0 ? 'marked blank-choice' : 'blank-choice'} onClick={() => changeAnswer(answer.question - 1, '')}>—</button></div><Badge tone={answerStatuses[answer.status].tone}>{answerStatuses[answer.status].label}</Badge></div>)}</div></div></div>
+
+        <div className="answer-review-panel panel scan-answer-review">
+          <header className="answer-review-heading"><div><h3>Respostas encontradas</h3><p>Filtre os resultados ou clique em uma alternativa para corrigir a leitura.</p></div><Badge tone={result.multiple + result.uncertain ? 'ochre' : 'green'}>{result.answers.length} questões</Badge></header>
+          <div className="answer-filters"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todas <span>{result.answers.length}</span></button><button className={filter === 'correct' ? 'active' : ''} onClick={() => setFilter('correct')}>Acertos <span>{result.correct}</span></button><button className={filter === 'wrong' ? 'active' : ''} onClick={() => setFilter('wrong')}>Erros <span>{result.wrong}</span></button><button className={filter === 'blank' ? 'active' : ''} onClick={() => setFilter('blank')}>Em branco <span>{result.blank}</span></button><button className={filter === 'multiple' ? 'active' : ''} onClick={() => setFilter('multiple')}>Múltiplas <span>{result.multiple}</span></button><button className={filter === 'uncertain' ? 'active' : ''} onClick={() => setFilter('uncertain')}>Incertas <span>{result.uncertain}</span></button></div>
+          <DetailedAnswerList answers={visibleAnswers} assessment={resultAssessment} questionAreas={resultQuestionAreas} onChange={changeAnswer} />
+        </div>
       </section>}
 
-      <Modal open={Boolean(batchPreview)} onClose={() => setBatchPreviewIndex(null)} title={`Página ${batchPreview?.item.pageNumber || ''}`} subtitle={batchPreview?.student ? `${batchPreview.student.name} · ${batchPreview.assessment?.title || ''}` : 'Prévia da página processada'} size="lg" footer={<Button onClick={() => setBatchPreviewIndex(null)}>Fechar prévia</Button>}>
-        {batchPreview?.item.previewUrl && <div className="batch-page-preview"><img src={batchPreview.item.previewUrl} alt={`Página ${batchPreview.item.pageNumber} do PDF`} /><div><Badge tone={batchPreview.issue ? 'ochre' : batchPreview.needsReview ? 'ochre' : 'green'}>{batchPreview.issue || (batchPreview.needsReview ? 'Requer revisão' : 'Leitura concluída')}</Badge><span><strong>{batchPreview.item.markersFound}/4</strong> marcadores</span><span><strong>{batchPreview.item.confidence}%</strong> confiança</span><span><strong>{batchPreview.item.multiple + batchPreview.item.uncertain}</strong> ocorrências</span></div></div>}
+      <Modal open={Boolean(batchPreview)} onClose={() => setBatchPreviewIndex(null)} title={`Conferência da página ${batchPreview?.item.pageNumber || ''}`} subtitle="Confira a identificação, o resultado e as respostas antes de salvar o lote." size="xl" footer={<Button onClick={() => setBatchPreviewIndex(null)}>Concluir conferência</Button>}>
+        {batchPreview?.item.previewUrl && <div className="batch-page-detail">
+          <div className="batch-preview-identification">
+            <article><small>ALUNO</small><strong>{batchPreview.student?.name || 'Não identificado'}</strong><p>{batchPreview.student ? `Matrícula ${batchPreview.student.registration}` : 'Selecione um aluno para salvar esta página'}</p>{!batchPreview.student && !batchPreview.item.error && <select value="" onChange={(event) => assignBatchStudent(batchPreview.index, event.target.value)}><option value="">Selecionar aluno...</option>{batchPreviewEligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select>}</article>
+            <article><small>SIMULADO / PROVA</small><strong>{batchPreview.assessment?.title || 'Não encontrado'}</strong><p>{batchPreview.assessment ? `${batchPreview.assessment.code} · ${batchPreview.assessment.questionCount} questões` : 'Identificação indisponível'}</p></article>
+            <article><small>TURMA / GABARITO</small><strong>{batchPreview.classroom?.name || 'Não definida'}</strong><p>{batchPreview.classroom ? `${batchPreview.classroom.shift} · ${hasCustomAnswerKey(batchPreview.assessment, batchPreview.classroom.id) ? 'versão específica' : 'versão padrão'}` : 'Aguardando identificação do aluno'}</p></article>
+            <article><small>QUALIDADE</small><strong>{batchPreview.item.confidence}% de confiança</strong><p>QR {batchPreview.item.qrFound ? 'lido' : 'não lido'} · {batchPreview.item.markersFound}/4 marcadores</p></article>
+          </div>
+
+          {batchPreview.issue && <div className="scan-notice is-error"><AlertTriangle size={17} /><p><strong>Pendência nesta página.</strong> {batchPreview.issue}. Ela não será salva enquanto a pendência existir.</p></div>}
+          {!batchPreview.issue && batchPreview.needsReview && <div className="scan-notice is-warning"><AlertTriangle size={17} /><p><strong>Esta página requer revisão.</strong> Confira as marcações múltiplas, incertas ou o enquadramento antes de salvar.</p></div>}
+          {!batchPreview.issue && batchPreview.existingSubmission && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>Já existe uma correção deste aluno.</strong> O resultado anterior será substituído ao salvar o lote.</p></div>}
+
+          {batchPreview.item.answers && <ResultBreakdown result={batchPreview.item} />}
+
+          <div className="batch-page-review-grid">
+            <div className="batch-preview-image"><img src={batchPreview.item.previewUrl} alt={`Página ${batchPreview.item.pageNumber} do PDF`} /></div>
+            {batchPreview.item.answers && batchPreview.assessment && <div className="answer-review-panel panel">
+              <header className="answer-review-heading"><div><h3>Respostas da página</h3><p>Você pode ajustar a alternativa antes de fechar.</p></div><Badge tone={batchPreview.needsReview ? 'ochre' : 'green'}>{batchPreview.item.answers.length} questões</Badge></header>
+              <div className="answer-filters"><button className={batchFilter === 'all' ? 'active' : ''} onClick={() => setBatchFilter('all')}>Todas <span>{batchPreview.item.answers.length}</span></button><button className={batchFilter === 'correct' ? 'active' : ''} onClick={() => setBatchFilter('correct')}>Acertos <span>{batchPreview.item.correct}</span></button><button className={batchFilter === 'wrong' ? 'active' : ''} onClick={() => setBatchFilter('wrong')}>Erros <span>{batchPreview.item.wrong}</span></button><button className={batchFilter === 'blank' ? 'active' : ''} onClick={() => setBatchFilter('blank')}>Brancos <span>{batchPreview.item.blank}</span></button><button className={batchFilter === 'multiple' ? 'active' : ''} onClick={() => setBatchFilter('multiple')}>Múltiplas <span>{batchPreview.item.multiple}</span></button><button className={batchFilter === 'uncertain' ? 'active' : ''} onClick={() => setBatchFilter('uncertain')}>Incertas <span>{batchPreview.item.uncertain}</span></button></div>
+              <DetailedAnswerList answers={visibleBatchAnswers} assessment={batchPreview.assessment} questionAreas={batchPreviewAreas} onChange={(questionIndex, letter) => changeBatchAnswer(batchPreview.index, questionIndex, letter)} />
+            </div>}
+          </div>
+        </div>}
       </Modal>
     </div>
   )
