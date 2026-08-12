@@ -1,9 +1,9 @@
 import readXlsxFile from 'read-excel-file/browser'
 import { classColors } from '../data.js'
-import { normalize, uid } from './utils.js'
+import { nextStudentRegistration, normalize, uid } from './utils.js'
 
 export const fieldDefinitions = [
-  { key: 'registration', label: 'Matrícula / ID', required: true, aliases: ['matricula', 'matricula aluno', 'id aluno', 'codigo aluno', 'cod aluno', 'inep aluno', 'codigo'] },
+  { key: 'registration', label: 'Matrícula / ID', required: false, aliases: ['matricula', 'matricula aluno', 'id aluno', 'codigo aluno', 'cod aluno', 'inep aluno', 'codigo'] },
   { key: 'name', label: 'Nome do aluno', required: true, aliases: ['nome', 'aluno', 'nome aluno', 'nome civil', 'nome estudante', 'estudante'] },
   { key: 'className', label: 'Turma', required: true, aliases: ['turma', 'classe', 'nome turma', 'descricao turma'] },
   { key: 'grade', label: 'Série / etapa', required: false, aliases: ['serie', 'ano', 'etapa', 'ano serie', 'etapa modalidade', 'serie ano'] },
@@ -26,6 +26,35 @@ export async function readSegesFile(file) {
   const headers = headerRow.map((cell, index) => String(cell || `Coluna ${index + 1}`).trim())
   const rows = dataRows.map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])))
   return { rows, headers, sheetName: 'Planilha 1' }
+}
+
+export function readPastedTable(source) {
+  const lines = String(source ?? '')
+    .replace(/^\ufeff/, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter((line) => line.trim())
+  if (!lines.length) return { rows: [], headers: [], sheetName: 'Área de transferência', rowOffset: 1 }
+
+  const matrix = lines.map((line) => line.split('\t').map((cell) => cell.trim()))
+  const columnCount = Math.max(...matrix.map((row) => row.length))
+  const headerTerms = new Set([
+    'nome', 'nome completo', 'nome do aluno', 'nome aluno', 'aluno', 'estudante',
+    'matricula', 'matricula aluno', 'codigo', 'turma', 'serie', 'turno',
+  ])
+  const hasHeader = matrix[0].some((cell) => headerTerms.has(normalize(cell)))
+  const headerRow = hasHeader ? matrix[0] : Array.from({ length: columnCount }, (_, index) => `Coluna ${index + 1}`)
+  const usedHeaders = new Map()
+  const headers = Array.from({ length: columnCount }, (_, index) => {
+    const base = String(headerRow[index] || `Coluna ${index + 1}`).trim()
+    const count = (usedHeaders.get(base) || 0) + 1
+    usedHeaders.set(base, count)
+    return count === 1 ? base : `${base} (${count})`
+  })
+  const dataRows = hasHeader ? matrix.slice(1) : matrix
+  const rows = dataRows.map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])))
+
+  return { rows, headers, sheetName: 'Área de transferência', rowOffset: hasHeader ? 2 : 1 }
 }
 
 function parseCsv(source) {
@@ -78,6 +107,7 @@ export function importSegesRows(state, rows, mapping, filename) {
   const classes = [...state.classes]
   const students = [...state.students]
   const knownStudents = new Map(students.map((student, index) => [normalize(student.registration), index]))
+  const knownStudentsByClassAndName = new Map(students.map((student, index) => [normalize(`${student.classId}|${student.name}`), index]))
   const knownClasses = new Map(classes.map((item) => [normalize(`${item.name}|${item.grade}|${item.shift}`), item]))
   let added = 0
   let updated = 0
@@ -85,14 +115,14 @@ export function importSegesRows(state, rows, mapping, filename) {
   const errors = []
 
   rows.forEach((row, rowIndex) => {
-    const registration = mapped(row, mapping, 'registration')
+    const providedRegistration = mapped(row, mapping, 'registration')
     const name = mapped(row, mapping, 'name')
     const className = mapped(row, mapping, 'className')
     const grade = mapped(row, mapping, 'grade') || 'Não informada'
     const shift = mapped(row, mapping, 'shift') || 'Não informado'
-    if (!registration || !name || !className) {
+    if (!name || !className) {
       skipped += 1
-      errors.push(`Linha ${rowIndex + 2}: matrícula, nome ou turma ausente.`)
+      errors.push(`Linha ${rowIndex + 2}: nome ou turma ausente.`)
       return
     }
 
@@ -107,10 +137,15 @@ export function importSegesRows(state, rows, mapping, filename) {
       knownClasses.set(classKey, classroom)
     }
 
+    const nameKey = normalize(`${classroom.id}|${name}`)
+    const existingIndex = providedRegistration
+      ? knownStudents.get(normalize(providedRegistration))
+      : knownStudentsByClassAndName.get(nameKey)
+    const registration = providedRegistration || students[existingIndex]?.registration || nextStudentRegistration(students)
     const studentKey = normalize(registration)
-    const existingIndex = knownStudents.get(studentKey)
     const sourceData = {
       registration,
+      registrationType: providedRegistration ? 'external' : students[existingIndex]?.registrationType || 'internal',
       name,
       classId: classroom.id,
       status: mapped(row, mapping, 'status') || 'Ativo',
@@ -119,10 +154,13 @@ export function importSegesRows(state, rows, mapping, filename) {
     }
     if (existingIndex !== undefined) {
       students[existingIndex] = { ...students[existingIndex], ...sourceData }
+      knownStudents.set(studentKey, existingIndex)
+      knownStudentsByClassAndName.set(nameKey, existingIndex)
       updated += 1
     } else {
       students.push({ id: uid('student'), ...sourceData })
       knownStudents.set(studentKey, students.length - 1)
+      knownStudentsByClassAndName.set(nameKey, students.length - 1)
       added += 1
     }
   })

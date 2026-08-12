@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
-import { bubbleCenter, MARKERS, SHEET } from '../lib/omr'
+import { bubbleCenter, getAnswerSheetLayout, MARKERS, SHEET } from '../lib/omr'
 import { qrPayload } from '../lib/utils'
 
 const options = ['A', 'B', 'C', 'D', 'E']
 const governmentLogo = `${import.meta.env.BASE_URL}assets/brasao-governo-es-horizontal.png`
 
-export function AnswerSheet({ student, assessment, classroom, school }) {
+export function AnswerSheet({ student, assessment, classroom, school, hideRegistration = false }) {
   const [qr, setQr] = useState('')
   const payload = useMemo(() => qrPayload(student.id, assessment.id), [student.id, assessment.id])
   const schoolLocation = [school.address, school.city && school.state ? `${school.city} – ${school.state}.` : school.city || school.state]
     .filter(Boolean)
     .join(', ')
+  const layout = getAnswerSheetLayout(assessment.questionCount)
 
   useEffect(() => {
     QRCode.toDataURL(payload, { margin: 1, width: 220, errorCorrectionLevel: 'M', color: { dark: '#111111', light: '#ffffff' } })
@@ -49,8 +50,8 @@ export function AnswerSheet({ student, assessment, classroom, school }) {
       <text x="216" y="162" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">ALUNO(A)</text>
       <text x="216" y="184" fontFamily="Arial" fontSize="17" fontWeight="700" fill="#17221e">{student.name.toUpperCase()}</text>
       <line x1="216" y1="195" x2="708" y2="195" stroke="#bfc8c4" />
-      <text x="216" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">MATRÍCULA</text>
-      <text x="216" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{student.registration}</text>
+      {!hideRegistration && <text x="216" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">MATRÍCULA</text>}
+      {!hideRegistration && <text x="216" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{student.registration}</text>}
       <text x="407" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">TURMA</text>
       <text x="407" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{classroom?.name || '—'} · {classroom?.shift || ''}</text>
       <text x="566" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">DATA</text>
@@ -58,7 +59,7 @@ export function AnswerSheet({ student, assessment, classroom, school }) {
       <text x="216" y="266" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">SIMULADO</text>
       <text x="216" y="286" fontFamily="Arial" fontSize="13" fontWeight="700" fill="#17221e">{assessment.title}</text>
       <text x="566" y="266" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">CÓDIGO</text>
-      <text x="566" y="286" fontFamily="Arial" fontSize="13" fill="#17221e">{assessment.code} · {classroom?.name}</text>
+      <text x="566" y="286" fontFamily="Arial" fontSize="13" fill="#17221e">{assessment.code}</text>
 
       <rect x="65" y="311" width="643" height="52" rx="7" fill="#f1f4f2" />
       <circle cx="86" cy="329" r="6" fill="none" stroke="#52615b" strokeWidth="1.5" />
@@ -66,27 +67,27 @@ export function AnswerSheet({ student, assessment, classroom, school }) {
       <text x="101" y="332" fontFamily="Arial" fontSize="9" fill="#424c48">Use caneta azul ou preta e preencha completamente apenas uma alternativa.</text>
       <text x="101" y="350" fontFamily="Arial" fontSize="9" fill="#424c48">Não rasure, não dobre a folha e mantenha os marcadores dos cantos visíveis.</text>
 
-      {[0, 1].map((column) => (
+      {Array.from({ length: layout.columns }, (_, column) => (
         <g key={column}>
-          <rect x={65 + column * 382} y="378" width="327" height="620" rx="8" fill="none" stroke="#d5dcd8" />
-          <rect x={65 + column * 382} y="378" width="327" height="32" rx="8" fill="#edf2ef" />
-          <text x={84 + column * 382} y="399" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#55615c">QUESTÃO</text>
+          <rect x={65 + column * layout.columnStep} y="378" width={layout.panelWidth} height="620" rx="8" fill="none" stroke="#d5dcd8" />
+          <rect x={65 + column * layout.columnStep} y="378" width={layout.panelWidth} height="32" rx="8" fill="#edf2ef" />
+          <text x={layout.numberX + column * layout.columnStep} y="399" textAnchor="middle" fontFamily="Arial" fontSize={layout.columns === 3 ? 7.5 : 9} fontWeight="700" fill="#55615c">QUESTÃO</text>
           {options.slice(0, assessment.optionCount).map((option, index) => (
-            <text key={option} x={164 + column * 382 + index * 43} y="399" textAnchor="middle" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#55615c">{option}</text>
+            <text key={option} x={layout.optionX + column * layout.columnStep + index * layout.optionStep} y="399" textAnchor="middle" fontFamily="Arial" fontSize={layout.columns === 3 ? 7.5 : 9} fontWeight="700" fill="#55615c">{option}</text>
           ))}
-          {Array.from({ length: 20 }, (_, row) => {
-            const questionIndex = row + column * 20
+          {Array.from({ length: layout.rowsPerColumn }, (_, row) => {
+            const questionIndex = row + column * layout.rowsPerColumn
             if (questionIndex >= assessment.questionCount) return null
             return (
               <g key={row}>
-                {row > 0 && <line x1={78 + column * 382} y1={410 + row * 29.4} x2={379 + column * 382} y2={410 + row * 29.4} stroke="#edf0ee" />}
-                <text x={95 + column * 382} y={bubbleCenter(questionIndex, 0).y + 3.2} textAnchor="middle" fontFamily="Arial" fontSize="10" fontWeight="700" fill="#26312d">{String(questionIndex + 1).padStart(2, '0')}</text>
+                {row > 0 && <line x1={73 + column * layout.columnStep} y1={layout.bubbleY - layout.rowStep / 2 + row * layout.rowStep} x2={62 + layout.panelWidth + column * layout.columnStep} y2={layout.bubbleY - layout.rowStep / 2 + row * layout.rowStep} stroke="#edf0ee" />}
+                <text x={layout.numberX + column * layout.columnStep} y={bubbleCenter(questionIndex, 0, assessment.questionCount).y + 3.2} textAnchor="middle" fontFamily="Arial" fontSize={layout.rowsPerColumn === 30 ? 8 : 10} fontWeight="700" fill="#26312d">{String(questionIndex + 1).padStart(2, '0')}</text>
                 {options.slice(0, assessment.optionCount).map((option, optionIndex) => {
-                  const center = bubbleCenter(questionIndex, optionIndex)
+                  const center = bubbleCenter(questionIndex, optionIndex, assessment.questionCount)
                   return (
                     <g key={option}>
-                      <circle cx={center.x} cy={center.y} r="9" fill="white" stroke="#4b5651" strokeWidth="1.25" />
-                      <text x={center.x} y={center.y + 3.2} textAnchor="middle" fontFamily="Arial" fontSize="7.5" fill="#5c6662">{option}</text>
+                      <circle cx={center.x} cy={center.y} r={layout.bubbleRadius} fill="white" stroke="#4b5651" strokeWidth={layout.rowsPerColumn === 30 ? 1 : 1.25} />
+                      <text x={center.x} y={center.y + (layout.rowsPerColumn === 30 ? 2.2 : 3.2)} textAnchor="middle" fontFamily="Arial" fontSize={layout.optionFontSize} fill="#5c6662">{option}</text>
                     </g>
                   )
                 })}
@@ -104,7 +105,7 @@ export function AnswerSheet({ student, assessment, classroom, school }) {
   )
 }
 
-export function PrintableSheets({ students, assessment, classes, school }) {
+export function PrintableSheets({ students, assessment, classes, school, hideRegistration = false }) {
   return (
     <div className="print-root">
       {students.map((student) => (
@@ -114,6 +115,7 @@ export function PrintableSheets({ students, assessment, classes, school }) {
             assessment={assessment}
             classroom={classes.find((item) => item.id === student.classId)}
             school={school}
+            hideRegistration={hideRegistration}
           />
         </div>
       ))}

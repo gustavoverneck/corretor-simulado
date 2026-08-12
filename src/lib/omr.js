@@ -9,12 +9,43 @@ export const MARKERS = {
   bottomRight: { x: 751, y: 1080 },
 }
 
-export function bubbleCenter(questionIndex, optionIndex) {
-  const column = questionIndex >= 20 ? 1 : 0
-  const row = questionIndex % 20
+export function getAnswerSheetLayout(questionCount) {
+  const count = Math.max(1, Math.min(90, Number(questionCount) || 1))
+  if (count <= 20) {
+    return {
+      id: '1-20', label: '1–20', columns: 1, rowsPerColumn: 20,
+      panelWidth: 643, columnStep: 0, numberX: 170, optionX: 300, optionStep: 55,
+      bubbleY: 425, rowStep: 29.4, bubbleRadius: 9, optionFontSize: 7.5,
+    }
+  }
+  if (count <= 40) {
+    return {
+      id: '21-40', label: '21–40', columns: 2, rowsPerColumn: 20,
+      panelWidth: 327, columnStep: 382, numberX: 95, optionX: 164, optionStep: 43,
+      bubbleY: 425, rowStep: 29.4, bubbleRadius: 9, optionFontSize: 7.5,
+    }
+  }
+  if (count <= 60) {
+    return {
+      id: '41-60', label: '41–60', columns: 3, rowsPerColumn: 20,
+      panelWidth: 205, columnStep: 219, numberX: 91, optionX: 137, optionStep: 29,
+      bubbleY: 425, rowStep: 29.4, bubbleRadius: 7, optionFontSize: 6.5,
+    }
+  }
   return {
-    x: 164 + column * 382 + optionIndex * 43,
-    y: 425 + row * 29.4,
+    id: '61-90', label: '61–90', columns: 3, rowsPerColumn: 30,
+    panelWidth: 205, columnStep: 219, numberX: 91, optionX: 137, optionStep: 29,
+    bubbleY: 420, rowStep: 19.5, bubbleRadius: 6.2, optionFontSize: 6,
+  }
+}
+
+export function bubbleCenter(questionIndex, optionIndex, questionCount = 40) {
+  const layout = getAnswerSheetLayout(questionCount)
+  const column = Math.floor(questionIndex / layout.rowsPerColumn)
+  const row = questionIndex % layout.rowsPerColumn
+  return {
+    x: layout.optionX + column * layout.columnStep + optionIndex * layout.optionStep,
+    y: layout.bubbleY + row * layout.rowStep,
   }
 }
 
@@ -247,9 +278,13 @@ function sampleColorInk(imageData, center, radius) {
       const red = data[offset] / 255
       const green = data[offset + 1] / 255
       const blue = data[offset + 2] / 255
-      const blueBias = Math.max(0, blue - (red + green) / 2)
-      const chroma = Math.max(red, green, blue) - Math.min(red, green, blue)
-      ink += Math.max(blueBias, chroma * 0.68)
+      const blueBias = Math.max(0, blue - (red * 0.55 + green * 0.45))
+      const saturation = Math.max(red, green, blue) - Math.min(red, green, blue)
+      const darkness = 1 - (red * 0.299 + green * 0.587 + blue * 0.114)
+      // Somente dominância azul conta como tinta colorida. O cálculo anterior
+      // aceitava qualquer cromaticidade e confundia a tonalidade da foto, da
+      // mesa ou do papel com caneta em todas as alternativas.
+      ink += blueBias * (0.65 + saturation * 0.8 + darkness * 0.35)
       total += 1
     }
   }
@@ -267,16 +302,23 @@ function percentile(values, ratio) {
 }
 
 export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS, settings = {}) {
+  const layout = getAnswerSheetLayout(assessment.questionCount)
   const horizontalScale = Math.hypot(corners.topRight.x - corners.topLeft.x, corners.topRight.y - corners.topLeft.y) / 708
   const verticalScale = Math.hypot(corners.bottomLeft.x - corners.topLeft.x, corners.bottomLeft.y - corners.topLeft.y) / 1037
-  const sampleRadius = Math.max(2.5, 5.2 * Math.min(horizontalScale, verticalScale))
-  const colorSampleRadius = Math.max(3.2, 7.2 * Math.min(horizontalScale, verticalScale))
+  const sheetScale = Math.min(horizontalScale, verticalScale)
+  // A folha antiga usava sempre bolhas de raio 9. Nos formatos de 3 colunas as
+  // bolhas são menores; manter o raio antigo faz a amostra alcançar contornos,
+  // letras e linhas vizinhas. A leitura deve acompanhar a geometria impressa.
+  const sampleRadius = Math.max(1.8, layout.bubbleRadius * 0.56 * sheetScale)
+  const colorSampleRadius = Math.max(2.4, layout.bubbleRadius * 0.76 * sheetScale)
   const markThreshold = Number(settings.markThreshold ?? 0.38)
   const ambiguityThreshold = Number(settings.ambiguityThreshold ?? 0.22)
   const contrastThreshold = Math.max(0.06, Math.min(0.13, markThreshold * 0.22))
   const possibleContrastThreshold = Math.min(contrastThreshold * 0.92, Math.max(0.045, ambiguityThreshold * 0.34))
   const colorThreshold = Number(settings.colorThreshold ?? 0.065)
-  const possibleColorThreshold = colorThreshold * 0.8
+  const colorContrastThreshold = Math.max(0.018, colorThreshold * 0.38)
+  const possibleColorThreshold = colorThreshold * 0.78
+  const possibleColorContrastThreshold = colorContrastThreshold * 0.72
   const answers = []
   let correct = 0
   let wrong = 0
@@ -286,7 +328,7 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
 
   const measured = Array.from({ length: assessment.questionCount }, (_, question) => (
     Array.from({ length: assessment.optionCount }, (_, option) => {
-      const center = project(bubbleCenter(question, option), corners)
+      const center = project(bubbleCenter(question, option, assessment.questionCount), corners)
       return {
         option,
         value: sampleDarkness(imageData, center, sampleRadius),
@@ -298,26 +340,39 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
 
   for (let question = 0; question < assessment.questionCount; question += 1) {
     const scores = measured[question]
-    const columnStart = question >= 20 ? 20 : 0
-    const columnEnd = Math.min(assessment.questionCount, columnStart + 20)
+    const columnStart = Math.floor(question / layout.rowsPerColumn) * layout.rowsPerColumn
+    const columnEnd = Math.min(assessment.questionCount, columnStart + layout.rowsPerColumn)
     const rowBaseline = percentile(scores.map((score) => score.value), 0.25)
+    const rowColorBaseline = percentile(scores.map((score) => score.color), 0.25)
     scores.forEach((score) => {
       const nearby = []
+      const nearbyColors = []
       for (let index = Math.max(columnStart, question - 6); index < Math.min(columnEnd, question + 7); index += 1) {
-        if (measured[index]?.[score.option]) nearby.push(measured[index][score.option].value)
+        if (measured[index]?.[score.option]) {
+          nearby.push(measured[index][score.option].value)
+          nearbyColors.push(measured[index][score.option].color)
+        }
       }
       score.localBaseline = percentile(nearby, 0.25)
+      score.localColorBaseline = percentile(nearbyColors, 0.25)
       score.rowContrast = score.value - rowBaseline
       score.localContrast = score.value - score.localBaseline
+      score.rowColorContrast = score.color - rowColorBaseline
+      score.localColorContrast = score.color - score.localColorBaseline
     })
-    const allOptionsRaised = scores.filter((score) => score.localContrast >= 0.105).length >= Math.max(3, assessment.optionCount - 1)
+    // Para cor, o fundo correto é a própria linha: todas as alternativas estão
+    // sob a mesma luz. Comparar com outras questões deixava sombras verticais e
+    // diferenças da câmera parecerem tinta azul.
+    const hasBlueInk = (score, threshold, contrast) => score.color >= threshold && score.rowColorContrast >= contrast
+    const allOptionsRaised = scores.filter((score) => score.value >= markThreshold && score.localContrast >= 0.105).length >= Math.max(3, assessment.optionCount - 1)
     const strong = scores.filter((score) => (
-      score.color >= colorThreshold
+      hasBlueInk(score, colorThreshold, colorContrastThreshold)
       || (score.rowContrast >= contrastThreshold && score.localContrast >= contrastThreshold)
-      || (allOptionsRaised && score.localContrast >= 0.085)
+      || (score.value >= markThreshold && score.rowContrast >= contrastThreshold && score.localContrast >= possibleContrastThreshold)
+      || (allOptionsRaised && score.value >= markThreshold && score.localContrast >= 0.085)
     ))
     const possible = scores.filter((score) => (
-      score.color >= possibleColorThreshold
+      hasBlueInk(score, possibleColorThreshold, possibleColorContrastThreshold)
       || (score.rowContrast >= possibleContrastThreshold && score.localContrast >= 0.07)
     ))
     let status = 'blank'
@@ -346,10 +401,15 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
       scores: scores.map((item) => Number(item.value.toFixed(3))),
       colorScores: scores.map((item) => Number(item.color.toFixed(3))),
       contrastScores: scores.map((item) => Number(Math.max(item.rowContrast, item.localContrast).toFixed(3))),
+      colorContrastScores: scores.map((item) => Number(item.rowColorContrast.toFixed(3))),
     })
   }
 
-  return { answers, correct, wrong, blank, multiple, uncertain, score: Math.round((correct / assessment.questionCount) * 100) }
+  return {
+    answers, correct, wrong, blank, multiple, uncertain,
+    score: Math.round((correct / assessment.questionCount) * 100),
+    answerSheetFormat: layout.id,
+  }
 }
 
 function readQrFromSheet(context, imageData, corners) {

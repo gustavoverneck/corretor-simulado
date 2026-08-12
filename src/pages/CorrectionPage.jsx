@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { Badge, Button, EmptyState, Modal } from '../components/ui'
 import { analyzeAnswerSheet } from '../lib/omr'
-import { getAnswerKeyForClass, hasCustomAnswerKey, regradeAnswers } from '../lib/assessment'
+import { getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, hasCustomAnswerKey, regradeAnswers } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAreas'
 import { cn, uid } from '../lib/utils'
 
@@ -72,12 +72,15 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
   const [assessmentId, setAssessmentId] = useState(initialAssessmentId || data.assessments[0]?.id)
   const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
   const [classId, setClassId] = useState(assessment?.classIds[0] || '')
+  const [versionId, setVersionId] = useState('')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState([])
   const [areaDraft, setAreaDraft] = useState([])
   const [copySource, setCopySource] = useState('')
   const classroom = data.classes.find((item) => item.id === classId)
-  const answerKey = getAnswerKeyForClass(assessment, classId)
+  const classVersions = getAnswerKeyVersionsForClass(assessment, classId)
+  const selectedVersion = classVersions.find((version) => version.id === versionId) || classVersions[0]
+  const answerKey = selectedVersion?.answerKey || getAnswerKeyForClass(assessment, classId)
   const questionAreas = getQuestionAreas(assessment)
   const areaSummary = [...questionAreas.reduce((summary, area) => summary.set(area, (summary.get(area) || 0) + 1), new Map()).entries()]
   const isCustom = hasCustomAnswerKey(assessment, classId)
@@ -91,6 +94,7 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
     const next = data.assessments.find((item) => item.id === nextId)
     setAssessmentId(nextId)
     setClassId(next?.classIds[0] || '')
+    setVersionId('')
     setEditing(false)
     setAreaDraft([])
     setCopySource('')
@@ -98,6 +102,14 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
 
   function chooseClass(nextId) {
     setClassId(nextId)
+    setVersionId('')
+    setEditing(false)
+    setAreaDraft([])
+    setCopySource('')
+  }
+
+  function chooseVersion(nextId) {
+    setVersionId(nextId)
     setEditing(false)
     setAreaDraft([])
     setCopySource('')
@@ -133,14 +145,22 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
       return
     }
     const normalizedAreas = areaDraft.map((area) => area.trim())
-    const studentIds = new Set(data.students.filter((student) => student.classId === classId).map((student) => student.id))
+    const studentIds = new Set(data.students.filter((student) => {
+      if (!selectedVersion) return student.classId === classId
+      return getAnswerKeyVersionForStudent(assessment, student)?.id === selectedVersion.id
+    }).map((student) => student.id))
     const regradableCount = data.submissions.filter((submission) => submission.assessmentId === assessment.id && studentIds.has(submission.studentId) && Array.isArray(submission.answers)).length
     setData((current) => ({
       ...current,
       assessments: current.assessments.map((item) => item.id === assessment.id ? {
         ...item,
         questionAreas: normalizedAreas,
-        answerKeysByClass: { ...item.answerKeysByClass, [classId]: draft },
+        answerKey: selectedVersion && item.answerKeyVersions?.[0]?.id === selectedVersion.id ? draft : item.answerKey,
+        answerKeyVersions: selectedVersion ? item.answerKeyVersions.map((version) => version.id === selectedVersion.id ? { ...version, answerKey: draft } : version) : item.answerKeyVersions,
+        answerKeysByClass: selectedVersion ? Object.fromEntries(item.classIds.map((itemClassId) => {
+          const firstVersionId = item.answerKeyVersionIdsByClass?.[itemClassId]?.[0]
+          return [itemClassId, firstVersionId === selectedVersion.id ? draft : item.answerKeysByClass?.[itemClassId] || item.answerKey]
+        })) : { ...item.answerKeysByClass, [classId]: draft },
       } : item),
       submissions: current.submissions.map((submission) => {
         if (submission.assessmentId !== assessment.id || !studentIds.has(submission.studentId) || !Array.isArray(submission.answers)) return submission
@@ -155,7 +175,7 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
     setEditing(false)
     setAreaDraft([])
     setCopySource('')
-    notify('Gabarito e áreas salvos', `${classroom?.name}: ${draft.length} respostas classificadas${regradableCount ? ` e ${regradableCount} correção(ões) recalculada(s)` : ''}.`)
+    notify('Gabarito e áreas salvos', `${selectedVersion?.label || classroom?.name}: ${draft.length} respostas classificadas${regradableCount ? ` e ${regradableCount} correção(ões) recalculada(s)` : ''}.`)
   }
 
   if (!assessment) return <EmptyState icon={ClipboardList} title="Nenhum simulado" description="Crie um simulado antes de cadastrar o gabarito." />
@@ -180,16 +200,18 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
           })}
         </div>
 
+        {classVersions.length > 1 && <div className="answer-key-version-selector"><span>VERSÕES DE {classroom?.name?.toUpperCase()}</span><div>{classVersions.map((version) => <button key={version.id} className={selectedVersion?.id === version.id ? 'active' : ''} onClick={() => chooseVersion(version.id)}>{version.label}<small>{data.students.filter((student) => student.classId === classId && getAnswerKeyVersionForStudent(assessment, student)?.id === version.id).length} alunos</small></button>)}</div></div>}
+
         <div className="answer-key-summary-row">
           <div><span className="class-key-icon" style={{ '--class-color': classroom?.color }}><UsersRound size={20} /></span><p><strong>{classroom?.name} · {classroom?.shift}</strong><small>{classStudents} alunos · {classSubmissions.length} folhas corrigidas</small></p></div>
-          <Badge tone={isCustom ? 'purple' : 'green'}>{isCustom ? 'Gabarito específico desta turma' : 'Igual ao gabarito padrão'}</Badge>
+          <Badge tone={isCustom ? 'purple' : 'green'}>{selectedVersion ? selectedVersion.label : isCustom ? 'Gabarito específico desta turma' : 'Igual ao gabarito padrão'}</Badge>
         </div>
 
         {editing ? (
           <div className="key-edit-area">
             <datalist id="correction-question-areas">{QUESTION_AREA_SUGGESTIONS.map((area) => <option value={area} key={area} />)}</datalist>
             <div className="key-edit-toolbar">
-              <div><strong>Editando {classroom?.name}</strong><small>Defina a resposta e a área de cada questão. As áreas valem para todas as turmas.</small></div>
+              <div><strong>Editando {selectedVersion ? `${selectedVersion.label} · ${classroom?.name}` : classroom?.name}</strong><small>Defina a resposta e a área de cada questão. As áreas valem para todas as turmas.</small></div>
               {assessment.classIds.length > 1 && <label>Copiar de<select value={copySource} onChange={(event) => copyFromClass(event.target.value)}><option value="">Outra turma...</option>{assessment.classIds.filter((id) => id !== classId).map((id) => <option key={id} value={id}>{data.classes.find((item) => item.id === id)?.name}</option>)}</select></label>}
               <Button variant="ghost" size="sm" icon={RotateCcw} onClick={() => setDraft([...assessment.answerKey])}>Usar padrão</Button>
             </div>
@@ -214,7 +236,7 @@ function ReviewQueue({ data, setData, notify }) {
   const student = data.students.find((item) => item.id === selected?.studentId)
   const assessment = data.assessments.find((item) => item.id === selected?.assessmentId)
   const classroom = data.classes.find((item) => item.id === student?.classId)
-  const answerKey = getAnswerKeyForClass(assessment, student?.classId)
+  const answerKey = getAnswerKeyForStudent(assessment, student)
 
   function openReview(submission) {
     if (!Array.isArray(submission.answers)) {
@@ -291,7 +313,8 @@ export function CorrectionPage({ data, setData, notify }) {
   const detectedStudent = data.students.find((item) => item.id === detectedStudentId)
   const resultClassId = result?.classId || detectedStudent?.classId || classId
   const resultClassroom = data.classes.find((item) => item.id === resultClassId)
-  const resultAnswerKey = getAnswerKeyForClass(resultAssessment, resultClassId)
+  const resultAnswerKeyVersion = detectedStudent ? getAnswerKeyVersionForStudent(resultAssessment, detectedStudent) : null
+  const resultAnswerKey = detectedStudent ? getAnswerKeyForStudent(resultAssessment, detectedStudent) : getAnswerKeyForClass(resultAssessment, resultClassId)
   const resultQuestionAreas = getQuestionAreas(resultAssessment)
   const resultEligibleStudents = data.students.filter((student) => resultAssessment?.classIds.includes(student.classId) && student.status === 'Ativo')
   const resultClassCompatible = Boolean(detectedStudent && resultAssessment?.classIds.includes(detectedStudent.classId))
@@ -351,7 +374,7 @@ export function CorrectionPage({ data, setData, notify }) {
     return {
       assessment: recognizedAssessment,
       classId: recognizedClassId,
-      answerKey: getAnswerKeyForClass(recognizedAssessment, recognizedClassId),
+      answerKey: recognizedStudent ? getAnswerKeyForStudent(recognizedAssessment, recognizedStudent) : getAnswerKeyForClass(recognizedAssessment, recognizedClassId),
     }
   }
 
@@ -443,7 +466,7 @@ export function CorrectionPage({ data, setData, notify }) {
     setStudentId(nextStudentId)
     const student = data.students.find((item) => item.id === nextStudentId)
     const nextClassId = student?.classId || classId
-    const nextKey = getAnswerKeyForClass(resultAssessment, nextClassId)
+    const nextKey = student ? getAnswerKeyForStudent(resultAssessment, student) : getAnswerKeyForClass(resultAssessment, nextClassId)
     setResult((current) => current ? { ...current, identity: { ...current.identity, studentId: nextStudentId, assessmentId: resultAssessment.id }, classId: nextClassId, ...regradeAnswers(current.answers, nextKey) } : current)
   }
 
@@ -458,7 +481,7 @@ export function CorrectionPage({ data, setData, notify }) {
         return { ...current, items }
       }
       const itemAssessment = data.assessments.find((entry) => entry.id === item.assessmentId) || assessment
-      const nextKey = getAnswerKeyForClass(itemAssessment, nextStudent.classId)
+      const nextKey = getAnswerKeyForStudent(itemAssessment, nextStudent)
       const regraded = regradeAnswers(item.answers, nextKey)
       const updated = {
         ...item,
@@ -478,7 +501,7 @@ export function CorrectionPage({ data, setData, notify }) {
       const itemAssessment = data.assessments.find((entry) => entry.id === item.assessmentId) || assessment
       const itemStudent = data.students.find((entry) => entry.id === item.identity?.studentId)
       const itemClassId = itemStudent?.classId || item.classId || classId
-      const itemAnswerKey = getAnswerKeyForClass(itemAssessment, itemClassId)
+      const itemAnswerKey = itemStudent ? getAnswerKeyForStudent(itemAssessment, itemStudent) : getAnswerKeyForClass(itemAssessment, itemClassId)
       const changed = item.answers.map((answer, index) => index === questionIndex
         ? { ...answer, selected: letter ? [letter] : [], expected: itemAnswerKey[index], status: !letter ? 'blank' : letter === itemAnswerKey[index] ? 'correct' : 'wrong' }
         : answer)
@@ -503,13 +526,14 @@ export function CorrectionPage({ data, setData, notify }) {
       notify('Turma incompatível', 'Este aluno não pertence a uma turma associada ao simulado.', 'warning')
       return
     }
-    const finalKey = getAnswerKeyForClass(finalAssessment, finalStudent.classId)
+    const finalVersion = getAnswerKeyVersionForStudent(finalAssessment, finalStudent)
+    const finalKey = finalVersion?.answerKey || getAnswerKeyForClass(finalAssessment, finalStudent.classId)
     const graded = regradeAnswers(result.answers, finalKey)
     const needsReview = graded.multiple > 0 || graded.uncertain > 0 || result.markersFound < 4
     const submission = {
       id: uid('submission'), assessmentId: finalAssessment.id, studentId: finalStudent.id, classId: finalStudent.classId,
       status: needsReview ? 'Revisar' : 'Corrigido', ...graded,
-      answerKeySnapshot: finalKey, confidence: result.confidence, markersFound: result.markersFound,
+      answerKeySnapshot: finalKey, answerKeyVersionId: finalVersion?.id, answerKeyVersionLabel: finalVersion?.label, confidence: result.confidence, markersFound: result.markersFound,
       reviewReasons: [
         ...(result.markersFound < 4 ? ['Marcadores incompletos'] : []),
         ...(graded.multiple > 0 ? ['Marcações múltiplas'] : []),
@@ -533,7 +557,8 @@ export function CorrectionPage({ data, setData, notify }) {
     }
     const correctedAt = new Date().toISOString()
     const submissions = batchSaveable.map(({ item, student: finalStudent, assessment: finalAssessment, needsReview }) => {
-      const finalKey = getAnswerKeyForClass(finalAssessment, finalStudent.classId)
+      const finalVersion = getAnswerKeyVersionForStudent(finalAssessment, finalStudent)
+      const finalKey = finalVersion?.answerKey || getAnswerKeyForClass(finalAssessment, finalStudent.classId)
       const graded = regradeAnswers(item.answers, finalKey)
       return {
         id: uid('submission'),
@@ -543,6 +568,8 @@ export function CorrectionPage({ data, setData, notify }) {
         status: needsReview ? 'Revisar' : 'Corrigido',
         ...graded,
         answerKeySnapshot: finalKey,
+        answerKeyVersionId: finalVersion?.id,
+        answerKeyVersionLabel: finalVersion?.label,
         confidence: item.confidence,
         markersFound: item.markersFound,
         reviewReasons: [
@@ -696,7 +723,7 @@ export function CorrectionPage({ data, setData, notify }) {
           </aside>
         </div>
 
-        <div className="applied-key-banner"><ClipboardList size={17} /><div><strong>Gabarito aplicado: {resultAssessment?.title} · {resultClassroom?.name}</strong><p>{hasCustomAnswerKey(resultAssessment, resultClassId) ? 'Versão específica desta turma' : 'Gabarito padrão do simulado'}</p></div><AnswerKeyStrip answerKey={resultAnswerKey} limit={10} compact /></div>
+        <div className="applied-key-banner"><ClipboardList size={17} /><div><strong>Gabarito aplicado: {resultAssessment?.title} · {resultClassroom?.name}</strong><p>{resultAnswerKeyVersion?.label || (hasCustomAnswerKey(resultAssessment, resultClassId) ? 'Versão específica desta turma' : 'Gabarito padrão do simulado')}</p></div><AnswerKeyStrip answerKey={resultAnswerKey} limit={10} compact /></div>
 
         <div className="answer-review-panel panel scan-answer-review">
           <header className="answer-review-heading"><div><h3>Respostas encontradas</h3><p>Filtre os resultados ou clique em uma alternativa para corrigir a leitura.</p></div><Badge tone={result.multiple + result.uncertain ? 'ochre' : 'green'}>{result.answers.length} questões</Badge></header>

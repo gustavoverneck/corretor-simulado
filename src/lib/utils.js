@@ -6,6 +6,17 @@ export function uid(prefix = 'id') {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+export function nextStudentRegistration(students = []) {
+  let highest = BigInt(`${new Date().getFullYear()}0000000`)
+  students.forEach((student) => {
+    const registration = String(student?.registration ?? '').trim()
+    if (!/^\d+$/.test(registration)) return
+    const value = BigInt(registration)
+    if (value > highest) highest = value
+  })
+  return String(highest + 1n)
+}
+
 export function formatDate(value, options = {}) {
   if (!value) return '—'
   const date = String(value).length === 10 ? new Date(`${value}T12:00:00`) : new Date(value)
