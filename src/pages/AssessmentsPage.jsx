@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle } from 'lucide-react'
+import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { PrintableSheets } from '../components/AnswerSheet'
 import { createRandomAnswerKey, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, hasCustomAnswerKey } from '../lib/assessment'
@@ -162,6 +162,12 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
     setPrintAssessmentId(null)
     setPrintClassIds([])
     setHidePrintRegistration(false)
+  }
+
+  function printSheets(mode) {
+    document.body.dataset.sheetPrintMode = mode
+    window.print()
+    window.setTimeout(() => delete document.body.dataset.sheetPrintMode, 0)
   }
 
   function openCorrection(assessment, tab = 'scan') {
@@ -415,7 +421,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
         title={detailAssessment?.title || 'Detalhes do simulado'}
         subtitle="Informações da aplicação, turmas participantes e gabaritos utilizados."
         size="lg"
-        footer={detailAssessment && <><Button variant="ghost" onClick={() => setDetailAssessmentId(null)}>Fechar</Button><Button variant="secondary" icon={Printer} onClick={() => { setDetailAssessmentId(null); openPrint(detailAssessment) }}>Gerar folhas</Button><Button icon={ScanLine} onClick={() => openCorrection(detailAssessment, 'keys')}>Ver gabaritos</Button></>}
+        footer={detailAssessment && <><Button variant="ghost" onClick={() => setDetailAssessmentId(null)}>Fechar</Button><Button variant="secondary" icon={Printer} onClick={() => { setDetailAssessmentId(null); openPrint(detailAssessment) }}>Gerar folhas</Button><Button icon={ScanLine} onClick={() => openCorrection(detailAssessment, 'responses')}>Ver correção</Button></>}
       >
         {detailAssessment && <AssessmentDetails assessment={detailAssessment} data={data} setData={setData} notify={notify} />}
       </Modal>
@@ -482,7 +488,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
         </form>
       </Modal>
 
-      <Modal open={Boolean(printAssessment)} onClose={closePrint} title="Gerar folhas de respostas" subtitle="Cada aluno recebe uma folha individual com QR Code próprio." size="xl" footer={<><span className="footer-note"><CheckCircle2 size={16} /> {printStudents.length} folhas prontas</span><Button variant="ghost" onClick={closePrint}>Fechar</Button><Button icon={Printer} onClick={() => window.print()}>Imprimir / salvar PDF</Button></>}>
+      <Modal open={Boolean(printAssessment)} onClose={closePrint} title="Gerar folhas de respostas" subtitle="Gere as folhas dos alunos ou uma cópia avulsa para cadastro posterior." size="xl" footer={<><span className="footer-note"><CheckCircle2 size={16} /> {printStudents.length} folhas identificadas prontas</span><Button variant="ghost" onClick={closePrint}>Fechar</Button><Button variant="secondary" icon={UserPlus} onClick={() => printSheets('blank')}>Salvar folha sem aluno</Button><Button icon={Printer} disabled={!printStudents.length} onClick={() => printSheets('students')}>Imprimir / salvar PDF</Button></>}>
         {printAssessment && (
           <div className="print-modal-layout">
             <aside className="print-options">
@@ -492,13 +498,15 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
                 <h4>Dados visíveis</h4>
                 <label className="print-privacy-option"><input type="checkbox" checked={hidePrintRegistration} onChange={(event) => setHidePrintRegistration(event.target.checked)} /><span><strong>Ocultar matrícula</strong><small>O número de controle não aparecerá na folha.</small></span></label>
               </div>
+              <div className="blank-sheet-note"><UserPlus size={17} /><p><strong>Aluno fora da lista?</strong>Use “Salvar folha sem aluno”. Nome, matrícula e turma poderão ser preenchidos à mão, e o cadastro será feito durante a correção.</p></div>
               <div className="print-tip"><Printer size={18} /><p><strong>Configuração recomendada</strong>Papel A4, escala 100%, margens “nenhuma” e orientação retrato.</p></div>
             </aside>
             <div className="sheet-preview-area">
               {printStudents[0] && <div className="sheet-preview"><PrintableSheets students={[printStudents[0]]} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} /><span>Prévia · folha 1 de {printStudents.length}</span></div>}
               {!printStudents.length && <div className="no-print-students"><UsersRound size={30} /><strong>Nenhuma turma selecionada</strong></div>}
             </div>
-            <div className="all-print-sheets"><PrintableSheets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} /></div>
+            <div className="all-print-sheets student-print-sheets"><PrintableSheets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} /></div>
+            <div className="all-print-sheets blank-print-sheet"><PrintableSheets students={[null]} assessment={printAssessment} classes={data.classes} school={data.school} /></div>
           </div>
         )}
       </Modal>

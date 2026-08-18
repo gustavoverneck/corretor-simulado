@@ -65,16 +65,16 @@ export function crc32(text) {
 }
 
 export function qrPayload(studentId, assessmentId) {
-  const body = `LUMA|1|${studentId}|${assessmentId}`
+  const body = `LUMA|1|${studentId ?? ''}|${assessmentId}`
   return `${body}|${crc32(body)}`
 }
 
 export function parseQrPayload(payload) {
   const parts = String(payload || '').split('|')
-  if (parts.length !== 5 || parts[0] !== 'LUMA' || parts[1] !== '1') return null
+  if (parts.length !== 5 || parts[0] !== 'LUMA' || parts[1] !== '1' || !parts[3]) return null
   const body = parts.slice(0, 4).join('|')
   if (crc32(body) !== parts[4]) return null
-  return { studentId: parts[2], assessmentId: parts[3], version: 1 }
+  return { studentId: parts[2] || null, assessmentId: parts[3], version: 1 }
 }
 
 export function downloadBlob(blob, filename) {

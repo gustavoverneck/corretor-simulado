@@ -2,13 +2,13 @@ import { useMemo, useRef, useState } from 'react'
 import {
   UploadCloud, Camera, ScanLine, CheckCircle2, AlertTriangle, FileImage, RotateCcw,
   Save, MoreHorizontal, QrCode, Focus, CircleDot, ChevronRight, X, ClipboardList,
-  ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files,
+  ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2,
 } from 'lucide-react'
-import { Badge, Button, EmptyState, Modal } from '../components/ui'
+import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { analyzeAnswerSheet } from '../lib/omr'
 import { getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, hasCustomAnswerKey, regradeAnswers } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAreas'
-import { cn, uid } from '../lib/utils'
+import { cn, formatDateTime, nextStudentRegistration, normalize, uid } from '../lib/utils'
 
 const answerStatuses = {
   correct: { label: 'Correta', tone: 'green' },
@@ -46,24 +46,29 @@ function ResultBreakdown({ result, compact = false }) {
   )
 }
 
-function DetailedAnswerList({ answers, assessment, questionAreas, onChange }) {
+function DetailedAnswerList({ answers, assessment, questionAreas, onChange, readOnly = false }) {
   if (!answers.length) return <div className="answer-list-empty"><ListChecks size={22} /><p>Nenhuma questão corresponde a este filtro.</p></div>
   return (
-    <div className="answer-review-list detailed-answer-list">
-      {answers.map((answer) => <div key={answer.question} className={cn('answer-review-row', `answer-${answer.status}`)}>
-        <div className="answer-question-label"><strong>{String(answer.question).padStart(2, '0')}</strong><small title={questionAreas[answer.question - 1]}>{questionAreas[answer.question - 1] || 'Sem área'}</small></div>
-        <div className="answer-choice-review">
-          <div className="answer-options">
-            {Array.from({ length: assessment.optionCount }, (_, index) => {
-              const letter = String.fromCharCode(65 + index)
-              return <button type="button" key={letter} className={cn(answer.selected.includes(letter) && 'marked', answer.expected === letter && 'expected')} onClick={() => onChange(answer.question - 1, letter)} aria-label={`Questão ${answer.question}, alternativa ${letter}`}>{letter}</button>
-            })}
-            <button type="button" className={answer.selected.length === 0 ? 'marked blank-choice' : 'blank-choice'} onClick={() => onChange(answer.question - 1, '')} aria-label={`Deixar questão ${answer.question} em branco`}>—</button>
+    <div className={cn('answer-review-list detailed-answer-list', readOnly && 'is-read-only')}>
+      {answers.map((answer) => {
+        const selected = Array.isArray(answer.selected) ? answer.selected : []
+        return (
+          <div key={answer.question} className={cn('answer-review-row', `answer-${answer.status}`)}>
+            <div className="answer-question-label"><strong>{String(answer.question).padStart(2, '0')}</strong><small title={questionAreas[answer.question - 1]}>{questionAreas[answer.question - 1] || 'Sem área'}</small></div>
+            <div className="answer-choice-review">
+              <div className="answer-options">
+                {Array.from({ length: assessment.optionCount }, (_, index) => {
+                  const letter = String.fromCharCode(65 + index)
+                  return <button type="button" key={letter} disabled={readOnly} className={cn(selected.includes(letter) && 'marked', answer.expected === letter && 'expected')} onClick={() => onChange?.(answer.question - 1, letter)} aria-label={`Questão ${answer.question}, alternativa ${letter}`}>{letter}</button>
+                })}
+                <button type="button" disabled={readOnly} className={selected.length === 0 ? 'marked blank-choice' : 'blank-choice'} onClick={() => onChange?.(answer.question - 1, '')} aria-label={`Questão ${answer.question} em branco`}>—</button>
+              </div>
+              <small>Marcada: {selected.length ? selected.join(' + ') : 'em branco'} · Gabarito: {answer.expected || '—'}</small>
+            </div>
+            <Badge tone={answerStatuses[answer.status]?.tone || 'neutral'}>{answerStatuses[answer.status]?.label || answer.status}</Badge>
           </div>
-          <small>Marcada: {answer.selected.length ? answer.selected.join(' + ') : 'em branco'} · Gabarito: {answer.expected || '—'}</small>
-        </div>
-        <Badge tone={answerStatuses[answer.status]?.tone || 'neutral'}>{answerStatuses[answer.status]?.label || answer.status}</Badge>
-      </div>)}
+        )
+      })}
     </div>
   )
 }
@@ -253,18 +258,26 @@ function ReviewQueue({ data, setData, notify }) {
   function changeDraftAnswer(questionIndex, letter) {
     setDraftAnswers((current) => current.map((answer, index) => {
       if (index !== questionIndex) return answer
-      const selectedAnswers = letter ? [letter] : []
-      return { ...answer, selected: selectedAnswers, status: !letter ? 'blank' : letter === answerKey[index] ? 'correct' : 'wrong' }
+      const selectedAnswers = letter
+        ? answer.selected.includes(letter) ? answer.selected.filter((item) => item !== letter) : [...answer.selected, letter].sort()
+        : []
+      const nextStatus = selectedAnswers.length === 0
+        ? 'blank'
+        : selectedAnswers.length > 1 ? 'multiple' : selectedAnswers[0] === answerKey[index] ? 'correct' : 'wrong'
+      return { ...answer, selected: selectedAnswers, status: nextStatus }
     }))
   }
 
   function saveReview() {
     const graded = regradeAnswers(draftAnswers, answerKey, { preserveUncertain: false })
-    const stillPending = graded.multiple > 0 || graded.uncertain > 0
-    setData((current) => ({ ...current, submissions: current.submissions.map((item) => item.id === selected.id ? { ...item, ...graded, status: stillPending ? 'Revisar' : 'Corrigido', reviewedAt: new Date().toISOString(), answerKeySnapshot: answerKey } : item) }))
+    setData((current) => ({ ...current, submissions: current.submissions.map((item) => item.id === selected.id ? { ...item, ...graded, status: 'Corrigido', reviewedAt: new Date().toISOString(), answerKeySnapshot: answerKey } : item) }))
     setSelectedId(null)
     setDraftAnswers([])
-    notify(stillPending ? 'Revisão salva' : 'Revisão concluída', stillPending ? 'Ainda existem respostas que precisam ser resolvidas.' : 'A nota foi recalculada com o gabarito da turma.')
+    const confirmedOccurrences = [
+      graded.multiple > 0 ? `${graded.multiple} múltipla(s)` : '',
+      graded.blank > 0 ? `${graded.blank} em branco` : '',
+    ].filter(Boolean).join(' e ')
+    notify('Revisão concluída', confirmedOccurrences ? `Resultado salvo mantendo ${confirmedOccurrences}.` : 'A nota foi recalculada com o gabarito da turma.')
   }
 
   return (
@@ -275,7 +288,107 @@ function ReviewQueue({ data, setData, notify }) {
       </section>
 
       <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title="Revisar respostas" subtitle={`${student?.name || ''} · ${classroom?.name || ''} · ${assessment?.title || ''}`} size="lg" footer={<><Button variant="ghost" onClick={() => setSelectedId(null)}>Cancelar</Button><Button icon={Check} onClick={saveReview}>Concluir revisão</Button></>}>
-        {selected && <div className="saved-review"><div className="saved-review-summary"><Badge tone="blue">Gabarito {classroom?.name}</Badge><span>Escolha uma única resposta em cada questão destacada. O resultado será recalculado ao concluir.</span></div><div className="answer-review-list">{draftAnswers.map((answer, index) => <div key={answer.question} className={cn('answer-review-row', `answer-${answer.status}`)}><strong>{String(answer.question).padStart(2, '0')}</strong><div className="answer-options">{Array.from({ length: assessment.optionCount }, (_, option) => { const letter = String.fromCharCode(65 + option); return <button key={letter} className={cn(answer.selected.includes(letter) && 'marked', answerKey[index] === letter && 'expected')} onClick={() => changeDraftAnswer(index, letter)}>{letter}</button> })}<button className={answer.selected.length === 0 ? 'marked blank-choice' : 'blank-choice'} onClick={() => changeDraftAnswer(index, '')}>—</button></div><Badge tone={answerStatuses[answer.status]?.tone || 'neutral'}>{answerStatuses[answer.status]?.label || answer.status}</Badge></div>)}</div></div>}
+        {selected && <div className="saved-review"><div className="saved-review-summary"><Badge tone="blue">Gabarito {classroom?.name}</Badge><span>Clique nas alternativas para marcar ou desmarcar. Respostas múltiplas e em branco podem ser confirmadas como resultado final.</span></div><div className="answer-review-list">{draftAnswers.map((answer, index) => <div key={answer.question} className={cn('answer-review-row', `answer-${answer.status}`)}><strong>{String(answer.question).padStart(2, '0')}</strong><div className="answer-options">{Array.from({ length: assessment.optionCount }, (_, option) => { const letter = String.fromCharCode(65 + option); return <button key={letter} className={cn(answer.selected.includes(letter) && 'marked', answerKey[index] === letter && 'expected')} onClick={() => changeDraftAnswer(index, letter)}>{letter}</button> })}<button className={answer.selected.length === 0 ? 'marked blank-choice' : 'blank-choice'} onClick={() => changeDraftAnswer(index, '')}>—</button></div><Badge tone={answerStatuses[answer.status]?.tone || 'neutral'}>{answerStatuses[answer.status]?.label || answer.status}</Badge></div>)}</div></div>}
+      </Modal>
+    </>
+  )
+}
+
+function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
+  const [assessmentId, setAssessmentId] = useState(initialAssessmentId || data.assessments[0]?.id || '')
+  const [classId, setClassId] = useState('all')
+  const [status, setStatus] = useState('all')
+  const [search, setSearch] = useState('')
+  const [selectedId, setSelectedId] = useState(null)
+  const [deleteId, setDeleteId] = useState(null)
+  const [answerFilter, setAnswerFilter] = useState('all')
+  const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
+  const selected = data.submissions.find((item) => item.id === selectedId)
+  const responseToDelete = data.submissions.find((item) => item.id === deleteId)
+  const responseToDeleteStudent = data.students.find((item) => item.id === responseToDelete?.studentId)
+  const responseToDeleteAssessment = data.assessments.find((item) => item.id === responseToDelete?.assessmentId)
+  const selectedStudent = data.students.find((item) => item.id === selected?.studentId)
+  const selectedClass = data.classes.find((item) => item.id === selectedStudent?.classId)
+  const selectedAssessment = data.assessments.find((item) => item.id === selected?.assessmentId)
+  const selectedAnswerKey = selected?.answerKeySnapshot || getAnswerKeyForStudent(selectedAssessment, selectedStudent)
+  const selectedQuestionAreas = getQuestionAreas(selectedAssessment)
+  const selectedAnswers = Array.isArray(selected?.answers)
+    ? selected.answers.map((answer, index) => ({ ...answer, expected: answer.expected || selectedAnswerKey[index] }))
+    : []
+  const visibleAnswers = selectedAnswers.filter((answer) => answerFilter === 'all' || answer.status === answerFilter)
+
+  const rows = useMemo(() => data.submissions
+    .filter((submission) => submission.assessmentId === assessment?.id)
+    .map((submission) => {
+      const student = data.students.find((item) => item.id === submission.studentId)
+      const classroom = data.classes.find((item) => item.id === student?.classId)
+      return { submission, student, classroom }
+    })
+    .filter((row) => classId === 'all' || row.student?.classId === classId)
+    .filter((row) => status === 'all' || row.submission.status === status)
+    .filter((row) => !search.trim() || normalize(`${row.student?.name} ${row.student?.registration} ${row.classroom?.name}`).includes(normalize(search)))
+    .sort((first, second) => new Date(second.submission.correctedAt || 0) - new Date(first.submission.correctedAt || 0)), [assessment?.id, classId, data, search, status])
+
+  function chooseAssessment(nextId) {
+    setAssessmentId(nextId)
+    setClassId('all')
+    setStatus('all')
+    setSearch('')
+    setSelectedId(null)
+  }
+
+  function openResponse(submission) {
+    setAnswerFilter('all')
+    setSelectedId(submission.id)
+  }
+
+  function deleteResponse() {
+    if (!responseToDelete) return
+    setData((current) => ({ ...current, submissions: current.submissions.filter((item) => item.id !== responseToDelete.id) }))
+    if (selectedId === responseToDelete.id) setSelectedId(null)
+    setDeleteId(null)
+    notify('Resposta excluída', `A correção de ${responseToDeleteStudent?.name || 'aluno removido'} foi apagada. O cadastro do aluno foi mantido.`)
+  }
+
+  if (!assessment) return <EmptyState icon={ClipboardList} title="Nenhum simulado" description="Crie um simulado para visualizar as respostas corrigidas." />
+
+  return (
+    <>
+      <section className="panel responses-panel">
+        <header className="panel-header"><div><h3>Respostas corrigidas</h3><p>Consulte a identificação, o resultado e as alternativas de cada folha.</p></div><Badge tone={rows.length ? 'blue' : 'neutral'}>{rows.length} resposta{rows.length !== 1 ? 's' : ''}</Badge></header>
+
+        <div className="responses-toolbar">
+          <label><span>Simulado</span><select value={assessment.id} onChange={(event) => chooseAssessment(event.target.value)}>{data.assessments.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
+          <label><span>Turma</span><select value={classId} onChange={(event) => setClassId(event.target.value)}><option value="all">Todas as turmas</option>{assessment.classIds.map((id) => { const item = data.classes.find((entry) => entry.id === id); return <option value={id} key={id}>{item?.name || 'Turma removida'}</option> })}</select></label>
+          <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos</option><option value="Corrigido">Corrigidas</option><option value="Revisar">Para revisar</option></select></label>
+          <label className="responses-search"><span>Buscar aluno</span><div><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nome ou matrícula" />{search && <button type="button" onClick={() => setSearch('')} aria-label="Limpar busca"><X size={13} /></button>}</div></label>
+        </div>
+        <div className="response-status-legend"><Badge tone="ochre">Revisar</Badge><span>A correção ainda precisa de conferência. Se a marcação múltipla ou em branco estiver correta, basta mantê-la e concluir a revisão.</span></div>
+
+        {rows.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>RESULTADO</th><th>RESPOSTAS</th><th>STATUS</th><th>CORRIGIDA EM</th><th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{assessment.questionCount} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span></div></td><td><Badge tone={submission.status === 'Revisar' ? 'ochre' : 'green'}>{submission.status}</Badge></td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
+      </section>
+
+      <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selectedStudent ? `Respostas de ${selectedStudent.name}` : 'Detalhes da correção'} subtitle={`${selectedClass?.name || 'Turma não encontrada'} · ${selectedAssessment?.title || ''}`} size="xl" footer={<><Button variant="danger" icon={Trash2} onClick={() => setDeleteId(selected.id)}>Excluir resposta</Button><Button onClick={() => setSelectedId(null)}>Fechar</Button></>}>
+        {selected && <div className="response-detail-view">
+          <div className="response-detail-identification">
+            <article><small>ALUNO</small><strong>{selectedStudent?.name || 'Aluno removido'}</strong><p>{selectedStudent ? `Matrícula ${selectedStudent.registration}` : 'Cadastro não encontrado'}</p></article>
+            <article><small>TURMA / GABARITO</small><strong>{selectedClass?.name || 'Turma removida'}</strong><p>{selected.answerKeyVersionLabel || (hasCustomAnswerKey(selectedAssessment, selectedClass?.id) ? 'Versão específica' : 'Gabarito padrão')}</p></article>
+            <article><small>SIMULADO</small><strong>{selectedAssessment?.title || 'Simulado removido'}</strong><p>{selectedAssessment?.code} · {selectedAssessment?.questionCount} questões</p></article>
+            <article><small>CORREÇÃO</small><strong>{formatDateTime(selected.correctedAt)}</strong><p>{selected.filename || 'Arquivo não informado'}</p></article>
+          </div>
+
+          <ResultBreakdown result={{ ...selected, total: selectedAssessment?.questionCount }} />
+
+          {selectedAnswers.length ? <section className="answer-review-panel response-answer-view">
+            <header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>A alternativa marcada aparece preenchida; o contorno indica o gabarito.</p></div><Badge tone={selected.status === 'Revisar' ? 'ochre' : 'green'}>{selected.status}</Badge></header>
+            <div className="answer-filters"><button className={answerFilter === 'all' ? 'active' : ''} onClick={() => setAnswerFilter('all')}>Todas <span>{selectedAnswers.length}</span></button><button className={answerFilter === 'correct' ? 'active' : ''} onClick={() => setAnswerFilter('correct')}>Acertos <span>{selected.correct || 0}</span></button><button className={answerFilter === 'wrong' ? 'active' : ''} onClick={() => setAnswerFilter('wrong')}>Erros <span>{selected.wrong || 0}</span></button><button className={answerFilter === 'blank' ? 'active' : ''} onClick={() => setAnswerFilter('blank')}>Em branco <span>{selected.blank || 0}</span></button><button className={answerFilter === 'multiple' ? 'active' : ''} onClick={() => setAnswerFilter('multiple')}>Múltiplas <span>{selected.multiple || 0}</span></button><button className={answerFilter === 'uncertain' ? 'active' : ''} onClick={() => setAnswerFilter('uncertain')}>Incertas <span>{selected.uncertain || 0}</span></button></div>
+            <DetailedAnswerList answers={visibleAnswers} assessment={selectedAssessment} questionAreas={selectedQuestionAreas} readOnly />
+          </section> : <EmptyState icon={FileText} title="Detalhamento indisponível" description="Esta correção antiga possui apenas o resumo do resultado." />}
+        </div>}
+      </Modal>
+
+      <Modal open={Boolean(responseToDelete)} onClose={() => setDeleteId(null)} title="Excluir resposta corrigida?" subtitle="Esta ação remove somente a correção selecionada." footer={<><Button variant="ghost" onClick={() => setDeleteId(null)}>Cancelar</Button><Button variant="danger" icon={Trash2} onClick={deleteResponse}>Excluir resposta</Button></>}>
+        {responseToDelete && <div className="delete-response-confirmation"><span><AlertTriangle size={22} /></span><div><strong>{responseToDeleteStudent?.name || 'Aluno removido'}</strong><p>{responseToDeleteAssessment?.title || 'Simulado removido'} · {responseToDelete.correct || 0} acertos · {responseToDelete.score || 0}%</p><small>O aluno, a turma e o simulado continuarão cadastrados. Para recuperar o resultado, será necessário corrigir a folha novamente.</small></div></div>}
       </Modal>
     </>
   )
@@ -290,7 +403,7 @@ export function CorrectionPage({ data, setData, notify }) {
     || data.assessments[0]
   const [tab, setTab] = useState(() => {
     const requested = new URLSearchParams(window.location.search).get('tab')
-    return ['scan', 'keys', 'reviews'].includes(requested) ? requested : 'scan'
+    return ['scan', 'responses', 'keys', 'reviews'].includes(requested) ? requested : 'scan'
   })
   const [assessmentId, setAssessmentId] = useState(initialAssessment?.id)
   const [classId, setClassId] = useState(initialAssessment?.classIds[0] || '')
@@ -301,6 +414,7 @@ export function CorrectionPage({ data, setData, notify }) {
   const [result, setResult] = useState(null)
   const [batch, setBatch] = useState(null)
   const [batchPreviewIndex, setBatchPreviewIndex] = useState(null)
+  const [newStudentContext, setNewStudentContext] = useState(null)
   const [batchFilter, setBatchFilter] = useState('all')
   const [fileName, setFileName] = useState('')
   const [filter, setFilter] = useState('all')
@@ -359,12 +473,25 @@ export function CorrectionPage({ data, setData, notify }) {
   const batchPreviewAreas = getQuestionAreas(batchPreview?.assessment)
   const visibleBatchAnswers = batchPreview?.item.answers?.filter((answer) => batchFilter === 'all' || answer.status === batchFilter) || []
   const batchPreviewEligibleStudents = data.students.filter((student) => batchPreview?.assessment?.classIds.includes(student.classId) && student.status === 'Ativo')
+  const newStudentAssessment = data.assessments.find((item) => item.id === newStudentContext?.assessmentId)
+  const newStudentClasses = data.classes.filter((item) => newStudentAssessment?.classIds.includes(item.id))
+  const newStudentDefaultClassId = newStudentClasses.length === 1
+    ? newStudentClasses[0].id
+    : newStudentClasses.some((item) => item.id === newStudentContext?.suggestedClassId) ? newStudentContext.suggestedClassId : ''
 
   function chooseAssessment(nextId) {
     const next = data.assessments.find((item) => item.id === nextId)
     setAssessmentId(nextId)
     setClassId(next?.classIds[0] || '')
     setStudentId('')
+  }
+
+  function openNewStudent(context) {
+    if (!context?.assessmentId) {
+      notify('Simulado não identificado', 'Identifique o simulado antes de cadastrar o aluno.', 'warning')
+      return
+    }
+    setNewStudentContext(context)
   }
 
   function resolveRecognitionContext(identity) {
@@ -447,6 +574,7 @@ export function CorrectionPage({ data, setData, notify }) {
       setFilter('all')
       setResult(analyzed)
       if (!analyzed.qrFound && !studentId) notify('QR Code não identificado', 'Selecione o aluno antes de salvar a correção.', 'warning')
+      else if (analyzed.qrFound && !analyzed.identity?.studentId) notify('Folha sem aluno identificada', 'Selecione um aluno existente ou cadastre-o agora para concluir a correção.', 'warning')
       else if (analyzed.qrFound && !data.students.some((item) => item.id === analyzed.identity?.studentId)) notify('Aluno não encontrado', 'O QR foi lido, mas o aluno não existe mais no banco local.', 'warning')
     } catch (error) {
       notify('Não foi possível ler a folha', error.message || 'Tente uma foto mais nítida.', 'warning')
@@ -462,19 +590,19 @@ export function CorrectionPage({ data, setData, notify }) {
     })
   }
 
-  function assignManualStudent(nextStudentId) {
+  function assignManualStudent(nextStudentId, providedStudent) {
     setStudentId(nextStudentId)
-    const student = data.students.find((item) => item.id === nextStudentId)
+    const student = providedStudent || data.students.find((item) => item.id === nextStudentId)
     const nextClassId = student?.classId || classId
     const nextKey = student ? getAnswerKeyForStudent(resultAssessment, student) : getAnswerKeyForClass(resultAssessment, nextClassId)
     setResult((current) => current ? { ...current, identity: { ...current.identity, studentId: nextStudentId, assessmentId: resultAssessment.id }, classId: nextClassId, ...regradeAnswers(current.answers, nextKey) } : current)
   }
 
-  function assignBatchStudent(index, nextStudentId) {
+  function assignBatchStudent(index, nextStudentId, providedStudent) {
     setBatch((current) => {
       if (!current) return current
       const item = current.items[index]
-      const nextStudent = data.students.find((entry) => entry.id === nextStudentId)
+      const nextStudent = providedStudent || data.students.find((entry) => entry.id === nextStudentId)
       if (!item || item.error) return current
       if (!nextStudent) {
         const items = current.items.map((entry, itemIndex) => itemIndex === index ? { ...entry, identity: { ...entry.identity, studentId: null } } : entry)
@@ -491,6 +619,44 @@ export function CorrectionPage({ data, setData, notify }) {
       }
       return { ...current, items: current.items.map((entry, itemIndex) => itemIndex === index ? updated : entry) }
     })
+  }
+
+  function saveNewStudent(event) {
+    event.preventDefault()
+    if (!newStudentContext || !newStudentAssessment) return
+    const form = new FormData(event.currentTarget)
+    const name = String(form.get('name')).trim()
+    if (!name) {
+      notify('Informe o nome do aluno', 'Digite o nome escrito na folha para continuar.', 'warning')
+      return
+    }
+    const providedRegistration = String(form.get('registration')).trim()
+    const registration = providedRegistration || nextStudentRegistration(data.students)
+    if (data.students.some((student) => normalize(student.registration) === normalize(registration))) {
+      notify('Matrícula já cadastrada', 'Selecione o aluno existente ou use outra matrícula.', 'warning')
+      return
+    }
+
+    const student = {
+      id: uid('student'),
+      name,
+      registration,
+      registrationType: providedRegistration ? 'external' : 'internal',
+      classId: String(form.get('classId')),
+      status: 'Ativo',
+      source: 'Manual',
+      updatedAt: new Date().toISOString(),
+    }
+    if (!newStudentAssessment.classIds.includes(student.classId)) {
+      notify('Turma incompatível', 'Escolha uma turma participante deste simulado.', 'warning')
+      return
+    }
+
+    setData((current) => ({ ...current, students: [...current.students, student] }))
+    if (newStudentContext.source === 'batch') assignBatchStudent(newStudentContext.index, student.id, student)
+    else assignManualStudent(student.id, student)
+    setNewStudentContext(null)
+    notify('Aluno cadastrado', `${student.name} foi adicionado e vinculado a esta folha.`)
   }
 
   function changeBatchAnswer(itemIndex, questionIndex, letter) {
@@ -617,8 +783,9 @@ export function CorrectionPage({ data, setData, notify }) {
 
   return (
     <div className="page-stack correction-page">
-      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagem ou PDF em lote</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>Visualizar e editar</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{data.submissions.filter((item) => item.status === 'Revisar').length} pendentes</small></span></button></div>}
+      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagem ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>Visualizar e editar</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{data.submissions.filter((item) => item.status === 'Revisar').length} pendentes</small></span></button></div>}
 
+      {!result && !batch && tab === 'responses' && <ResponsesPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'keys' && <AnswerKeysPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'reviews' && <ReviewQueue data={data} setData={setData} notify={notify} />}
 
@@ -638,7 +805,7 @@ export function CorrectionPage({ data, setData, notify }) {
             <details className="manual-identification"><summary>QR Code danificado? Identificar manualmente <ChevronRight size={15} /></summary><div><select value={studentId} onChange={(event) => setStudentId(event.target.value)}><option value="">Selecione o aluno (opcional)</option>{eligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select></div></details>
           </section>
 
-          <aside className="correction-guide"><h3>Para uma leitura precisa</h3><div><span><Focus size={19} /></span><p><strong>Uma folha por página</strong>No PDF, cada página deve conter uma folha completa, sem cortes.</p></div><div><span><CircleDot size={19} /></span><p><strong>Digitalize com nitidez</strong>Prefira 200 ou 300 DPI e mantenha os quatro marcadores visíveis.</p></div><div><span><QrCode size={19} /></span><p><strong>Não cubra o QR Code</strong>Ele relaciona cada página ao aluno, à turma e ao simulado.</p></div><div className="privacy-note"><CheckCircle2 size={18} /><p><strong>Processamento privado</strong>O PDF é analisado neste dispositivo e não é enviado para servidores.</p></div></aside>
+          <aside className="correction-guide"><h3>Para uma leitura precisa</h3><div><span><Focus size={19} /></span><p><strong>Uma folha por página</strong>No PDF, cada página deve conter uma folha completa, sem cortes.</p></div><div><span><CircleDot size={19} /></span><p><strong>Digitalize com nitidez</strong>Prefira 200 ou 300 DPI e mantenha os quatro marcadores visíveis.</p></div><div><span><QrCode size={19} /></span><p><strong>Não cubra o QR Code</strong>Ele identifica o simulado e, nas folhas nominadas, também o aluno.</p></div><div className="privacy-note"><CheckCircle2 size={18} /><p><strong>Processamento privado</strong>O PDF é analisado neste dispositivo e não é enviado para servidores.</p></div></aside>
         </div>
 
         <section className="panel recent-corrections"><header className="panel-header"><div><h3>Correções recentes</h3><p>Últimas folhas processadas e o gabarito aplicado</p></div><button className="text-button" onClick={() => setTab('reviews')}>{data.submissions.filter((item) => item.status === 'Revisar').length} para revisar <ChevronRight size={14} /></button></header>{recent.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA / GABARITO</th><th>SIMULADO</th><th>RESULTADO</th><th>STATUS</th><th /></tr></thead><tbody>{recent.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); return <tr key={submission.id}><td><strong>{itemStudent?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span><small className="cell-subtitle">Gabarito {hasCustomAnswerKey(itemAssessment, itemStudent?.classId) ? 'específico' : 'padrão'}</small></td><td>{itemAssessment?.title}</td><td><strong>{submission.correct} / {itemAssessment?.questionCount}</strong><small className="cell-subtitle">{submission.score}% de acertos</small></td><td><Badge tone={submission.status === 'Revisar' ? 'ochre' : 'green'}>{submission.status}</Badge></td><td><button className="icon-button"><MoreHorizontal size={18} /></button></td></tr> })}</tbody></table></div> : <EmptyState icon={ScanLine} title="Nenhuma folha corrigida" description="As leituras aparecerão aqui." />}</section>
@@ -672,7 +839,7 @@ export function CorrectionPage({ data, setData, notify }) {
               const availableStudents = data.students.filter((student) => row.assessment?.classIds.includes(student.classId) && student.status === 'Ativo')
               return <tr key={row.item.pageNumber} className={row.issue ? 'batch-row-issue' : ''}>
                 <td><span className="batch-page-number">{row.item.pageNumber}</span></td>
-                <td>{row.item.error ? <span className="batch-error-text">Página não processada</span> : <select className="batch-student-select" value={row.student?.id || ''} onChange={(event) => assignBatchStudent(row.index, event.target.value)}><option value="">Identificar aluno...</option>{availableStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select>}</td>
+                <td>{row.item.error ? <span className="batch-error-text">Página não processada</span> : <div className="batch-student-control"><select className="batch-student-select" value={row.student?.id || ''} onChange={(event) => assignBatchStudent(row.index, event.target.value)}><option value="">Identificar aluno...</option>{availableStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select>{!row.student && <button type="button" onClick={() => openNewStudent({ source: 'batch', index: row.index, assessmentId: row.assessment?.id, suggestedClassId: row.item.classId })}><UserPlus size={12} /> Cadastrar</button>}</div>}</td>
                 <td>{row.classroom ? <span className="class-tag" style={{ '--class-color': row.classroom.color }}>{row.classroom.name}</span> : '—'}</td>
                 <td><strong>{row.assessment?.code || '—'}</strong><small className="cell-subtitle">{row.assessment?.title || ''}</small></td>
                 <td>{row.valid ? <div className="batch-result-cell"><strong>{row.item.score}%</strong><span><b className="is-correct">{row.item.correct} A</b><b className="is-wrong">{row.item.wrong} E</b><b>{row.item.blank} B</b><b className="is-review">{row.item.multiple + row.item.uncertain} R</b></span></div> : '—'}</td>
@@ -702,7 +869,7 @@ export function CorrectionPage({ data, setData, notify }) {
 
             <section className="panel scan-identity-panel">
               <header><h3>Identificação encontrada</h3><p>Dados usados para selecionar o gabarito</p></header>
-              <div className={cn('scan-identity-row', !detectedStudent && 'identification-missing')}><span><UsersRound size={18} /></span><div><small>ALUNO</small><strong>{detectedStudent?.name || 'Não identificado'}</strong><p>{detectedStudent ? `Matrícula ${detectedStudent.registration}` : 'Selecione o aluno para continuar'}</p>{!detectedStudent && <select value={studentId} onChange={(event) => assignManualStudent(event.target.value)}><option value="">Selecionar aluno...</option>{resultEligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {data.classes.find((item) => item.id === student.classId)?.name}</option>)}</select>}</div><Badge tone={detectedStudent && result.qrFound ? 'green' : 'ochre'}>{detectedStudent && result.qrFound ? 'QR' : detectedStudent ? 'Manual' : 'Pendente'}</Badge></div>
+              <div className={cn('scan-identity-row', !detectedStudent && 'identification-missing')}><span><UsersRound size={18} /></span><div><small>ALUNO</small><strong>{detectedStudent?.name || 'Não identificado'}</strong><p>{detectedStudent ? `Matrícula ${detectedStudent.registration}` : 'Selecione um aluno ou cadastre-o agora'}</p>{!detectedStudent && <div className="inline-student-identification"><select value={studentId} onChange={(event) => assignManualStudent(event.target.value)}><option value="">Selecionar aluno...</option>{resultEligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {data.classes.find((item) => item.id === student.classId)?.name}</option>)}</select><button type="button" onClick={() => openNewStudent({ source: 'result', assessmentId: resultAssessment?.id, suggestedClassId: resultClassId })}><UserPlus size={13} /> Cadastrar aluno</button></div>}</div><Badge tone={detectedStudent && result.studentQrFound ? 'green' : 'ochre'}>{detectedStudent && result.studentQrFound ? 'QR' : detectedStudent ? 'Manual' : 'Pendente'}</Badge></div>
               <div className="scan-identity-row"><span><FileText size={18} /></span><div><small>SIMULADO / PROVA</small><strong>{resultAssessment?.title || 'Não encontrado'}</strong><p>{resultAssessment ? `${resultAssessment.code} · ${resultAssessment.questionCount} questões` : 'Confira o QR Code'}</p></div><Badge tone={result.qrFound && result.identity?.assessmentId === resultAssessment?.id ? 'green' : 'blue'}>{result.qrFound && result.identity?.assessmentId === resultAssessment?.id ? 'QR' : 'Selecionada'}</Badge></div>
               <div className={cn('scan-identity-row', detectedStudent && !resultClassCompatible && 'identification-missing')}><span><ClipboardList size={18} /></span><div><small>TURMA / GABARITO</small><strong>{resultClassroom?.name || 'Turma não definida'}</strong><p>{resultClassroom ? `${resultClassroom.shift} · ${hasCustomAnswerKey(resultAssessment, resultClassId) ? 'versão específica' : 'versão padrão'}` : 'Gabarito não definido'}</p></div><Badge tone={resultClassCompatible ? 'green' : 'ochre'}>{resultClassCompatible ? 'Compatível' : 'Conferir'}</Badge></div>
               <div className="scan-identity-row"><span><ScanLine size={18} /></span><div><small>QUALIDADE</small><strong>{result.confidence}% de confiança</strong><p>QR {result.qrFound ? 'lido' : 'não lido'} · {result.markersFound}/4 marcadores</p></div><Badge tone={result.qrFound && result.markersFound === 4 ? 'green' : 'ochre'}>{result.markersFound === 4 ? 'Boa' : 'Estimada'}</Badge></div>
@@ -711,7 +878,7 @@ export function CorrectionPage({ data, setData, notify }) {
             <ResultBreakdown result={result} compact />
 
             <div className="scan-notice-stack compact-notices">
-              {!detectedStudent && <div className="scan-notice is-warning"><UsersRound size={17} /><p><strong>Aluno não encontrado.</strong> Faça a identificação manual acima.</p></div>}
+              {!detectedStudent && <div className="scan-notice is-warning"><UsersRound size={17} /><p><strong>{result.qrFound && !result.identity?.studentId ? 'Folha sem aluno vinculado.' : 'Aluno não encontrado.'}</strong> Selecione um cadastro existente ou cadastre o aluno acima.</p></div>}
               {!result.qrFound && <div className="scan-notice is-warning"><QrCode size={17} /><p><strong>QR não reconhecido.</strong> A prova selecionada foi usada como referência.</p></div>}
               {detectedStudent && !resultClassCompatible && <div className="scan-notice is-error"><AlertTriangle size={17} /><p><strong>Turma incompatível.</strong> Este aluno não pertence às turmas do simulado.</p></div>}
               {result.markersFound < 4 && <div className="scan-notice is-warning"><Focus size={17} /><p><strong>Enquadramento estimado.</strong> {result.markersFound} de 4 marcadores encontrados.</p></div>}
@@ -735,7 +902,7 @@ export function CorrectionPage({ data, setData, notify }) {
       <Modal open={Boolean(batchPreview)} onClose={() => setBatchPreviewIndex(null)} title={`Conferência da página ${batchPreview?.item.pageNumber || ''}`} subtitle="Confira a identificação, o resultado e as respostas antes de salvar o lote." size="xl" footer={<Button onClick={() => setBatchPreviewIndex(null)}>Concluir conferência</Button>}>
         {batchPreview?.item.previewUrl && <div className="batch-page-detail">
           <div className="batch-preview-identification">
-            <article><small>ALUNO</small><strong>{batchPreview.student?.name || 'Não identificado'}</strong><p>{batchPreview.student ? `Matrícula ${batchPreview.student.registration}` : 'Selecione um aluno para salvar esta página'}</p>{!batchPreview.student && !batchPreview.item.error && <select value="" onChange={(event) => assignBatchStudent(batchPreview.index, event.target.value)}><option value="">Selecionar aluno...</option>{batchPreviewEligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select>}</article>
+            <article><small>ALUNO</small><strong>{batchPreview.student?.name || 'Não identificado'}</strong><p>{batchPreview.student ? `Matrícula ${batchPreview.student.registration}` : 'Selecione um aluno ou cadastre-o agora'}</p>{!batchPreview.student && !batchPreview.item.error && <div className="inline-student-identification"><select value="" onChange={(event) => assignBatchStudent(batchPreview.index, event.target.value)}><option value="">Selecionar aluno...</option>{batchPreviewEligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select><button type="button" onClick={() => openNewStudent({ source: 'batch', index: batchPreview.index, assessmentId: batchPreview.assessment?.id, suggestedClassId: batchPreview.item.classId })}><UserPlus size={12} /> Cadastrar aluno</button></div>}</article>
             <article><small>SIMULADO / PROVA</small><strong>{batchPreview.assessment?.title || 'Não encontrado'}</strong><p>{batchPreview.assessment ? `${batchPreview.assessment.code} · ${batchPreview.assessment.questionCount} questões` : 'Identificação indisponível'}</p></article>
             <article><small>TURMA / GABARITO</small><strong>{batchPreview.classroom?.name || 'Não definida'}</strong><p>{batchPreview.classroom ? `${batchPreview.classroom.shift} · ${hasCustomAnswerKey(batchPreview.assessment, batchPreview.classroom.id) ? 'versão específica' : 'versão padrão'}` : 'Aguardando identificação do aluno'}</p></article>
             <article><small>QUALIDADE</small><strong>{batchPreview.item.confidence}% de confiança</strong><p>QR {batchPreview.item.qrFound ? 'lido' : 'não lido'} · {batchPreview.item.markersFound}/4 marcadores</p></article>
@@ -756,6 +923,15 @@ export function CorrectionPage({ data, setData, notify }) {
             </div>}
           </div>
         </div>}
+      </Modal>
+
+      <Modal open={Boolean(newStudentContext)} onClose={() => setNewStudentContext(null)} title="Cadastrar aluno durante a correção" subtitle="O novo cadastro será vinculado automaticamente à folha que está sendo conferida." footer={<><Button variant="ghost" onClick={() => setNewStudentContext(null)}>Cancelar</Button><Button type="submit" form="correction-new-student-form" icon={UserPlus}>Cadastrar e vincular</Button></>}>
+        {newStudentContext && <form key={`${newStudentContext.source}-${newStudentContext.index ?? 'single'}`} id="correction-new-student-form" className="form-grid" onSubmit={saveNewStudent}>
+          <div className="new-student-assessment-note"><FileText size={17} /><p><strong>{newStudentAssessment?.title}</strong><span>Somente turmas participantes deste simulado estão disponíveis.</span></p></div>
+          <Field label="Nome completo" required><input name="name" required autoFocus placeholder="Digite o nome escrito na folha" /></Field>
+          <Field label="Matrícula" hint="Opcional. Se ficar vazia, um número de controle será criado."><input name="registration" inputMode="numeric" placeholder="Deixe em branco para gerar automaticamente" /></Field>
+          <Field label="Turma" required><select name="classId" required defaultValue={newStudentDefaultClassId}><option value="" disabled>Selecione a turma</option>{newStudentClasses.map((item) => <option value={item.id} key={item.id}>{item.name} · {item.shift}</option>)}</select></Field>
+        </form>}
       </Modal>
     </div>
   )

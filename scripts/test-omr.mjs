@@ -1,5 +1,6 @@
 import { analyzeMarks, bubbleCenter, detectSheetMarkers, getAnswerSheetLayout, MARKERS, SHEET } from '../src/lib/omr.js'
 import { createRandomAnswerKey, getAnswerKeyForStudent, getAnswerKeyVersionForStudent } from '../src/lib/assessment.js'
+import { parseQrPayload, qrPayload } from '../src/lib/utils.js'
 
 function makeImage(width, height, background = [255, 255, 255]) {
   const data = new Uint8ClampedArray(width * height * 4)
@@ -195,4 +196,11 @@ if (randomKey.length !== 10 || randomKey.some((answer) => !['A', 'B', 'C', 'D'].
   throw new Error(`Gabarito aleatório inválido ou desbalanceado: ${JSON.stringify(randomKey)}`)
 }
 
-console.log('OMR validado: folhas completas nos 4 formatos, perspectiva, múltiplas versões e aleatorização balanceada.')
+const identifiedQr = parseQrPayload(qrPayload('student-1', 'assessment-1'))
+const blankQr = parseQrPayload(qrPayload(null, 'assessment-1'))
+if (identifiedQr?.studentId !== 'student-1' || identifiedQr.assessmentId !== 'assessment-1'
+  || blankQr?.studentId !== null || blankQr.assessmentId !== 'assessment-1') {
+  throw new Error('Os QR Codes de folhas identificadas e avulsas não foram interpretados corretamente.')
+}
+
+console.log('OMR validado: folhas completas nos 4 formatos, perspectiva, QR avulso, múltiplas versões e aleatorização balanceada.')

@@ -8,7 +8,8 @@ const governmentLogo = `${import.meta.env.BASE_URL}assets/brasao-governo-es-hori
 
 export function AnswerSheet({ student, assessment, classroom, school, hideRegistration = false }) {
   const [qr, setQr] = useState('')
-  const payload = useMemo(() => qrPayload(student.id, assessment.id), [student.id, assessment.id])
+  const isBlank = !student
+  const payload = useMemo(() => qrPayload(student?.id, assessment.id), [student?.id, assessment.id])
   const schoolLocation = [school.address, school.city && school.state ? `${school.city} – ${school.state}.` : school.city || school.state]
     .filter(Boolean)
     .join(', ')
@@ -20,7 +21,7 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
   }, [payload])
 
   return (
-    <svg className="answer-sheet" viewBox={`0 0 ${SHEET.width} ${SHEET.height}`} role="img" aria-label={`Folha de respostas de ${student.name}`}>
+    <svg className="answer-sheet" viewBox={`0 0 ${SHEET.width} ${SHEET.height}`} role="img" aria-label={isBlank ? 'Folha de respostas sem aluno vinculado' : `Folha de respostas de ${student.name}`}>
       <rect width={SHEET.width} height={SHEET.height} fill="white" />
       {Object.values(MARKERS).map((marker, index) => (
         <g key={index}>
@@ -48,12 +49,14 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
       <text x="126" y="284" textAnchor="middle" fontFamily="Arial" fontSize="8" fill="#5e6864">IDENTIFICAÇÃO DIGITAL</text>
 
       <text x="216" y="162" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">ALUNO(A)</text>
-      <text x="216" y="184" fontFamily="Arial" fontSize="17" fontWeight="700" fill="#17221e">{student.name.toUpperCase()}</text>
+      {!isBlank && <text x="216" y="184" fontFamily="Arial" fontSize="17" fontWeight="700" fill="#17221e">{student.name.toUpperCase()}</text>}
       <line x1="216" y1="195" x2="708" y2="195" stroke="#bfc8c4" />
       {!hideRegistration && <text x="216" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">MATRÍCULA</text>}
-      {!hideRegistration && <text x="216" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{student.registration}</text>}
+      {!hideRegistration && !isBlank && <text x="216" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{student.registration}</text>}
+      {!hideRegistration && isBlank && <line x1="216" y1="241" x2="379" y2="241" stroke="#bfc8c4" />}
       <text x="407" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">TURMA</text>
-      <text x="407" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{classroom?.name || '—'} · {classroom?.shift || ''}</text>
+      {!isBlank && <text x="407" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{classroom?.name || '—'} · {classroom?.shift || ''}</text>}
+      {isBlank && <line x1="407" y1="241" x2="544" y2="241" stroke="#bfc8c4" />}
       <text x="566" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">DATA</text>
       <text x="566" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">____ / ____ / ______</text>
       <text x="216" y="266" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">SIMULADO</text>
@@ -109,11 +112,11 @@ export function PrintableSheets({ students, assessment, classes, school, hideReg
   return (
     <div className="print-root">
       {students.map((student) => (
-        <div className="print-page" key={student.id}>
+        <div className="print-page" key={student?.id || 'blank-sheet'}>
           <AnswerSheet
             student={student}
             assessment={assessment}
-            classroom={classes.find((item) => item.id === student.classId)}
+            classroom={classes.find((item) => item.id === student?.classId)}
             school={school}
             hideRegistration={hideRegistration}
           />

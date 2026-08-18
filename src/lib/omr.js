@@ -448,7 +448,9 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
   let qr = jsQR(data.data, data.width, data.height, { inversionAttempts: 'attemptBoth' })
   if (!qr && detectedMarkers) qr = readQrFromSheet(context, data, corners)
   const qrIdentity = qr ? parseQrPayload(qr.data) : null
-  const identity = qrIdentity || fallbackIdentity
+  const identity = qrIdentity
+    ? { ...qrIdentity, studentId: qrIdentity.studentId || fallbackIdentity.studentId || null }
+    : fallbackIdentity
   const resolved = resolveContext?.(identity) || {}
   const activeAssessment = resolved.assessment || assessment
   const activeAnswerKey = resolved.answerKey || activeAssessment.answerKey
@@ -460,6 +462,7 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
     assessmentId: activeAssessment.id,
     classId: resolved.classId || null,
     qrFound: Boolean(qrIdentity),
+    studentQrFound: Boolean(qrIdentity?.studentId),
     rawQr: qr?.data || null,
     markersFound,
     markerCorners: detectedMarkers ? Object.fromEntries(Object.entries(corners).map(([key, point]) => [key, { x: Math.round(point.x), y: Math.round(point.y) }])) : null,

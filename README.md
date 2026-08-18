@@ -32,10 +32,12 @@ npm run preview
 - edição, cópia entre turmas e recálculo das correções após alterar um gabarito;
 - folha A4 individual, com dados do aluno, QR Code e quatro marcadores de alinhamento;
 - impressão em lote ou geração de PDF, uma folha por aluno;
+- folha avulsa sem aluno vinculado, para preencher à mão e cadastrar o estudante durante a correção;
 - leitura de JPG, PNG ou WEBP, inclusive pela câmera do celular;
 - detecção de QR Code, guias, marcações, respostas em branco, múltiplas e incertas;
 - seleção automática do gabarito correto a partir da turma do aluno identificado;
-- revisão manual antes de salvar e fila própria para resolver marcações ambíguas;
+- revisão manual antes de salvar e fila própria para resolver ou confirmar marcações múltiplas, em branco e ambíguas;
+- consulta das correções por simulado e turma, com detalhamento de cada resposta marcada;
 - resultados por aluno, turma e área de conhecimento, com exportação CSV;
 - persistência local da demonstração e restauração da base inicial.
 
