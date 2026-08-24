@@ -18,6 +18,12 @@ const answerStatuses = {
   uncertain: { label: 'Revisar', tone: 'ochre' },
 }
 
+const supportedImagePattern = /\.(jpe?g|png|webp)$/i
+
+function isSupportedImage(file) {
+  return ['image/jpeg', 'image/png', 'image/webp'].includes(file?.type) || supportedImagePattern.test(file?.name || '')
+}
+
 function AnswerKeyStrip({ answerKey, limit, compact = false }) {
   const visible = limit ? answerKey.slice(0, limit) : answerKey
   return (
@@ -451,7 +457,7 @@ export function CorrectionPage({ data, setData, notify }) {
       if (!issue && !itemStudent) issue = 'Aluno não identificado'
       if (!issue && !itemAssessment.classIds.includes(itemStudent.classId)) issue = 'Turma incompatível'
       const pairKey = itemStudent && itemAssessment ? `${itemAssessment.id}:${itemStudent.id}` : ''
-      if (!issue && seen.has(pairKey)) issue = 'Folha duplicada no PDF'
+      if (!issue && seen.has(pairKey)) issue = 'Folha duplicada no lote'
       if (!issue) seen.add(pairKey)
       const needsReview = !issue && (item.multiple > 0 || item.uncertain > 0 || item.markersFound < 4)
       return { index, item, assessment: itemAssessment, student: itemStudent, classroom: itemClass, existingSubmission, issue, pairKey, needsReview, valid: !issue }
@@ -534,7 +540,7 @@ export function CorrectionPage({ data, setData, notify }) {
           items.push({ pageNumber, pageFilename: pageFile.name, error: error.message || 'Página não reconhecida.' })
         }
       })
-      setBatch({ fileName: file.name, totalPages: items.length, items })
+      setBatch({ fileName: file.name, sourceType: 'pdf', totalPages: items.length, items })
       const identified = items.filter((item) => data.students.some((student) => student.id === item.identity?.studentId)).length
       notify('PDF analisado', `${items.length} página(s) processada(s) · ${identified} aluno(s) identificado(s).`, identified === items.length ? 'success' : 'warning')
     } catch (error) {
@@ -543,6 +549,78 @@ export function CorrectionPage({ data, setData, notify }) {
       setProcessing(false)
       setProcessingProgress(null)
     }
+  }
+
+  async function processImageBatch(files) {
+    const orderedFiles = [...files].sort((first, second) => first.name.localeCompare(second.name, 'pt-BR', { numeric: true, sensitivity: 'base' }))
+    if (orderedFiles.length > 100) {
+      notify('Muitas imagens no lote', 'Selecione no máximo 100 imagens por vez.', 'warning')
+      return
+    }
+    const oversized = orderedFiles.find((file) => file.size > 15 * 1024 * 1024)
+    if (oversized) {
+      notify('Imagem muito grande', `${oversized.name} ultrapassa o limite de 15 MB por imagem.`, 'warning')
+      return
+    }
+
+    const batchName = `Lote de ${orderedFiles.length} imagens`
+    setFileName(batchName)
+    setProcessing(true)
+    setProcessingProgress({ current: 0, total: orderedFiles.length })
+    setResult(null)
+    setBatch(null)
+    setBatchFilter('all')
+    const items = []
+    try {
+      for (let index = 0; index < orderedFiles.length; index += 1) {
+        const imageFile = orderedFiles[index]
+        const itemNumber = index + 1
+        setProcessingProgress({ current: itemNumber, total: orderedFiles.length })
+        try {
+          const analyzed = await analyzeAnswerSheet(
+            imageFile,
+            assessment,
+            { studentId: null, assessmentId },
+            data.settings?.omr,
+            resolveRecognitionContext,
+          )
+          items.push({ ...analyzed, pageNumber: itemNumber, pageFilename: imageFile.name })
+        } catch (error) {
+          items.push({ pageNumber: itemNumber, pageFilename: imageFile.name, error: error.message || 'Imagem não reconhecida.' })
+        }
+      }
+      setBatch({ fileName: batchName, sourceType: 'images', totalPages: items.length, items })
+      const identified = items.filter((item) => data.students.some((student) => student.id === item.identity?.studentId)).length
+      notify('Lote de imagens analisado', `${items.length} imagem(ns) processada(s) · ${identified} aluno(s) identificado(s).`, identified === items.length ? 'success' : 'warning')
+    } finally {
+      setProcessing(false)
+      setProcessingProgress(null)
+    }
+  }
+
+  async function processFiles(fileList) {
+    if (!assessment || processing) return
+    const files = Array.from(fileList || [])
+    if (!files.length) return
+    const pdfFiles = files.filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
+    const unsupportedFiles = files.filter((file) => !pdfFiles.includes(file) && !isSupportedImage(file))
+    if (unsupportedFiles.length) {
+      notify('Formato não suportado', `Use arquivos JPG, JPEG, PNG, WEBP ou PDF. Não foi possível incluir ${unsupportedFiles[0].name}.`, 'warning')
+      return
+    }
+    if (pdfFiles.length) {
+      if (files.length > 1) {
+        notify('Envio misto não permitido', 'Envie um PDF por vez ou selecione um lote formado somente por imagens.', 'warning')
+        return
+      }
+      await processPdf(pdfFiles[0])
+      return
+    }
+    if (files.length > 1) {
+      await processImageBatch(files)
+      return
+    }
+    await processFile(files[0])
   }
 
   async function processFile(file) {
@@ -718,7 +796,7 @@ export function CorrectionPage({ data, setData, notify }) {
 
   function saveBatchCorrections() {
     if (!batchSaveable.length) {
-      notify('Nenhuma correção pronta', 'Identifique ao menos uma página antes de salvar o lote.', 'warning')
+      notify('Nenhuma correção pronta', 'Identifique ao menos uma folha antes de salvar o lote.', 'warning')
       return
     }
     const correctedAt = new Date().toISOString()
@@ -744,8 +822,8 @@ export function CorrectionPage({ data, setData, notify }) {
           ...(graded.uncertain > 0 ? ['Marcações incertas'] : []),
         ],
         correctedAt,
-        filename: `${batch.fileName} · página ${item.pageNumber}`,
-        sourceType: 'pdf',
+        filename: batch.sourceType === 'images' ? item.pageFilename : `${batch.fileName} · página ${item.pageNumber}`,
+        sourceType: batch.sourceType === 'images' ? 'image-batch' : 'pdf',
         sourcePage: item.pageNumber,
       }
     })
@@ -759,7 +837,7 @@ export function CorrectionPage({ data, setData, notify }) {
       ],
       assessments: current.assessments.map((item) => touchedAssessments.has(item.id) && item.status === 'Pronto para aplicar' ? { ...item, status: 'Correção em andamento' } : item),
     }))
-    const skippedMessage = batchUnresolved ? ` ${batchUnresolved} página(s) com pendência foram ignoradas.` : ''
+    const skippedMessage = batchUnresolved ? ` ${batchUnresolved} folha(s) com pendência foram ignoradas.` : ''
     const reviewMessage = batchNeedsReview ? ` ${batchNeedsReview} correção(ões) foram enviadas para revisão.` : ''
     const replacementMessage = batchReplacements ? ` ${batchReplacements} resultado(s) anterior(es) foram atualizado(s).` : ''
     notify('Lote de correções salvo', `${submissions.length} correção(ões) registradas.${replacementMessage}${reviewMessage}${skippedMessage}`, batchUnresolved ? 'warning' : 'success')
@@ -783,7 +861,7 @@ export function CorrectionPage({ data, setData, notify }) {
 
   return (
     <div className="page-stack correction-page">
-      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagem ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>Visualizar e editar</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{data.submissions.filter((item) => item.status === 'Revisar').length} pendentes</small></span></button></div>}
+      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagens ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>Visualizar e editar</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{data.submissions.filter((item) => item.status === 'Revisar').length} pendentes</small></span></button></div>}
 
       {!result && !batch && tab === 'responses' && <ResponsesPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'keys' && <AnswerKeysPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
@@ -796,16 +874,16 @@ export function CorrectionPage({ data, setData, notify }) {
             <div className="correction-selectors"><label><span>Simulado</span><select value={assessmentId} onChange={(event) => chooseAssessment(event.target.value)}>{data.assessments.map((item) => <option value={item.id} key={item.id}>{item.title} · {item.questionCount} questões</option>)}</select></label><label><span>Turma / versão</span><select value={classId} onChange={(event) => { setClassId(event.target.value); setStudentId('') }}>{assessment?.classIds.map((id) => { const item = data.classes.find((entry) => entry.id === id); return <option value={id} key={id}>{item?.name} · {item?.shift}</option> })}</select></label></div>
             <div className="selected-key-preview"><div><span className="key-preview-icon"><ClipboardList size={18} /></span><p><small>GABARITO EM USO</small><strong>{classroom?.name} · {assessment?.code}</strong><em>{hasCustomAnswerKey(assessment, classId) ? 'Versão específica da turma' : 'Gabarito padrão'}</em></p></div><AnswerKeyStrip answerKey={answerKey} limit={12} compact /><button onClick={() => setTab('keys')}>Ver gabarito completo <ChevronRight size={14} /></button></div>
 
-            <div className="correction-step second"><span>2</span><div><h3>Envie uma folha ou um PDF completo</h3><p>Cada página será identificada pelo QR e corrigida com o gabarito da turma correspondente.</p></div></div>
-            <div className={cn('drop-zone', dragging && 'dragging', processing && 'processing')} onDragOver={(event) => { event.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); processFile(event.dataTransfer.files[0]) }}>
-              {processing ? <><span className="scan-animation"><ScanLine size={31} /><i /></span><h3>{processingProgress?.total ? `Analisando página ${processingProgress.current} de ${processingProgress.total}` : 'Preparando arquivo...'}</h3><p>Lendo QR Codes, identificando turmas e aplicando os gabaritos</p>{processingProgress?.total > 0 && <div className="batch-processing-progress"><i style={{ width: `${Math.round((processingProgress.current / processingProgress.total) * 100)}%` }} /></div>}</> : <><span className="upload-illustration"><Files size={28} /><i><QrCode size={16} /></i></span><h3>Arraste uma imagem ou PDF aqui</h3><p>JPG, PNG ou WEBP até 15 MB · PDF com até 100 páginas e 100 MB</p><div><Button icon={UploadCloud} onClick={() => fileInput.current?.click()}>Imagem ou PDF</Button><Button variant="secondary" icon={Camera} onClick={() => cameraInput.current?.click()}>Usar câmera</Button></div></>}
-              <input ref={fileInput} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf" hidden onChange={(event) => { processFile(event.target.files[0]); event.target.value = '' }} />
+            <div className="correction-step second"><span>2</span><div><h3>Envie imagens ou um PDF completo</h3><p>Cada imagem ou página será identificada pelo QR e corrigida com o gabarito correspondente.</p></div></div>
+            <div className={cn('drop-zone', dragging && 'dragging', processing && 'processing')} onDragOver={(event) => { event.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); processFiles(event.dataTransfer.files) }}>
+              {processing ? <><span className="scan-animation"><ScanLine size={31} /><i /></span><h3>{processingProgress?.total ? `Analisando folha ${processingProgress.current} de ${processingProgress.total}` : 'Preparando arquivo...'}</h3><p>Lendo QR Codes, identificando turmas e aplicando os gabaritos</p>{processingProgress?.total > 0 && <div className="batch-processing-progress"><i style={{ width: `${Math.round((processingProgress.current / processingProgress.total) * 100)}%` }} /></div>}</> : <><span className="upload-illustration"><Files size={28} /><i><QrCode size={16} /></i></span><h3>Arraste imagens ou um PDF aqui</h3><p>Até 100 JPG, PNG ou WEBP de 15 MB cada · PDF com até 100 páginas e 100 MB</p><div><Button icon={UploadCloud} onClick={() => fileInput.current?.click()}>Selecionar arquivos</Button><Button variant="secondary" icon={Camera} onClick={() => cameraInput.current?.click()}>Usar câmera</Button></div></>}
+              <input ref={fileInput} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" multiple hidden onChange={(event) => { processFiles(event.target.files); event.target.value = '' }} />
               <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { processFile(event.target.files[0]); event.target.value = '' }} />
             </div>
             <details className="manual-identification"><summary>QR Code danificado? Identificar manualmente <ChevronRight size={15} /></summary><div><select value={studentId} onChange={(event) => setStudentId(event.target.value)}><option value="">Selecione o aluno (opcional)</option>{eligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select></div></details>
           </section>
 
-          <aside className="correction-guide"><h3>Para uma leitura precisa</h3><div><span><Focus size={19} /></span><p><strong>Uma folha por página</strong>No PDF, cada página deve conter uma folha completa, sem cortes.</p></div><div><span><CircleDot size={19} /></span><p><strong>Digitalize com nitidez</strong>Prefira 200 ou 300 DPI e mantenha os quatro marcadores visíveis.</p></div><div><span><QrCode size={19} /></span><p><strong>Não cubra o QR Code</strong>Ele identifica o simulado e, nas folhas nominadas, também o aluno.</p></div><div className="privacy-note"><CheckCircle2 size={18} /><p><strong>Processamento privado</strong>O PDF é analisado neste dispositivo e não é enviado para servidores.</p></div></aside>
+          <aside className="correction-guide"><h3>Para uma leitura precisa</h3><div><span><Focus size={19} /></span><p><strong>Uma folha por arquivo</strong>Cada imagem ou página do PDF deve conter uma folha completa, sem cortes.</p></div><div><span><CircleDot size={19} /></span><p><strong>Digitalize com nitidez</strong>Prefira 200 ou 300 DPI e mantenha os quatro marcadores visíveis.</p></div><div><span><QrCode size={19} /></span><p><strong>Não cubra o QR Code</strong>Ele identifica o simulado e, nas folhas nominadas, também o aluno.</p></div><div className="privacy-note"><CheckCircle2 size={18} /><p><strong>Processamento privado</strong>As imagens e o PDF são analisados neste dispositivo e não são enviados para servidores.</p></div></aside>
         </div>
 
         <section className="panel recent-corrections"><header className="panel-header"><div><h3>Correções recentes</h3><p>Últimas folhas processadas e o gabarito aplicado</p></div><button className="text-button" onClick={() => setTab('reviews')}>{data.submissions.filter((item) => item.status === 'Revisar').length} para revisar <ChevronRight size={14} /></button></header>{recent.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA / GABARITO</th><th>SIMULADO</th><th>RESULTADO</th><th>STATUS</th><th /></tr></thead><tbody>{recent.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); return <tr key={submission.id}><td><strong>{itemStudent?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span><small className="cell-subtitle">Gabarito {hasCustomAnswerKey(itemAssessment, itemStudent?.classId) ? 'específico' : 'padrão'}</small></td><td>{itemAssessment?.title}</td><td><strong>{submission.correct} / {itemAssessment?.questionCount}</strong><small className="cell-subtitle">{submission.score}% de acertos</small></td><td><Badge tone={submission.status === 'Revisar' ? 'ochre' : 'green'}>{submission.status}</Badge></td><td><button className="icon-button"><MoreHorizontal size={18} /></button></td></tr> })}</tbody></table></div> : <EmptyState icon={ScanLine} title="Nenhuma folha corrigida" description="As leituras aparecerão aqui." />}</section>
@@ -813,38 +891,38 @@ export function CorrectionPage({ data, setData, notify }) {
 
       {batch && <section className="batch-review page-stack">
         <header className="scan-result-header">
-          <div><button className="back-link" onClick={() => { setBatch(null); setBatchPreviewIndex(null); setFileName('') }}><X size={16} /> Descartar lote</button><h2>Revisão do PDF</h2><p>{batch.fileName} · {batch.totalPages} página(s) analisada(s)</p></div>
+          <div><button className="back-link" onClick={() => { setBatch(null); setBatchPreviewIndex(null); setFileName('') }}><X size={16} /> Descartar lote</button><h2>Revisão do lote</h2><p>{batch.fileName} · {batch.totalPages} {batch.sourceType === 'images' ? 'imagem(ns)' : 'página(s)'} analisada(s)</p></div>
           <div className="scan-header-actions"><Button variant="secondary" icon={RotateCcw} onClick={() => { setBatch(null); setBatchPreviewIndex(null) }}>Escolher outro arquivo</Button><Button icon={Save} disabled={!batchSaveable.length} onClick={saveBatchCorrections}>Salvar {batchSaveable.length} correção(ões)</Button></div>
         </header>
 
         <div className="batch-summary-grid">
-          <div><span className="batch-summary-icon blue"><FileText size={20} /></span><p><small>PÁGINAS</small><strong>{batch.totalPages}</strong></p></div>
+          <div><span className="batch-summary-icon blue"><FileText size={20} /></span><p><small>{batch.sourceType === 'images' ? 'IMAGENS' : 'PÁGINAS'}</small><strong>{batch.totalPages}</strong></p></div>
           <div><span className="batch-summary-icon green"><CheckCircle2 size={20} /></span><p><small>PRONTAS PARA SALVAR</small><strong>{batchSaveable.length}</strong></p></div>
           <div><span className="batch-summary-icon ochre"><AlertTriangle size={20} /></span><p><small>IRÃO PARA REVISÃO</small><strong>{batchNeedsReview}</strong></p></div>
           <div><span className="batch-summary-icon red"><QrCode size={20} /></span><p><small>PENDÊNCIAS</small><strong>{batchUnresolved}</strong></p></div>
         </div>
 
-        {batchUnresolved > 0 && <div className="batch-alert"><AlertTriangle size={18} /><p><strong>Existem páginas que não serão salvas ainda.</strong>Selecione manualmente o aluno quando o QR não for reconhecido. Páginas inválidas ou duplicadas serão ignoradas.</p></div>}
+        {batchUnresolved > 0 && <div className="batch-alert"><AlertTriangle size={18} /><p><strong>Existem folhas que não serão salvas ainda.</strong>Selecione manualmente o aluno quando o QR não for reconhecido. Folhas inválidas ou duplicadas serão ignoradas.</p></div>}
         {batchReplacements > 0 && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>{batchReplacements} correção(ões) já existente(s).</strong> Esses resultados serão atualizados quando o lote for salvo; as demais correções permanecerão intactas.</p></div>}
 
         <section className="panel batch-performance-panel">
-          <header className="panel-header"><div><h3>Resultado consolidado do lote</h3><p>Contagem de respostas das páginas prontas para salvar</p></div><Badge tone={batchTotals.multiple + batchTotals.uncertain ? 'ochre' : 'green'}>{batchTotals.total} respostas analisadas</Badge></header>
+          <header className="panel-header"><div><h3>Resultado consolidado do lote</h3><p>Contagem de respostas das folhas prontas para salvar</p></div><Badge tone={batchTotals.multiple + batchTotals.uncertain ? 'ochre' : 'green'}>{batchTotals.total} respostas analisadas</Badge></header>
           <ResultBreakdown result={batchTotals} />
         </section>
 
         <section className="panel batch-results-panel">
-          <header className="panel-header"><div><h3>Folhas encontradas</h3><p>Confira a identificação e o resultado de cada página antes de salvar.</p></div><Badge tone={batchUnresolved ? 'ochre' : 'green'}>{batchSaveable.length} de {batch.totalPages} prontas</Badge></header>
-          <div className="table-wrap"><table className="batch-results-table"><thead><tr><th>PÁGINA</th><th>ALUNO</th><th>TURMA</th><th>SIMULADO</th><th>RESULTADO</th><th>LEITURA</th><th /></tr></thead><tbody>
+          <header className="panel-header"><div><h3>Folhas encontradas</h3><p>Confira a identificação e o resultado de cada folha antes de salvar.</p></div><Badge tone={batchUnresolved ? 'ochre' : 'green'}>{batchSaveable.length} de {batch.totalPages} prontas</Badge></header>
+          <div className="table-wrap"><table className="batch-results-table"><thead><tr><th>{batch.sourceType === 'images' ? 'ARQUIVO' : 'PÁGINA'}</th><th>ALUNO</th><th>TURMA</th><th>SIMULADO</th><th>RESULTADO</th><th>LEITURA</th><th /></tr></thead><tbody>
             {batchRows.map((row) => {
               const availableStudents = data.students.filter((student) => row.assessment?.classIds.includes(student.classId) && student.status === 'Ativo')
               return <tr key={row.item.pageNumber} className={row.issue ? 'batch-row-issue' : ''}>
-                <td><span className="batch-page-number">{row.item.pageNumber}</span></td>
-                <td>{row.item.error ? <span className="batch-error-text">Página não processada</span> : <div className="batch-student-control"><select className="batch-student-select" value={row.student?.id || ''} onChange={(event) => assignBatchStudent(row.index, event.target.value)}><option value="">Identificar aluno...</option>{availableStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select>{!row.student && <button type="button" onClick={() => openNewStudent({ source: 'batch', index: row.index, assessmentId: row.assessment?.id, suggestedClassId: row.item.classId })}><UserPlus size={12} /> Cadastrar</button>}</div>}</td>
+                <td><span className="batch-page-number">{row.item.pageNumber}</span>{batch.sourceType === 'images' && <small className="batch-image-filename" title={row.item.pageFilename}>{row.item.pageFilename}</small>}</td>
+                <td>{row.item.error ? <span className="batch-error-text">Folha não processada</span> : <div className="batch-student-control"><select className="batch-student-select" value={row.student?.id || ''} onChange={(event) => assignBatchStudent(row.index, event.target.value)}><option value="">Identificar aluno...</option>{availableStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select>{!row.student && <button type="button" onClick={() => openNewStudent({ source: 'batch', index: row.index, assessmentId: row.assessment?.id, suggestedClassId: row.item.classId })}><UserPlus size={12} /> Cadastrar</button>}</div>}</td>
                 <td>{row.classroom ? <span className="class-tag" style={{ '--class-color': row.classroom.color }}>{row.classroom.name}</span> : '—'}</td>
                 <td><strong>{row.assessment?.code || '—'}</strong><small className="cell-subtitle">{row.assessment?.title || ''}</small></td>
                 <td>{row.valid ? <div className="batch-result-cell"><strong>{row.item.score}%</strong><span><b className="is-correct">{row.item.correct} A</b><b className="is-wrong">{row.item.wrong} E</b><b>{row.item.blank} B</b><b className="is-review">{row.item.multiple + row.item.uncertain} R</b></span></div> : '—'}</td>
                 <td>{row.issue ? <Badge tone={row.issue.includes('duplicada') || row.item.error ? 'red' : 'ochre'}>{row.issue}</Badge> : row.needsReview ? <Badge tone="ochre">Revisar marcações</Badge> : row.existingSubmission ? <Badge tone="blue">Atualizará existente</Badge> : <Badge tone="green">Pronta</Badge>}</td>
-                <td><button className="icon-button" disabled={!row.item.previewUrl} onClick={() => openBatchPreview(row.index)} aria-label={`Visualizar página ${row.item.pageNumber}`} title="Ver identificação e respostas"><Eye size={17} /></button></td>
+                <td><button className="icon-button" disabled={!row.item.previewUrl} onClick={() => openBatchPreview(row.index)} aria-label={`Visualizar folha ${row.item.pageNumber}`} title="Ver identificação e respostas"><Eye size={17} /></button></td>
               </tr>
             })}
           </tbody></table></div>
@@ -899,7 +977,7 @@ export function CorrectionPage({ data, setData, notify }) {
         </div>
       </section>}
 
-      <Modal open={Boolean(batchPreview)} onClose={() => setBatchPreviewIndex(null)} title={`Conferência da página ${batchPreview?.item.pageNumber || ''}`} subtitle="Confira a identificação, o resultado e as respostas antes de salvar o lote." size="xl" footer={<Button onClick={() => setBatchPreviewIndex(null)}>Concluir conferência</Button>}>
+      <Modal open={Boolean(batchPreview)} onClose={() => setBatchPreviewIndex(null)} title={`Conferência da ${batch?.sourceType === 'images' ? 'imagem' : 'página'} ${batchPreview?.item.pageNumber || ''}`} subtitle={batch?.sourceType === 'images' ? batchPreview?.item.pageFilename : 'Confira a identificação, o resultado e as respostas antes de salvar o lote.'} size="xl" footer={<Button onClick={() => setBatchPreviewIndex(null)}>Concluir conferência</Button>}>
         {batchPreview?.item.previewUrl && <div className="batch-page-detail">
           <div className="batch-preview-identification">
             <article><small>ALUNO</small><strong>{batchPreview.student?.name || 'Não identificado'}</strong><p>{batchPreview.student ? `Matrícula ${batchPreview.student.registration}` : 'Selecione um aluno ou cadastre-o agora'}</p>{!batchPreview.student && !batchPreview.item.error && <div className="inline-student-identification"><select value="" onChange={(event) => assignBatchStudent(batchPreview.index, event.target.value)}><option value="">Selecionar aluno...</option>{batchPreviewEligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select><button type="button" onClick={() => openNewStudent({ source: 'batch', index: batchPreview.index, assessmentId: batchPreview.assessment?.id, suggestedClassId: batchPreview.item.classId })}><UserPlus size={12} /> Cadastrar aluno</button></div>}</article>
@@ -908,16 +986,16 @@ export function CorrectionPage({ data, setData, notify }) {
             <article><small>QUALIDADE</small><strong>{batchPreview.item.confidence}% de confiança</strong><p>QR {batchPreview.item.qrFound ? 'lido' : 'não lido'} · {batchPreview.item.markersFound}/4 marcadores</p></article>
           </div>
 
-          {batchPreview.issue && <div className="scan-notice is-error"><AlertTriangle size={17} /><p><strong>Pendência nesta página.</strong> {batchPreview.issue}. Ela não será salva enquanto a pendência existir.</p></div>}
-          {!batchPreview.issue && batchPreview.needsReview && <div className="scan-notice is-warning"><AlertTriangle size={17} /><p><strong>Esta página requer revisão.</strong> Confira as marcações múltiplas, incertas ou o enquadramento antes de salvar.</p></div>}
+          {batchPreview.issue && <div className="scan-notice is-error"><AlertTriangle size={17} /><p><strong>Pendência nesta folha.</strong> {batchPreview.issue}. Ela não será salva enquanto a pendência existir.</p></div>}
+          {!batchPreview.issue && batchPreview.needsReview && <div className="scan-notice is-warning"><AlertTriangle size={17} /><p><strong>Esta folha requer revisão.</strong> Confira as marcações múltiplas, incertas ou o enquadramento antes de salvar.</p></div>}
           {!batchPreview.issue && batchPreview.existingSubmission && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>Já existe uma correção deste aluno.</strong> O resultado anterior será substituído ao salvar o lote.</p></div>}
 
           {batchPreview.item.answers && <ResultBreakdown result={batchPreview.item} />}
 
           <div className="batch-page-review-grid">
-            <div className="batch-preview-image"><img src={batchPreview.item.previewUrl} alt={`Página ${batchPreview.item.pageNumber} do PDF`} /></div>
+            <div className="batch-preview-image"><img src={batchPreview.item.previewUrl} alt={batch?.sourceType === 'images' ? batchPreview.item.pageFilename : `Página ${batchPreview.item.pageNumber} do PDF`} /></div>
             {batchPreview.item.answers && batchPreview.assessment && <div className="answer-review-panel panel">
-              <header className="answer-review-heading"><div><h3>Respostas da página</h3><p>Você pode ajustar a alternativa antes de fechar.</p></div><Badge tone={batchPreview.needsReview ? 'ochre' : 'green'}>{batchPreview.item.answers.length} questões</Badge></header>
+              <header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>Você pode ajustar a alternativa antes de fechar.</p></div><Badge tone={batchPreview.needsReview ? 'ochre' : 'green'}>{batchPreview.item.answers.length} questões</Badge></header>
               <div className="answer-filters"><button className={batchFilter === 'all' ? 'active' : ''} onClick={() => setBatchFilter('all')}>Todas <span>{batchPreview.item.answers.length}</span></button><button className={batchFilter === 'correct' ? 'active' : ''} onClick={() => setBatchFilter('correct')}>Acertos <span>{batchPreview.item.correct}</span></button><button className={batchFilter === 'wrong' ? 'active' : ''} onClick={() => setBatchFilter('wrong')}>Erros <span>{batchPreview.item.wrong}</span></button><button className={batchFilter === 'blank' ? 'active' : ''} onClick={() => setBatchFilter('blank')}>Brancos <span>{batchPreview.item.blank}</span></button><button className={batchFilter === 'multiple' ? 'active' : ''} onClick={() => setBatchFilter('multiple')}>Múltiplas <span>{batchPreview.item.multiple}</span></button><button className={batchFilter === 'uncertain' ? 'active' : ''} onClick={() => setBatchFilter('uncertain')}>Incertas <span>{batchPreview.item.uncertain}</span></button></div>
               <DetailedAnswerList answers={visibleBatchAnswers} assessment={batchPreview.assessment} questionAreas={batchPreviewAreas} onChange={(questionIndex, letter) => changeBatchAnswer(batchPreview.index, questionIndex, letter)} />
             </div>}

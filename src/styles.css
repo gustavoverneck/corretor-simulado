@@ -422,6 +422,7 @@ td > strong { color: #27362f; font-weight: 650; }
 .batch-result-cell b.is-correct { color: #40745e; background: #e4f0e9; }
 .batch-result-cell b.is-wrong { color: #a5534d; background: #f6e7e5; }
 .batch-result-cell b.is-review { color: #986a3f; background: #f8ecdd; }
+.batch-image-filename { width: 118px; margin-top: 4px; overflow: hidden; display: block; color: #7f8b86; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 
 .batch-page-detail { display: flex; flex-direction: column; gap: 14px; }
 .batch-preview-identification { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
