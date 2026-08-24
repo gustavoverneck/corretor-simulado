@@ -1,12 +1,29 @@
 import jsQR from 'jsqr'
+import { CANCELLED_ANSWER } from './assessment.js'
 import { parseQrPayload } from './utils.js'
 
 export const SHEET = { width: 794, height: 1123 }
-export const MARKERS = {
+export const LEGACY_MARKERS = {
   topLeft: { x: 43, y: 43 },
   topRight: { x: 751, y: 43 },
   bottomLeft: { x: 43, y: 1080 },
   bottomRight: { x: 751, y: 1080 },
+}
+export const ANSWER_GRID_MARKERS = {
+  topLeft: { x: 50, y: 363 },
+  topRight: { x: 744, y: 363 },
+  bottomLeft: { x: 50, y: 1013 },
+  bottomRight: { x: 744, y: 1013 },
+}
+export const CURRENT_MARKER_LAYOUT = 'answer-grid-v2'
+export const MARKER_LAYOUTS = {
+  'page-v1': LEGACY_MARKERS,
+  [CURRENT_MARKER_LAYOUT]: ANSWER_GRID_MARKERS,
+}
+export const MARKERS = ANSWER_GRID_MARKERS
+
+export function getMarkerLayout(layoutId = CURRENT_MARKER_LAYOUT) {
+  return MARKER_LAYOUTS[layoutId] || MARKERS
 }
 
 export function getAnswerSheetLayout(questionCount) {
@@ -117,7 +134,7 @@ function orderMarkerSet(points) {
   return { topLeft: top[0], topRight: top[1], bottomLeft: bottom[0], bottomRight: bottom[1] }
 }
 
-function markerGeometryScore(corners, imageData) {
+function markerGeometryScore(corners, imageData, templateMarkers) {
   const topWidth = distance(corners.topLeft, corners.topRight)
   const bottomWidth = distance(corners.bottomLeft, corners.bottomRight)
   const leftHeight = distance(corners.topLeft, corners.bottomLeft)
@@ -126,8 +143,8 @@ function markerGeometryScore(corners, imageData) {
   const averageHeight = (leftHeight + rightHeight) / 2
   if (averageWidth < imageData.width * 0.28 || averageHeight < imageData.height * 0.26) return Number.NEGATIVE_INFINITY
   const ratio = averageHeight / averageWidth
-  if (ratio < 0.9 || ratio > 2.2) return Number.NEGATIVE_INFINITY
-  const expectedRatio = (MARKERS.bottomLeft.y - MARKERS.topLeft.y) / (MARKERS.topRight.x - MARKERS.topLeft.x)
+  if (ratio < 0.68 || ratio > 2.2) return Number.NEGATIVE_INFINITY
+  const expectedRatio = (templateMarkers.bottomLeft.y - templateMarkers.topLeft.y) / (templateMarkers.topRight.x - templateMarkers.topLeft.x)
   const ratioPenalty = Math.abs(Math.log(ratio / expectedRatio))
   const widthPenalty = Math.abs(topWidth - bottomWidth) / averageWidth
   const heightPenalty = Math.abs(leftHeight - rightHeight) / averageHeight
@@ -177,8 +194,10 @@ export function detectSheetMarkers(imageData) {
       for (let third = second + 1; third < distinct.length - 1; third += 1) {
         for (let fourth = third + 1; fourth < distinct.length; fourth += 1) {
           const corners = orderMarkerSet([distinct[first], distinct[second], distinct[third], distinct[fourth]])
-          const score = markerGeometryScore(corners, imageData)
-          if (Number.isFinite(score) && (!best || score > best.score)) best = { corners, score }
+          Object.entries(MARKER_LAYOUTS).forEach(([markerLayout, templateMarkers]) => {
+            const score = markerGeometryScore(corners, imageData, templateMarkers)
+            if (Number.isFinite(score) && (!best || score > best.score)) best = { corners, score, markerLayout, templateMarkers }
+          })
         }
       }
     }
@@ -186,25 +205,25 @@ export function detectSheetMarkers(imageData) {
   return best
 }
 
-function findCornerMarker(imageData, corner) {
+function findCornerMarker(imageData, corner, templateMarkers) {
   const { width, height, data } = imageData
-  const regionWidth = Math.floor(width * 0.18)
-  const regionHeight = Math.floor(height * 0.14)
-  const startX = corner.includes('Right') ? width - regionWidth : 0
-  const startY = corner.includes('bottom') || corner.includes('Bottom') ? height - regionHeight : 0
+  const expectedX = width * (templateMarkers[corner].x / SHEET.width)
+  const expectedY = height * (templateMarkers[corner].y / SHEET.height)
+  const radius = Math.min(width, height) * 0.05
+  const startX = Math.max(0, Math.floor(expectedX - radius))
+  const endX = Math.min(width, Math.ceil(expectedX + radius))
+  const startY = Math.max(0, Math.floor(expectedY - radius))
+  const endY = Math.min(height, Math.ceil(expectedY + radius))
   const step = Math.max(2, Math.floor(Math.min(width, height) / 500))
   const points = []
-  for (let y = startY; y < startY + regionHeight; y += step) {
-    for (let x = startX; x < startX + regionWidth; x += step) {
+  for (let y = startY; y < endY; y += step) {
+    for (let x = startX; x < endX; x += step) {
       const offset = (y * width + x) * 4
       if (luminance(data, offset) < 0.14) points.push({ x, y })
     }
   }
   if (points.length < 12) return null
 
-  const expectedX = corner.includes('Right') ? width * 0.945 : width * 0.055
-  const expectedY = corner.toLowerCase().includes('bottom') ? height * 0.962 : height * 0.038
-  const radius = Math.min(width, height) * 0.045
   const nearby = points.filter((point) => Math.hypot(point.x - expectedX, point.y - expectedY) < radius)
   if (nearby.length <= 8) return null
   const source = nearby
@@ -214,9 +233,9 @@ function findCornerMarker(imageData, corner) {
   }
 }
 
-function project(point, corners) {
-  const u = (point.x - MARKERS.topLeft.x) / (MARKERS.topRight.x - MARKERS.topLeft.x)
-  const v = (point.y - MARKERS.topLeft.y) / (MARKERS.bottomLeft.y - MARKERS.topLeft.y)
+function project(point, corners, templateMarkers = MARKERS) {
+  const u = (point.x - templateMarkers.topLeft.x) / (templateMarkers.topRight.x - templateMarkers.topLeft.x)
+  const v = (point.y - templateMarkers.topLeft.y) / (templateMarkers.bottomLeft.y - templateMarkers.topLeft.y)
   const topLeft = corners.topLeft
   const topRight = corners.topRight
   const bottomRight = corners.bottomRight
@@ -301,10 +320,12 @@ function percentile(values, ratio) {
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower)
 }
 
-export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS, settings = {}) {
+export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS, settings = {}, templateMarkers = MARKERS) {
   const layout = getAnswerSheetLayout(assessment.questionCount)
-  const horizontalScale = Math.hypot(corners.topRight.x - corners.topLeft.x, corners.topRight.y - corners.topLeft.y) / 708
-  const verticalScale = Math.hypot(corners.bottomLeft.x - corners.topLeft.x, corners.bottomLeft.y - corners.topLeft.y) / 1037
+  const templateWidth = templateMarkers.topRight.x - templateMarkers.topLeft.x
+  const templateHeight = templateMarkers.bottomLeft.y - templateMarkers.topLeft.y
+  const horizontalScale = Math.hypot(corners.topRight.x - corners.topLeft.x, corners.topRight.y - corners.topLeft.y) / templateWidth
+  const verticalScale = Math.hypot(corners.bottomLeft.x - corners.topLeft.x, corners.bottomLeft.y - corners.topLeft.y) / templateHeight
   const sheetScale = Math.min(horizontalScale, verticalScale)
   // A folha antiga usava sempre bolhas de raio 9. Nos formatos de 3 colunas as
   // bolhas são menores; manter o raio antigo faz a amostra alcançar contornos,
@@ -325,10 +346,11 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   let blank = 0
   let multiple = 0
   let uncertain = 0
+  let cancelled = 0
 
   const measured = Array.from({ length: assessment.questionCount }, (_, question) => (
     Array.from({ length: assessment.optionCount }, (_, option) => {
-      const center = project(bubbleCenter(question, option, assessment.questionCount), corners)
+      const center = project(bubbleCenter(question, option, assessment.questionCount), corners, templateMarkers)
       return {
         option,
         value: sampleDarkness(imageData, center, sampleRadius),
@@ -377,7 +399,17 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
     ))
     let status = 'blank'
     let selected = []
-    if (strong.length > 1) {
+    const annulled = answerKey[question] === null
+    const isCancelled = answerKey[question] === CANCELLED_ANSWER
+    if (isCancelled) {
+      selected = (strong.length ? strong : possible).map((item) => String.fromCharCode(65 + item.option))
+      status = 'cancelled'
+      cancelled += 1
+    } else if (annulled) {
+      selected = (strong.length ? strong : possible).map((item) => String.fromCharCode(65 + item.option))
+      status = 'correct'
+      correct += 1
+    } else if (strong.length > 1) {
       status = 'multiple'
       selected = strong.map((item) => String.fromCharCode(65 + item.option))
       multiple += 1
@@ -397,6 +429,8 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
       question: question + 1,
       selected,
       expected: answerKey[question],
+      annulled,
+      cancelled: isCancelled,
       status,
       scores: scores.map((item) => Number(item.value.toFixed(3))),
       colorScores: scores.map((item) => Number(item.color.toFixed(3))),
@@ -405,19 +439,20 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
     })
   }
 
+  const gradedTotal = Math.max(0, assessment.questionCount - cancelled)
   return {
-    answers, correct, wrong, blank, multiple, uncertain,
-    score: Math.round((correct / assessment.questionCount) * 100),
+    answers, correct, wrong, blank, multiple, uncertain, cancelled, gradedTotal,
+    score: gradedTotal ? Math.round((correct / gradedTotal) * 100) : 0,
     answerSheetFormat: layout.id,
   }
 }
 
-function readQrFromSheet(context, imageData, corners) {
+function readQrFromSheet(context, imageData, corners, templateMarkers) {
   const qrArea = [
-    project({ x: 50, y: 135 }, corners),
-    project({ x: 205, y: 135 }, corners),
-    project({ x: 205, y: 295 }, corners),
-    project({ x: 50, y: 295 }, corners),
+    project({ x: 50, y: 135 }, corners, templateMarkers),
+    project({ x: 205, y: 135 }, corners, templateMarkers),
+    project({ x: 205, y: 295 }, corners, templateMarkers),
+    project({ x: 50, y: 295 }, corners, templateMarkers),
   ]
   const minX = Math.max(0, Math.floor(Math.min(...qrArea.map((point) => point.x)) - 8))
   const minY = Math.max(0, Math.floor(Math.min(...qrArea.map((point) => point.y)) - 8))
@@ -430,24 +465,23 @@ function readQrFromSheet(context, imageData, corners) {
 
 export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}, settings = {}, resolveContext) {
   const { data, canvas, context } = await imageDataFromFile(file)
+  let qr = jsQR(data.data, data.width, data.height, { inversionAttempts: 'attemptBoth' })
+  let qrIdentity = qr ? parseQrPayload(qr.data) : null
   const detectedMarkers = detectSheetMarkers(data)
-  const corners = detectedMarkers?.corners || {
-    topLeft: findCornerMarker(data, 'topLeft'),
-    topRight: findCornerMarker(data, 'topRight'),
-    bottomLeft: findCornerMarker(data, 'bottomLeft'),
-    bottomRight: findCornerMarker(data, 'bottomRight'),
-  }
+  const markerLayout = qrIdentity ? (qrIdentity.version === 1 ? 'page-v1' : CURRENT_MARKER_LAYOUT) : detectedMarkers?.markerLayout || CURRENT_MARKER_LAYOUT
+  const templateMarkers = getMarkerLayout(markerLayout)
+  const corners = detectedMarkers?.corners || Object.fromEntries(Object.keys(templateMarkers).map((corner) => [corner, findCornerMarker(data, corner, templateMarkers)]))
   const markersFound = detectedMarkers ? 4 : Object.values(corners).filter(Boolean).length
   if (markersFound < 4) {
-    corners.topLeft ||= { x: data.width * 0.055, y: data.height * 0.038 }
-    corners.topRight ||= { x: data.width * 0.945, y: data.height * 0.038 }
-    corners.bottomLeft ||= { x: data.width * 0.055, y: data.height * 0.962 }
-    corners.bottomRight ||= { x: data.width * 0.945, y: data.height * 0.962 }
+    Object.entries(templateMarkers).forEach(([corner, marker]) => {
+      corners[corner] ||= { x: data.width * (marker.x / SHEET.width), y: data.height * (marker.y / SHEET.height) }
+    })
   }
 
-  let qr = jsQR(data.data, data.width, data.height, { inversionAttempts: 'attemptBoth' })
-  if (!qr && detectedMarkers) qr = readQrFromSheet(context, data, corners)
-  const qrIdentity = qr ? parseQrPayload(qr.data) : null
+  if (!qr && detectedMarkers) {
+    qr = readQrFromSheet(context, data, corners, templateMarkers)
+    qrIdentity = qr ? parseQrPayload(qr.data) : null
+  }
   const identity = qrIdentity
     ? { ...qrIdentity, studentId: qrIdentity.studentId || fallbackIdentity.studentId || null }
     : fallbackIdentity
@@ -455,7 +489,7 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
   const activeAssessment = resolved.assessment || assessment
   const activeAnswerKey = resolved.answerKey || activeAssessment.answerKey
 
-  const marks = analyzeMarks(data, activeAssessment, activeAnswerKey, corners, settings)
+  const marks = analyzeMarks(data, activeAssessment, activeAnswerKey, corners, settings, templateMarkers)
 
   return {
     identity,
@@ -466,7 +500,8 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
     rawQr: qr?.data || null,
     markersFound,
     markerCorners: detectedMarkers ? Object.fromEntries(Object.entries(corners).map(([key, point]) => [key, { x: Math.round(point.x), y: Math.round(point.y) }])) : null,
-    alignmentMode: detectedMarkers ? 'sheet-markers' : markersFound === 4 ? 'corner-markers' : 'estimated',
+    markerLayout,
+    alignmentMode: detectedMarkers ? (markerLayout === CURRENT_MARKER_LAYOUT ? 'answer-grid-markers' : 'legacy-page-markers') : markersFound === 4 ? 'expected-markers' : 'estimated',
     ...marks,
     previewUrl: canvas.toDataURL('image/jpeg', 0.82),
     confidence: Math.max(48, Math.min(99, Math.round(55 + markersFound * 7 + (qrIdentity ? 15 : 0) - marks.uncertain * 1.5))),

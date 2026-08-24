@@ -1,5 +1,5 @@
-import { analyzeMarks, bubbleCenter, detectSheetMarkers, getAnswerSheetLayout, MARKERS, SHEET } from '../src/lib/omr.js'
-import { createRandomAnswerKey, getAnswerKeyForStudent, getAnswerKeyVersionForStudent } from '../src/lib/assessment.js'
+import { ANSWER_GRID_MARKERS, analyzeMarks, bubbleCenter, CURRENT_MARKER_LAYOUT, detectSheetMarkers, getAnswerSheetLayout, LEGACY_MARKERS, MARKERS, SHEET } from '../src/lib/omr.js'
+import { CANCELLED_ANSWER, createRandomAnswerKey, getAnswerKeyForStudent, getAnswerKeyVersionForStudent } from '../src/lib/assessment.js'
 import { parseQrPayload, qrPayload } from '../src/lib/utils.js'
 
 function makeImage(width, height, background = [255, 255, 255]) {
@@ -41,9 +41,9 @@ function fillBubble(image, question, option, color, questionCount = 3) {
   }
 }
 
-function projectTemplatePoint(point, corners) {
-  const u = (point.x - MARKERS.topLeft.x) / (MARKERS.topRight.x - MARKERS.topLeft.x)
-  const v = (point.y - MARKERS.topLeft.y) / (MARKERS.bottomLeft.y - MARKERS.topLeft.y)
+function projectTemplatePoint(point, corners, templateMarkers = MARKERS) {
+  const u = (point.x - templateMarkers.topLeft.x) / (templateMarkers.topRight.x - templateMarkers.topLeft.x)
+  const v = (point.y - templateMarkers.topLeft.y) / (templateMarkers.bottomLeft.y - templateMarkers.topLeft.y)
   const { topLeft, topRight, bottomLeft, bottomRight } = corners
   const deltaX1 = topRight.x - bottomRight.x
   const deltaX2 = bottomLeft.x - bottomRight.x
@@ -82,7 +82,7 @@ function fillProjectedBubble(image, center, radius, color) {
   }
 }
 
-function validateCompleteLayout(questionCount, optionCount, background) {
+function validateCompleteLayout(questionCount, optionCount, background, templateMarkers = MARKERS) {
   const corners = {
     topLeft: { x: 74, y: 58 },
     topRight: { x: 932, y: 84 },
@@ -91,14 +91,14 @@ function validateCompleteLayout(questionCount, optionCount, background) {
   }
   const image = makeImage(1020, 1360, background)
   const layout = getAnswerSheetLayout(questionCount)
-  const horizontalScale = Math.hypot(corners.topRight.x - corners.topLeft.x, corners.topRight.y - corners.topLeft.y) / 708
-  const verticalScale = Math.hypot(corners.bottomLeft.x - corners.topLeft.x, corners.bottomLeft.y - corners.topLeft.y) / 1037
+  const horizontalScale = Math.hypot(corners.topRight.x - corners.topLeft.x, corners.topRight.y - corners.topLeft.y) / (templateMarkers.topRight.x - templateMarkers.topLeft.x)
+  const verticalScale = Math.hypot(corners.bottomLeft.x - corners.topLeft.x, corners.bottomLeft.y - corners.topLeft.y) / (templateMarkers.bottomLeft.y - templateMarkers.topLeft.y)
   const scale = Math.min(horizontalScale, verticalScale)
   const answerKey = Array.from({ length: questionCount }, (_, index) => String.fromCharCode(65 + ((index * 3 + 1) % optionCount)))
 
   for (let question = 0; question < questionCount; question += 1) {
     for (let option = 0; option < optionCount; option += 1) {
-      const center = projectTemplatePoint(bubbleCenter(question, option, questionCount), corners)
+      const center = projectTemplatePoint(bubbleCenter(question, option, questionCount), corners, templateMarkers)
       drawBubbleOutline(image, center, layout.bubbleRadius * scale)
       if (answerKey[question] === String.fromCharCode(65 + option)) {
         fillProjectedBubble(image, center, layout.bubbleRadius * scale * 0.72, question % 2 ? [25, 25, 25] : [30, 45, 155])
@@ -106,7 +106,7 @@ function validateCompleteLayout(questionCount, optionCount, background) {
     }
   }
 
-  const result = analyzeMarks(image, { questionCount, optionCount }, answerKey, corners)
+  const result = analyzeMarks(image, { questionCount, optionCount }, answerKey, corners, {}, templateMarkers)
   if (result.answerSheetFormat !== layout.id || result.correct !== questionCount || result.wrong || result.blank || result.multiple || result.uncertain) {
     throw new Error(`Leitura completa falhou no formato ${layout.id} com ${questionCount} questões: ${JSON.stringify(result)}`)
   }
@@ -124,9 +124,29 @@ drawMarker(photographedSheet, 155, 205, 0.6) // Padrão semelhante dentro do QR 
 
 const detected = detectSheetMarkers(photographedSheet)
 if (!detected) throw new Error('Os quatro marcadores não foram encontrados.')
+if (detected.markerLayout !== 'page-v1') throw new Error(`A folha antiga foi confundida com ${detected.markerLayout}.`)
 Object.entries(expectedCorners).forEach(([key, [x, y]]) => {
   if (Math.hypot(detected.corners[key].x - x, detected.corners[key].y - y) > 12) {
     throw new Error(`Marcador ${key} encontrado fora da posição esperada.`)
+  }
+})
+
+const photographedAnswerGrid = makeImage(1020, 1360)
+const expectedGridCorners = {
+  topLeft: [92, 365],
+  topRight: [926, 382],
+  bottomLeft: [75, 1142],
+  bottomRight: [944, 1161],
+}
+Object.values(expectedGridCorners).forEach(([x, y]) => drawMarker(photographedAnswerGrid, x, y, 0.72))
+;[[130, 190], [230, 190], [130, 290]].forEach(([x, y]) => drawMarker(photographedAnswerGrid, x, y, 0.72)) // Os três finders do QR não podem substituir os marcadores OMR.
+const detectedGrid = detectSheetMarkers(photographedAnswerGrid)
+if (!detectedGrid || detectedGrid.markerLayout !== CURRENT_MARKER_LAYOUT) {
+  throw new Error(`Os marcadores ao redor das respostas não foram reconhecidos: ${JSON.stringify(detectedGrid)}`)
+}
+Object.entries(expectedGridCorners).forEach(([key, [x, y]]) => {
+  if (Math.hypot(detectedGrid.corners[key].x - x, detectedGrid.corners[key].y - y) > 14) {
+    throw new Error(`Marcador interno ${key} encontrado fora da posição esperada.`)
   }
 })
 
@@ -138,6 +158,12 @@ const result = analyzeMarks(answerSheet, { questionCount: 3, optionCount: 4 }, [
 
 if (result.correct !== 1 || result.multiple !== 1 || result.blank !== 1) {
   throw new Error(`Classificação inesperada: ${JSON.stringify(result)}`)
+}
+
+const exceptionalKeyResult = analyzeMarks(answerSheet, { questionCount: 3, optionCount: 4 }, [null, CANCELLED_ANSWER, 'C'], MARKERS)
+if (exceptionalKeyResult.correct !== 1 || exceptionalKeyResult.cancelled !== 1 || exceptionalKeyResult.gradedTotal !== 2
+  || exceptionalKeyResult.multiple !== 0 || exceptionalKeyResult.blank !== 1 || exceptionalKeyResult.score !== 50) {
+  throw new Error(`Anulação ou cancelamento calculado incorretamente: ${JSON.stringify(exceptionalKeyResult)}`)
 }
 
 const expectedLayouts = [[10, 1, 20], [20, 1, 20], [21, 2, 20], [40, 2, 20], [41, 3, 20], [60, 3, 20], [61, 3, 30], [90, 3, 30]]
@@ -152,9 +178,15 @@ expectedLayouts.forEach(([questionCount, columns, rowsPerColumn]) => {
   }
 })
 
+if (ANSWER_GRID_MARKERS.topLeft.y < 300 || ANSWER_GRID_MARKERS.bottomLeft.y > 1040
+  || ANSWER_GRID_MARKERS.topLeft.x < 30 || ANSWER_GRID_MARKERS.topRight.x > SHEET.width - 30) {
+  throw new Error('Os novos marcadores não ficaram protegidos ao redor do quadro de respostas.')
+}
+
 ;[[10, 4], [20, 5], [21, 4], [40, 5], [41, 4], [60, 5], [61, 4], [90, 5]].forEach(([questionCount, optionCount]) => {
   validateCompleteLayout(questionCount, optionCount)
 })
+validateCompleteLayout(40, 5, undefined, LEGACY_MARKERS)
 
 // Uma foto com balanço de branco azulado não pode transformar todas as
 // alternativas em marcações, como ocorria com folhas reais de 10 questões.
@@ -198,9 +230,11 @@ if (randomKey.length !== 10 || randomKey.some((answer) => !['A', 'B', 'C', 'D'].
 
 const identifiedQr = parseQrPayload(qrPayload('student-1', 'assessment-1'))
 const blankQr = parseQrPayload(qrPayload(null, 'assessment-1'))
+const legacyQr = parseQrPayload(qrPayload('student-old', 'assessment-old', 1))
 if (identifiedQr?.studentId !== 'student-1' || identifiedQr.assessmentId !== 'assessment-1'
-  || blankQr?.studentId !== null || blankQr.assessmentId !== 'assessment-1') {
+  || identifiedQr.version !== 2 || blankQr?.studentId !== null || blankQr.assessmentId !== 'assessment-1'
+  || legacyQr?.studentId !== 'student-old' || legacyQr.assessmentId !== 'assessment-old' || legacyQr.version !== 1) {
   throw new Error('Os QR Codes de folhas identificadas e avulsas não foram interpretados corretamente.')
 }
 
-console.log('OMR validado: folhas completas nos 4 formatos, perspectiva, QR avulso, múltiplas versões e aleatorização balanceada.')
+console.log('OMR validado: marcadores, formatos, perspectiva, QR, múltiplos gabaritos, anulações e cancelamentos.')

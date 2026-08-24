@@ -31,20 +31,26 @@ function calculateSubmissionMetrics(submission, assessment, area = 'all') {
   if (!Array.isArray(submission.answers)) {
     if (area !== 'all') return null
     return {
-      total: assessment.questionCount,
+      total: Number(submission.gradedTotal ?? Math.max(0, assessment.questionCount - Number(submission.cancelled || 0))),
       correct: Number(submission.correct || 0),
       wrong: Number(submission.wrong || 0),
       blank: Number(submission.blank || 0),
       multiple: Number(submission.multiple || 0),
       uncertain: Number(submission.uncertain || 0),
+      cancelled: Number(submission.cancelled || 0),
       review: Number(submission.multiple || 0) + Number(submission.uncertain || 0),
       score: Number(submission.score || 0),
     }
   }
 
-  const metrics = { total: questionIndexes.length, correct: 0, wrong: 0, blank: 0, multiple: 0, uncertain: 0, review: 0, score: 0 }
+  const metrics = { total: 0, correct: 0, wrong: 0, blank: 0, multiple: 0, uncertain: 0, cancelled: 0, review: 0, score: 0 }
   questionIndexes.forEach((index) => {
     const status = submission.answers[index]?.status || 'blank'
+    if (status === 'cancelled') {
+      metrics.cancelled += 1
+      return
+    }
+    metrics.total += 1
     if (status === 'correct') metrics.correct += 1
     else if (status === 'wrong') metrics.wrong += 1
     else if (status === 'blank') metrics.blank += 1
@@ -62,7 +68,7 @@ function calculateAreaResults(assessment, submissions) {
   const questionAreas = getQuestionAreas(assessment)
   const summary = new Map()
   questionAreas.forEach((area) => {
-    if (!summary.has(area)) summary.set(area, { area, questions: 0, attempts: 0, correct: 0, wrong: 0, blank: 0, review: 0 })
+    if (!summary.has(area)) summary.set(area, { area, questions: 0, attempts: 0, correct: 0, wrong: 0, blank: 0, cancelled: 0, review: 0 })
     summary.get(area).questions += 1
   })
   submissions.forEach((submission) => {
@@ -70,6 +76,10 @@ function calculateAreaResults(assessment, submissions) {
     submission.answers.forEach((answer, index) => {
       const item = summary.get(questionAreas[index])
       if (!item) return
+      if (answer.status === 'cancelled') {
+        item.cancelled += 1
+        return
+      }
       item.attempts += 1
       if (answer.status === 'correct') item.correct += 1
       else if (answer.status === 'wrong') item.wrong += 1
@@ -89,10 +99,14 @@ function calculateQuestionResults(assessment, submissions, area) {
   const questionAreas = getQuestionAreas(assessment)
   return questionAreas.map((questionArea, index) => {
     if (area !== 'all' && questionArea !== area) return null
-    const result = { index, number: index + 1, area: questionArea, attempts: 0, correct: 0, wrong: 0, blank: 0, review: 0, score: 0 }
+    const result = { index, number: index + 1, area: questionArea, attempts: 0, correct: 0, wrong: 0, blank: 0, cancelled: 0, review: 0, score: 0 }
     submissions.forEach((submission) => {
       const answer = submission.answers?.[index]
       if (!answer) return
+      if (answer.status === 'cancelled') {
+        result.cancelled += 1
+        return
+      }
       result.attempts += 1
       if (answer.status === 'correct') result.correct += 1
       else if (answer.status === 'wrong') result.wrong += 1
@@ -179,12 +193,12 @@ export function ResultsPage({ data, notify }) {
       ['Área / componente', area === 'all' ? 'Todas' : area],
       ['Faixa de desempenho', activeBand?.label || 'Todas'],
     ]
-    const header = ['Matrícula', 'Aluno', 'Turma', 'Acertos', 'Erros', 'Brancos', 'Revisões', 'Aproveitamento (%)']
-    const rows = studentRows.map((item) => [item.student?.registration, item.student?.name, item.classroom?.name, item.correct, item.wrong, item.blank, item.review, item.score])
-    const areaHeader = ['Área / componente', 'Questões', 'Respostas analisadas', 'Acertos', 'Erros', 'Em branco', 'Para revisão', 'Aproveitamento (%)']
-    const areaRows = areaResults.map((item) => [item.area, item.questions, item.attempts, item.correct, item.wrong, item.blank, item.review, item.score])
-    const questionHeader = ['Questão', 'Área / componente', 'Respostas analisadas', 'Acertos', 'Erros', 'Em branco', 'Para revisão', 'Aproveitamento (%)']
-    const questionRows = questionResults.map((item) => [item.number, item.area, item.attempts, item.correct, item.wrong, item.blank, item.review, item.score])
+    const header = ['Matrícula', 'Aluno', 'Turma', 'Questões válidas', 'Acertos', 'Erros', 'Brancos', 'Canceladas', 'Revisões', 'Aproveitamento (%)']
+    const rows = studentRows.map((item) => [item.student?.registration, item.student?.name, item.classroom?.name, item.total, item.correct, item.wrong, item.blank, item.cancelled, item.review, item.score])
+    const areaHeader = ['Área / componente', 'Questões', 'Respostas válidas', 'Acertos', 'Erros', 'Em branco', 'Canceladas', 'Para revisão', 'Aproveitamento (%)']
+    const areaRows = areaResults.map((item) => [item.area, item.questions, item.attempts, item.correct, item.wrong, item.blank, item.cancelled, item.review, item.score])
+    const questionHeader = ['Questão', 'Área / componente', 'Respostas válidas', 'Acertos', 'Erros', 'Em branco', 'Canceladas', 'Para revisão', 'Aproveitamento (%)']
+    const questionRows = questionResults.map((item) => [item.number, item.area, item.attempts, item.correct, item.wrong, item.blank, item.cancelled, item.review, item.score])
     const csv = [
       ['FILTROS APLICADOS'], ...filterRows, [], header, ...rows,
       [], ['ANÁLISE POR ÁREA'], areaHeader, ...areaRows,
@@ -221,7 +235,7 @@ export function ResultsPage({ data, notify }) {
         <header className="panel-header"><div><h3>Desempenho por área de conhecimento</h3><p>Clique em uma área para analisar somente as questões daquele componente</p></div><div className="interactive-chart-hint"><MousePointerClick size={14} /><span>Gráfico interativo</span><Badge tone={detailedSubmissions.length === filteredRows.length ? 'green' : 'ochre'}>{detailedSubmissions.length} detalhadas</Badge></div></header>
         {detailedSubmissions.length ? <div className="area-performance-list">{areaResults.map((item) => <button type="button" className={cn('area-performance-row', area === item.area && 'selected')} key={item.area} onClick={() => changeArea(area === item.area ? 'all' : item.area)}>
           <span className="area-performance-icon" style={{ '--area-color': item.color }}><BookOpenCheck size={18} /></span>
-          <span className="area-performance-copy"><strong>{item.area}</strong><small>{item.questions} {item.questions === 1 ? 'questão' : 'questões'} · {item.attempts} respostas analisadas</small></span>
+          <span className="area-performance-copy"><strong>{item.area}</strong><small>{item.questions} {item.questions === 1 ? 'questão' : 'questões'} · {item.attempts} respostas válidas{item.cancelled ? ` · ${item.cancelled} canceladas` : ''}</small></span>
           <span className="area-performance-bar"><span><i style={{ width: `${item.score}%`, background: item.color }} /></span><strong>{item.score}%</strong></span>
           <span className="area-performance-counts"><span><b>{item.correct}</b> acertos</span><span><b>{item.blank}</b> brancos</span><span><b>{item.review}</b> revisar</span></span>
         </button>)}</div> : <div className="area-analysis-empty"><BookOpenCheck size={24} /><div><strong>Análise indisponível para este recorte</strong><p>As correções antigas possuem apenas o total de acertos. Selecione outro recorte ou faça novas leituras detalhadas.</p></div></div>}
@@ -234,7 +248,7 @@ export function ResultsPage({ data, notify }) {
 
       <section className="panel question-performance-panel">
         <header className="panel-header"><div><h3>Desempenho por questão</h3><p>{area === 'all' ? 'Todas as questões do simulado' : `Questões classificadas em ${area}`} · clique em uma barra para ver os detalhes</p></div><Badge tone="neutral">{questionResults.length} questões</Badge></header>
-        {detailedSubmissions.length ? <><div className="question-chart-scroll"><div className="question-chart" style={{ minWidth: `${Math.max(520, questionResults.length * 36)}px` }}>{questionResults.map((item) => <button type="button" className={cn(selectedQuestion === item.index && 'selected')} key={item.index} title={`Questão ${item.number}: ${item.score}% de acertos`} onClick={() => setSelectedQuestion(selectedQuestion === item.index ? null : item.index)}><span><i style={{ height: `${item.score}%`, background: item.score < 40 ? '#b9675f' : item.score < 60 ? '#c69558' : item.score < 80 ? '#7b9b72' : '#3f7968' }} /><em>{item.score}%</em></span><small>Q{item.number}</small></button>)}</div></div>{selectedQuestionResult && <div className="question-selection-detail"><span><strong>Questão {selectedQuestionResult.number}</strong><small>{selectedQuestionResult.area}</small></span><div><b>{selectedQuestionResult.score}%</b><small>aproveitamento</small></div><div><b>{selectedQuestionResult.correct}</b><small>acertos</small></div><div><b>{selectedQuestionResult.wrong}</b><small>erros</small></div><div><b>{selectedQuestionResult.blank}</b><small>brancos</small></div><div><b>{selectedQuestionResult.review}</b><small>revisar</small></div></div>}</> : <div className="area-analysis-empty"><BarChart3 size={24} /><div><strong>Sem respostas detalhadas</strong><p>Não há dados por questão disponíveis para o recorte selecionado.</p></div></div>}
+        {detailedSubmissions.length ? <><div className="question-chart-scroll"><div className="question-chart" style={{ minWidth: `${Math.max(520, questionResults.length * 36)}px` }}>{questionResults.map((item) => <button type="button" className={cn(selectedQuestion === item.index && 'selected')} key={item.index} title={`Questão ${item.number}: ${item.score}% de acertos${item.cancelled ? ` · ${item.cancelled} cancelada(s)` : ''}`} onClick={() => setSelectedQuestion(selectedQuestion === item.index ? null : item.index)}><span><i style={{ height: `${item.score}%`, background: item.score < 40 ? '#b9675f' : item.score < 60 ? '#c69558' : item.score < 80 ? '#7b9b72' : '#3f7968' }} /><em>{item.score}%</em></span><small>Q{item.number}</small></button>)}</div></div>{selectedQuestionResult && <div className="question-selection-detail"><span><strong>Questão {selectedQuestionResult.number}</strong><small>{selectedQuestionResult.area}</small></span><div><b>{selectedQuestionResult.score}%</b><small>aproveitamento</small></div><div><b>{selectedQuestionResult.correct}</b><small>acertos</small></div><div><b>{selectedQuestionResult.wrong}</b><small>erros</small></div><div><b>{selectedQuestionResult.blank}</b><small>brancos</small></div><div><b>{selectedQuestionResult.cancelled}</b><small>canceladas</small></div><div><b>{selectedQuestionResult.review}</b><small>revisar</small></div></div>}</> : <div className="area-analysis-empty"><BarChart3 size={24} /><div><strong>Sem respostas detalhadas</strong><p>Não há dados por questão disponíveis para o recorte selecionado.</p></div></div>}
       </section>
 
       <section className="pedagogical-insight">

@@ -64,17 +64,18 @@ export function crc32(text) {
   return ((crc ^ -1) >>> 0).toString(36).toUpperCase()
 }
 
-export function qrPayload(studentId, assessmentId) {
-  const body = `LUMA|1|${studentId ?? ''}|${assessmentId}`
+export function qrPayload(studentId, assessmentId, version = 2) {
+  const body = `LUMA|${version}|${studentId ?? ''}|${assessmentId}`
   return `${body}|${crc32(body)}`
 }
 
 export function parseQrPayload(payload) {
   const parts = String(payload || '').split('|')
-  if (parts.length !== 5 || parts[0] !== 'LUMA' || parts[1] !== '1' || !parts[3]) return null
+  const version = Number(parts[1])
+  if (parts.length !== 5 || parts[0] !== 'LUMA' || ![1, 2].includes(version) || !parts[3]) return null
   const body = parts.slice(0, 4).join('|')
   if (crc32(body) !== parts[4]) return null
-  return { studentId: parts[2] || null, assessmentId: parts[3], version: 1 }
+  return { studentId: parts[2] || null, assessmentId: parts[3], version }
 }
 
 export function downloadBlob(blob, filename) {

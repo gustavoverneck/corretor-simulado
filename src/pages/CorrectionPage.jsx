@@ -2,11 +2,11 @@ import { useMemo, useRef, useState } from 'react'
 import {
   UploadCloud, Camera, ScanLine, CheckCircle2, AlertTriangle, FileImage, RotateCcw,
   Save, MoreHorizontal, QrCode, Focus, CircleDot, ChevronRight, X, ClipboardList,
-  ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2,
+  ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff,
 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { analyzeAnswerSheet } from '../lib/omr'
-import { getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, hasCustomAnswerKey, regradeAnswers } from '../lib/assessment'
+import { CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, hasCustomAnswerKey, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAreas'
 import { cn, formatDateTime, nextStudentRegistration, normalize, uid } from '../lib/utils'
 
@@ -16,6 +16,7 @@ const answerStatuses = {
   blank: { label: 'Em branco', tone: 'neutral' },
   multiple: { label: 'Múltipla', tone: 'red' },
   uncertain: { label: 'Revisar', tone: 'ochre' },
+  cancelled: { label: 'Cancelada', tone: 'neutral' },
 }
 
 const supportedImagePattern = /\.(jpe?g|png|webp)$/i
@@ -28,14 +29,15 @@ function AnswerKeyStrip({ answerKey, limit, compact = false }) {
   const visible = limit ? answerKey.slice(0, limit) : answerKey
   return (
     <div className={cn('answer-key-strip', compact && 'compact')}>
-      {visible.map((answer, index) => <span key={index}><small>{String(index + 1).padStart(2, '0')}</small><strong>{answer || '—'}</strong></span>)}
+      {visible.map((answer, index) => <span className={cn(answer === null && 'is-annulled', answer === CANCELLED_ANSWER && 'is-cancelled')} key={index}><small>{String(index + 1).padStart(2, '0')}</small><strong>{answer === null ? 'ANU' : answer === CANCELLED_ANSWER ? 'CAN' : answer || '—'}</strong></span>)}
       {limit && answerKey.length > limit && <em>+{answerKey.length - limit}</em>}
     </div>
   )
 }
 
 function ResultBreakdown({ result, compact = false }) {
-  const total = result?.answers?.length || result?.total || 0
+  const rawTotal = result?.answers?.length || result?.total || 0
+  const total = result?.gradedTotal ?? Math.max(0, rawTotal - (result?.cancelled || 0))
   const score = total ? Math.round(((result?.correct || 0) / total) * 100) : 0
   const metrics = [
     { key: 'correct', label: 'Acertos', value: result?.correct || 0, tone: 'correct' },
@@ -43,10 +45,11 @@ function ResultBreakdown({ result, compact = false }) {
     { key: 'blank', label: 'Em branco', value: result?.blank || 0, tone: 'blank' },
     { key: 'multiple', label: 'Múltiplas', value: result?.multiple || 0, tone: 'multiple' },
     { key: 'uncertain', label: 'Incertas', value: result?.uncertain || 0, tone: 'uncertain' },
+    { key: 'cancelled', label: 'Canceladas', value: result?.cancelled || 0, tone: 'cancelled' },
   ]
   return (
     <div className={cn('result-breakdown', compact && 'is-compact')}>
-      <div className="result-breakdown-score"><small>APROVEITAMENTO</small><strong>{score}%</strong><span>{result?.correct || 0} de {total} questões</span></div>
+      <div className="result-breakdown-score"><small>APROVEITAMENTO</small><strong>{score}%</strong><span>{result?.correct || 0} de {total} questões válidas</span></div>
       {metrics.map((metric) => <div className={`result-breakdown-metric metric-${metric.tone}`} key={metric.key}><i /><p><small>{metric.label}</small><strong>{metric.value}</strong></p></div>)}
     </div>
   )
@@ -58,20 +61,22 @@ function DetailedAnswerList({ answers, assessment, questionAreas, onChange, read
     <div className={cn('answer-review-list detailed-answer-list', readOnly && 'is-read-only')}>
       {answers.map((answer) => {
         const selected = Array.isArray(answer.selected) ? answer.selected : []
+        const annulled = answer.annulled || answer.expected === null
+        const cancelled = answer.cancelled || answer.expected === CANCELLED_ANSWER
         return (
-          <div key={answer.question} className={cn('answer-review-row', `answer-${answer.status}`)}>
+          <div key={answer.question} className={cn('answer-review-row', `answer-${answer.status}`, annulled && 'answer-annulled', cancelled && 'answer-cancelled')}>
             <div className="answer-question-label"><strong>{String(answer.question).padStart(2, '0')}</strong><small title={questionAreas[answer.question - 1]}>{questionAreas[answer.question - 1] || 'Sem área'}</small></div>
             <div className="answer-choice-review">
               <div className="answer-options">
                 {Array.from({ length: assessment.optionCount }, (_, index) => {
                   const letter = String.fromCharCode(65 + index)
-                  return <button type="button" key={letter} disabled={readOnly} className={cn(selected.includes(letter) && 'marked', answer.expected === letter && 'expected')} onClick={() => onChange?.(answer.question - 1, letter)} aria-label={`Questão ${answer.question}, alternativa ${letter}`}>{letter}</button>
+                  return <button type="button" key={letter} disabled={readOnly} className={cn(selected.includes(letter) && 'marked', !annulled && !cancelled && answer.expected === letter && 'expected')} onClick={() => onChange?.(answer.question - 1, letter)} aria-label={`Questão ${answer.question}, alternativa ${letter}`}>{letter}</button>
                 })}
                 <button type="button" disabled={readOnly} className={selected.length === 0 ? 'marked blank-choice' : 'blank-choice'} onClick={() => onChange?.(answer.question - 1, '')} aria-label={`Questão ${answer.question} em branco`}>—</button>
               </div>
-              <small>Marcada: {selected.length ? selected.join(' + ') : 'em branco'} · Gabarito: {answer.expected || '—'}</small>
+              <small>{cancelled ? 'Questão cancelada · não compõe a nota' : annulled ? `Questão anulada · marcação ${selected.length ? selected.join(' + ') : 'em branco'} desconsiderada` : `Marcada: ${selected.length ? selected.join(' + ') : 'em branco'} · Gabarito: ${answer.expected || '—'}`}</small>
             </div>
-            <Badge tone={answerStatuses[answer.status]?.tone || 'neutral'}>{answerStatuses[answer.status]?.label || answer.status}</Badge>
+            <Badge tone={annulled ? 'blue' : answerStatuses[answer.status]?.tone || 'neutral'}>{cancelled ? 'Cancelada' : annulled ? 'Anulada' : answerStatuses[answer.status]?.label || answer.status}</Badge>
           </div>
         )
       })}
@@ -147,8 +152,8 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
   }
 
   function saveAnswerKey() {
-    if (draft.length !== assessment.questionCount || draft.some((answer) => !answer)) {
-      notify('Gabarito incompleto', 'Todas as questões precisam ter uma resposta correta.', 'warning')
+    if (draft.length !== assessment.questionCount || draft.some((answer) => answer === '' || answer === undefined)) {
+      notify('Gabarito incompleto', 'Cada questão precisa ter uma resposta correta, estar anulada ou cancelada.', 'warning')
       return
     }
     if (areaDraft.length !== assessment.questionCount || areaDraft.some((area) => !area.trim())) {
@@ -156,34 +161,42 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
       return
     }
     const normalizedAreas = areaDraft.map((area) => area.trim())
-    const studentIds = new Set(data.students.filter((student) => {
-      if (!selectedVersion) return student.classId === classId
+    const regradableSubmissionIds = new Set(data.submissions.filter((submission) => {
+      if (submission.assessmentId !== assessment.id || !Array.isArray(submission.answers)) return false
+      const student = data.students.find((item) => item.id === submission.studentId)
+      if ((submission.classId || student?.classId) !== classId) return false
+      if (!selectedVersion) return true
+      if (submission.answerKeyVersionId) return submission.answerKeyVersionId === selectedVersion.id
       return getAnswerKeyVersionForStudent(assessment, student)?.id === selectedVersion.id
-    }).map((student) => student.id))
-    const regradableCount = data.submissions.filter((submission) => submission.assessmentId === assessment.id && studentIds.has(submission.studentId) && Array.isArray(submission.answers)).length
-    setData((current) => ({
-      ...current,
-      assessments: current.assessments.map((item) => item.id === assessment.id ? {
-        ...item,
-        questionAreas: normalizedAreas,
-        answerKey: selectedVersion && item.answerKeyVersions?.[0]?.id === selectedVersion.id ? draft : item.answerKey,
-        answerKeyVersions: selectedVersion ? item.answerKeyVersions.map((version) => version.id === selectedVersion.id ? { ...version, answerKey: draft } : version) : item.answerKeyVersions,
-        answerKeysByClass: selectedVersion ? Object.fromEntries(item.classIds.map((itemClassId) => {
-          const firstVersionId = item.answerKeyVersionIdsByClass?.[itemClassId]?.[0]
-          return [itemClassId, firstVersionId === selectedVersion.id ? draft : item.answerKeysByClass?.[itemClassId] || item.answerKey]
-        })) : { ...item.answerKeysByClass, [classId]: draft },
-      } : item),
-      submissions: current.submissions.map((submission) => {
-        if (submission.assessmentId !== assessment.id || !studentIds.has(submission.studentId) || !Array.isArray(submission.answers)) return submission
-        const graded = regradeAnswers(submission.answers, draft)
-        return {
-          ...submission, ...graded, answerKeySnapshot: draft,
-          status: graded.multiple > 0 || graded.uncertain > 0 ? 'Revisar' : 'Corrigido',
-          correctedAt: new Date().toISOString(),
-        }
-      }),
-    }))
+    }).map((submission) => submission.id))
+    const regradableCount = regradableSubmissionIds.size
+    const versionSharedWithAnotherClass = selectedVersion && assessment.classIds.some((itemClassId) => (
+      itemClassId !== classId && assessment.answerKeyVersionIdsByClass?.[itemClassId]?.includes(selectedVersion.id)
+    ))
+    const savedVersionId = versionSharedWithAnotherClass ? uid('version') : selectedVersion?.id
+    setData((current) => {
+      const currentAssessment = current.assessments.find((item) => item.id === assessment.id)
+      if (!currentAssessment) return current
+      const updatedVersion = updateAnswerKeyVersionForClass(currentAssessment, classId, selectedVersion?.id, draft, current.students, () => savedVersionId)
+      const nextAssessment = { ...updatedVersion.assessment, questionAreas: normalizedAreas }
+      return {
+        ...current,
+        assessments: current.assessments.map((item) => item.id === assessment.id ? nextAssessment : item),
+        submissions: current.submissions.map((submission) => {
+          if (!regradableSubmissionIds.has(submission.id)) return submission
+          const graded = regradeAnswers(submission.answers, draft)
+          return {
+            ...submission, ...graded, answerKeySnapshot: draft,
+            answerKeyVersionId: selectedVersion && updatedVersion.forked ? updatedVersion.versionId : submission.answerKeyVersionId,
+            answerKeyVersionLabel: selectedVersion?.label || submission.answerKeyVersionLabel,
+            status: graded.multiple > 0 || graded.uncertain > 0 ? 'Revisar' : 'Corrigido',
+            correctedAt: new Date().toISOString(),
+          }
+        }),
+      }
+    })
     setEditing(false)
+    setVersionId(savedVersionId || '')
     setAreaDraft([])
     setCopySource('')
     notify('Gabarito e áreas salvos', `${selectedVersion?.label || classroom?.name}: ${draft.length} respostas classificadas${regradableCount ? ` e ${regradableCount} correção(ões) recalculada(s)` : ''}.`)
@@ -227,9 +240,9 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
               <Button variant="ghost" size="sm" icon={RotateCcw} onClick={() => setDraft([...assessment.answerKey])}>Usar padrão</Button>
             </div>
             <div className="answer-key-full-grid">
-              {draft.map((answer, index) => <div className="full-key-row" key={index}><div className="full-key-answer-line"><strong>{String(index + 1).padStart(2, '0')}</strong><div>{Array.from({ length: assessment.optionCount }, (_, option) => { const letter = String.fromCharCode(65 + option); return <button key={letter} className={answer === letter ? 'selected' : ''} onClick={() => setDraftAnswer(index, letter)}>{letter}</button> })}</div></div><input list="correction-question-areas" value={areaDraft[index] || ''} onChange={(event) => setDraftArea(index, event.target.value)} aria-label={`Área da questão ${index + 1}`} placeholder="Área ou componente" /></div>)}
+              {draft.map((answer, index) => <div className={cn('full-key-row', answer === null && 'is-annulled', answer === CANCELLED_ANSWER && 'is-cancelled')} key={index}><div className="full-key-answer-line"><strong>{String(index + 1).padStart(2, '0')}</strong><div>{Array.from({ length: assessment.optionCount }, (_, option) => { const letter = String.fromCharCode(65 + option); return <button type="button" key={letter} className={answer === letter ? 'selected' : ''} onClick={() => setDraftAnswer(index, letter)}>{letter}</button> })}<button type="button" className={cn('full-key-annul', answer === null && 'selected')} onClick={() => setDraftAnswer(index, null)} title="Anular questão"><Ban size={12} /><span>Anular</span></button><button type="button" className={cn('full-key-cancel', answer === CANCELLED_ANSWER && 'selected')} onClick={() => setDraftAnswer(index, CANCELLED_ANSWER)} title="Cancelar questão"><CircleOff size={12} /><span>Cancelar</span></button></div></div><input list="correction-question-areas" value={areaDraft[index] || ''} onChange={(event) => setDraftArea(index, event.target.value)} aria-label={`Área da questão ${index + 1}`} placeholder="Área ou componente" /></div>)}
             </div>
-            <div className="key-edit-footer"><div><AlertTriangle size={16} /><p>As áreas são compartilhadas entre as turmas. Alterações no gabarito recalculam as correções desta turma.</p></div><Button variant="ghost" onClick={() => setEditing(false)}>Cancelar</Button><Button icon={Save} onClick={saveAnswerKey}>Salvar alterações</Button></div>
+            <div className="key-edit-footer"><div><AlertTriangle size={16} /><p>Anuladas valem um acerto; canceladas são retiradas do total válido. Ao salvar, as correções desta versão são recalculadas.</p></div><Button variant="ghost" onClick={() => setEditing(false)}>Cancelar</Button><Button icon={Save} onClick={saveAnswerKey}>Salvar alterações</Button></div>
           </div>
         ) : (
           <div className="answer-key-view"><AnswerKeyStrip answerKey={answerKey} /><div className="question-area-summary"><span>ÁREAS DAS QUESTÕES</span><div>{areaSummary.map(([area, count]) => <Badge tone="neutral" key={area}>{area} · {count}</Badge>)}</div></div><div className="key-legend"><span><i /> Número da questão</span><span><i /> Resposta correta</span></div></div>
@@ -267,7 +280,10 @@ function ReviewQueue({ data, setData, notify }) {
       const selectedAnswers = letter
         ? answer.selected.includes(letter) ? answer.selected.filter((item) => item !== letter) : [...answer.selected, letter].sort()
         : []
-      const nextStatus = selectedAnswers.length === 0
+      const nextStatus = answerKey[index] === CANCELLED_ANSWER
+        ? 'cancelled'
+        : answerKey[index] === null ? 'correct'
+        : selectedAnswers.length === 0
         ? 'blank'
         : selectedAnswers.length > 1 ? 'multiple' : selectedAnswers[0] === answerKey[index] ? 'correct' : 'wrong'
       return { ...answer, selected: selectedAnswers, status: nextStatus }
@@ -290,11 +306,11 @@ function ReviewQueue({ data, setData, notify }) {
     <>
       <section className="panel review-queue-panel">
         <header className="panel-header"><div><h3>Fila de revisões</h3><p>Folhas com marcação múltipla ou leitura incerta</p></div><Badge tone={pending.length ? 'ochre' : 'green'}>{pending.length} pendente{pending.length !== 1 ? 's' : ''}</Badge></header>
-        {pending.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>SIMULADO</th><th>OCORRÊNCIAS</th><th>RESULTADO ATUAL</th><th /></tr></thead><tbody>{pending.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); return <tr key={submission.id}><td><strong>{itemStudent?.name}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span></td><td>{itemAssessment?.title}</td><td><div className="issue-badges">{submission.multiple > 0 && <Badge tone="red">{submission.multiple} múltipla(s)</Badge>}{submission.uncertain > 0 && <Badge tone="ochre">{submission.uncertain} incerta(s)</Badge>}{!submission.uncertain && !submission.multiple && <Badge tone="ochre">Revisão manual</Badge>}</div></td><td><strong>{submission.score}%</strong><small className="cell-subtitle">{submission.correct}/{itemAssessment?.questionCount} acertos</small></td><td><Button size="sm" variant="secondary" icon={Eye} onClick={() => openReview(submission)}>Revisar</Button></td></tr> })}</tbody></table></div> : <EmptyState icon={CheckCircle2} title="Tudo revisado" description="Não há marcações ambíguas aguardando conferência." />}
+        {pending.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>SIMULADO</th><th>OCORRÊNCIAS</th><th>RESULTADO ATUAL</th><th /></tr></thead><tbody>{pending.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span></td><td>{itemAssessment?.title}</td><td><div className="issue-badges">{submission.multiple > 0 && <Badge tone="red">{submission.multiple} múltipla(s)</Badge>}{submission.uncertain > 0 && <Badge tone="ochre">{submission.uncertain} incerta(s)</Badge>}{!submission.uncertain && !submission.multiple && <Badge tone="ochre">Revisão manual</Badge>}</div></td><td><strong>{submission.score}%</strong><small className="cell-subtitle">{submission.correct}/{validTotal} acertos</small></td><td><Button size="sm" variant="secondary" icon={Eye} onClick={() => openReview(submission)}>Revisar</Button></td></tr> })}</tbody></table></div> : <EmptyState icon={CheckCircle2} title="Tudo revisado" description="Não há marcações ambíguas aguardando conferência." />}
       </section>
 
       <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title="Revisar respostas" subtitle={`${student?.name || ''} · ${classroom?.name || ''} · ${assessment?.title || ''}`} size="lg" footer={<><Button variant="ghost" onClick={() => setSelectedId(null)}>Cancelar</Button><Button icon={Check} onClick={saveReview}>Concluir revisão</Button></>}>
-        {selected && <div className="saved-review"><div className="saved-review-summary"><Badge tone="blue">Gabarito {classroom?.name}</Badge><span>Clique nas alternativas para marcar ou desmarcar. Respostas múltiplas e em branco podem ser confirmadas como resultado final.</span></div><div className="answer-review-list">{draftAnswers.map((answer, index) => <div key={answer.question} className={cn('answer-review-row', `answer-${answer.status}`)}><strong>{String(answer.question).padStart(2, '0')}</strong><div className="answer-options">{Array.from({ length: assessment.optionCount }, (_, option) => { const letter = String.fromCharCode(65 + option); return <button key={letter} className={cn(answer.selected.includes(letter) && 'marked', answerKey[index] === letter && 'expected')} onClick={() => changeDraftAnswer(index, letter)}>{letter}</button> })}<button className={answer.selected.length === 0 ? 'marked blank-choice' : 'blank-choice'} onClick={() => changeDraftAnswer(index, '')}>—</button></div><Badge tone={answerStatuses[answer.status]?.tone || 'neutral'}>{answerStatuses[answer.status]?.label || answer.status}</Badge></div>)}</div></div>}
+        {selected && <div className="saved-review"><div className="saved-review-summary"><Badge tone="blue">Gabarito {classroom?.name}</Badge><span>Clique nas alternativas para marcar ou desmarcar. Questões anuladas ou canceladas mantêm a regra definida no gabarito.</span></div><DetailedAnswerList answers={draftAnswers} assessment={assessment} questionAreas={getQuestionAreas(assessment)} onChange={changeDraftAnswer} /></div>}
       </Modal>
     </>
   )
@@ -371,7 +387,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
         </div>
         <div className="response-status-legend"><Badge tone="ochre">Revisar</Badge><span>A correção ainda precisa de conferência. Se a marcação múltipla ou em branco estiver correta, basta mantê-la e concluir a revisão.</span></div>
 
-        {rows.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>RESULTADO</th><th>RESPOSTAS</th><th>STATUS</th><th>CORRIGIDA EM</th><th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{assessment.questionCount} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span></div></td><td><Badge tone={submission.status === 'Revisar' ? 'ochre' : 'green'}>{submission.status}</Badge></td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
+        {rows.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>RESULTADO</th><th>RESPOSTAS</th><th>STATUS</th><th>CORRIGIDA EM</th><th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{submission.gradedTotal ?? Math.max(0, assessment.questionCount - (submission.cancelled || 0))} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span>{submission.cancelled > 0 && <span className="cancelled">{submission.cancelled} C</span>}</div></td><td><Badge tone={submission.status === 'Revisar' ? 'ochre' : 'green'}>{submission.status}</Badge></td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
       </section>
 
       <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selectedStudent ? `Respostas de ${selectedStudent.name}` : 'Detalhes da correção'} subtitle={`${selectedClass?.name || 'Turma não encontrada'} · ${selectedAssessment?.title || ''}`} size="xl" footer={<><Button variant="danger" icon={Trash2} onClick={() => setDeleteId(selected.id)}>Excluir resposta</Button><Button onClick={() => setSelectedId(null)}>Fechar</Button></>}>
@@ -387,7 +403,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
 
           {selectedAnswers.length ? <section className="answer-review-panel response-answer-view">
             <header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>A alternativa marcada aparece preenchida; o contorno indica o gabarito.</p></div><Badge tone={selected.status === 'Revisar' ? 'ochre' : 'green'}>{selected.status}</Badge></header>
-            <div className="answer-filters"><button className={answerFilter === 'all' ? 'active' : ''} onClick={() => setAnswerFilter('all')}>Todas <span>{selectedAnswers.length}</span></button><button className={answerFilter === 'correct' ? 'active' : ''} onClick={() => setAnswerFilter('correct')}>Acertos <span>{selected.correct || 0}</span></button><button className={answerFilter === 'wrong' ? 'active' : ''} onClick={() => setAnswerFilter('wrong')}>Erros <span>{selected.wrong || 0}</span></button><button className={answerFilter === 'blank' ? 'active' : ''} onClick={() => setAnswerFilter('blank')}>Em branco <span>{selected.blank || 0}</span></button><button className={answerFilter === 'multiple' ? 'active' : ''} onClick={() => setAnswerFilter('multiple')}>Múltiplas <span>{selected.multiple || 0}</span></button><button className={answerFilter === 'uncertain' ? 'active' : ''} onClick={() => setAnswerFilter('uncertain')}>Incertas <span>{selected.uncertain || 0}</span></button></div>
+            <div className="answer-filters"><button className={answerFilter === 'all' ? 'active' : ''} onClick={() => setAnswerFilter('all')}>Todas <span>{selectedAnswers.length}</span></button><button className={answerFilter === 'correct' ? 'active' : ''} onClick={() => setAnswerFilter('correct')}>Acertos <span>{selected.correct || 0}</span></button><button className={answerFilter === 'wrong' ? 'active' : ''} onClick={() => setAnswerFilter('wrong')}>Erros <span>{selected.wrong || 0}</span></button><button className={answerFilter === 'blank' ? 'active' : ''} onClick={() => setAnswerFilter('blank')}>Em branco <span>{selected.blank || 0}</span></button><button className={answerFilter === 'multiple' ? 'active' : ''} onClick={() => setAnswerFilter('multiple')}>Múltiplas <span>{selected.multiple || 0}</span></button><button className={answerFilter === 'uncertain' ? 'active' : ''} onClick={() => setAnswerFilter('uncertain')}>Incertas <span>{selected.uncertain || 0}</span></button><button className={answerFilter === 'cancelled' ? 'active' : ''} onClick={() => setAnswerFilter('cancelled')}>Canceladas <span>{selected.cancelled || 0}</span></button></div>
             <DetailedAnswerList answers={visibleAnswers} assessment={selectedAssessment} questionAreas={selectedQuestionAreas} readOnly />
           </section> : <EmptyState icon={FileText} title="Detalhamento indisponível" description="Esta correção antiga possui apenas o resumo do resultado." />}
         </div>}
@@ -470,12 +486,14 @@ export function CorrectionPage({ data, setData, notify }) {
   const batchPreview = batchPreviewIndex === null ? null : batchRows.find((row) => row.index === batchPreviewIndex)
   const batchTotals = batchSaveable.reduce((summary, row) => ({
     total: summary.total + (row.item.answers?.length || 0),
+    gradedTotal: summary.gradedTotal + (row.item.gradedTotal ?? Math.max(0, (row.item.answers?.length || 0) - (row.item.cancelled || 0))),
     correct: summary.correct + (row.item.correct || 0),
     wrong: summary.wrong + (row.item.wrong || 0),
     blank: summary.blank + (row.item.blank || 0),
     multiple: summary.multiple + (row.item.multiple || 0),
     uncertain: summary.uncertain + (row.item.uncertain || 0),
-  }), { total: 0, correct: 0, wrong: 0, blank: 0, multiple: 0, uncertain: 0 })
+    cancelled: summary.cancelled + (row.item.cancelled || 0),
+  }), { total: 0, gradedTotal: 0, correct: 0, wrong: 0, blank: 0, multiple: 0, uncertain: 0, cancelled: 0 })
   const batchPreviewAreas = getQuestionAreas(batchPreview?.assessment)
   const visibleBatchAnswers = batchPreview?.item.answers?.filter((answer) => batchFilter === 'all' || answer.status === batchFilter) || []
   const batchPreviewEligibleStudents = data.students.filter((student) => batchPreview?.assessment?.classIds.includes(student.classId) && student.status === 'Ativo')
@@ -777,7 +795,7 @@ export function CorrectionPage({ data, setData, notify }) {
     const submission = {
       id: uid('submission'), assessmentId: finalAssessment.id, studentId: finalStudent.id, classId: finalStudent.classId,
       status: needsReview ? 'Revisar' : 'Corrigido', ...graded,
-      answerKeySnapshot: finalKey, answerKeyVersionId: finalVersion?.id, answerKeyVersionLabel: finalVersion?.label, confidence: result.confidence, markersFound: result.markersFound,
+      answerKeySnapshot: finalKey, answerKeyVersionId: finalVersion?.id, answerKeyVersionLabel: finalVersion?.label, confidence: result.confidence, markersFound: result.markersFound, markerLayout: result.markerLayout,
       reviewReasons: [
         ...(result.markersFound < 4 ? ['Marcadores incompletos'] : []),
         ...(graded.multiple > 0 ? ['Marcações múltiplas'] : []),
@@ -816,6 +834,7 @@ export function CorrectionPage({ data, setData, notify }) {
         answerKeyVersionLabel: finalVersion?.label,
         confidence: item.confidence,
         markersFound: item.markersFound,
+        markerLayout: item.markerLayout,
         reviewReasons: [
           ...(item.markersFound < 4 ? ['Marcadores incompletos'] : []),
           ...(graded.multiple > 0 ? ['Marcações múltiplas'] : []),
@@ -886,7 +905,7 @@ export function CorrectionPage({ data, setData, notify }) {
           <aside className="correction-guide"><h3>Para uma leitura precisa</h3><div><span><Focus size={19} /></span><p><strong>Uma folha por arquivo</strong>Cada imagem ou página do PDF deve conter uma folha completa, sem cortes.</p></div><div><span><CircleDot size={19} /></span><p><strong>Digitalize com nitidez</strong>Prefira 200 ou 300 DPI e mantenha os quatro marcadores visíveis.</p></div><div><span><QrCode size={19} /></span><p><strong>Não cubra o QR Code</strong>Ele identifica o simulado e, nas folhas nominadas, também o aluno.</p></div><div className="privacy-note"><CheckCircle2 size={18} /><p><strong>Processamento privado</strong>As imagens e o PDF são analisados neste dispositivo e não são enviados para servidores.</p></div></aside>
         </div>
 
-        <section className="panel recent-corrections"><header className="panel-header"><div><h3>Correções recentes</h3><p>Últimas folhas processadas e o gabarito aplicado</p></div><button className="text-button" onClick={() => setTab('reviews')}>{data.submissions.filter((item) => item.status === 'Revisar').length} para revisar <ChevronRight size={14} /></button></header>{recent.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA / GABARITO</th><th>SIMULADO</th><th>RESULTADO</th><th>STATUS</th><th /></tr></thead><tbody>{recent.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); return <tr key={submission.id}><td><strong>{itemStudent?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span><small className="cell-subtitle">Gabarito {hasCustomAnswerKey(itemAssessment, itemStudent?.classId) ? 'específico' : 'padrão'}</small></td><td>{itemAssessment?.title}</td><td><strong>{submission.correct} / {itemAssessment?.questionCount}</strong><small className="cell-subtitle">{submission.score}% de acertos</small></td><td><Badge tone={submission.status === 'Revisar' ? 'ochre' : 'green'}>{submission.status}</Badge></td><td><button className="icon-button"><MoreHorizontal size={18} /></button></td></tr> })}</tbody></table></div> : <EmptyState icon={ScanLine} title="Nenhuma folha corrigida" description="As leituras aparecerão aqui." />}</section>
+        <section className="panel recent-corrections"><header className="panel-header"><div><h3>Correções recentes</h3><p>Últimas folhas processadas e o gabarito aplicado</p></div><button className="text-button" onClick={() => setTab('reviews')}>{data.submissions.filter((item) => item.status === 'Revisar').length} para revisar <ChevronRight size={14} /></button></header>{recent.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA / GABARITO</th><th>SIMULADO</th><th>RESULTADO</th><th>STATUS</th><th /></tr></thead><tbody>{recent.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span><small className="cell-subtitle">Gabarito {hasCustomAnswerKey(itemAssessment, itemStudent?.classId) ? 'específico' : 'padrão'}</small></td><td>{itemAssessment?.title}</td><td><strong>{submission.correct} / {validTotal}</strong><small className="cell-subtitle">{submission.score}% de acertos</small></td><td><Badge tone={submission.status === 'Revisar' ? 'ochre' : 'green'}>{submission.status}</Badge></td><td><button className="icon-button"><MoreHorizontal size={18} /></button></td></tr> })}</tbody></table></div> : <EmptyState icon={ScanLine} title="Nenhuma folha corrigida" description="As leituras aparecerão aqui." />}</section>
       </>}
 
       {batch && <section className="batch-review page-stack">
@@ -906,7 +925,7 @@ export function CorrectionPage({ data, setData, notify }) {
         {batchReplacements > 0 && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>{batchReplacements} correção(ões) já existente(s).</strong> Esses resultados serão atualizados quando o lote for salvo; as demais correções permanecerão intactas.</p></div>}
 
         <section className="panel batch-performance-panel">
-          <header className="panel-header"><div><h3>Resultado consolidado do lote</h3><p>Contagem de respostas das folhas prontas para salvar</p></div><Badge tone={batchTotals.multiple + batchTotals.uncertain ? 'ochre' : 'green'}>{batchTotals.total} respostas analisadas</Badge></header>
+          <header className="panel-header"><div><h3>Resultado consolidado do lote</h3><p>Contagem de respostas das folhas prontas para salvar</p></div><Badge tone={batchTotals.multiple + batchTotals.uncertain ? 'ochre' : 'green'}>{batchTotals.gradedTotal} respostas válidas</Badge></header>
           <ResultBreakdown result={batchTotals} />
         </section>
 
@@ -920,7 +939,7 @@ export function CorrectionPage({ data, setData, notify }) {
                 <td>{row.item.error ? <span className="batch-error-text">Folha não processada</span> : <div className="batch-student-control"><select className="batch-student-select" value={row.student?.id || ''} onChange={(event) => assignBatchStudent(row.index, event.target.value)}><option value="">Identificar aluno...</option>{availableStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select>{!row.student && <button type="button" onClick={() => openNewStudent({ source: 'batch', index: row.index, assessmentId: row.assessment?.id, suggestedClassId: row.item.classId })}><UserPlus size={12} /> Cadastrar</button>}</div>}</td>
                 <td>{row.classroom ? <span className="class-tag" style={{ '--class-color': row.classroom.color }}>{row.classroom.name}</span> : '—'}</td>
                 <td><strong>{row.assessment?.code || '—'}</strong><small className="cell-subtitle">{row.assessment?.title || ''}</small></td>
-                <td>{row.valid ? <div className="batch-result-cell"><strong>{row.item.score}%</strong><span><b className="is-correct">{row.item.correct} A</b><b className="is-wrong">{row.item.wrong} E</b><b>{row.item.blank} B</b><b className="is-review">{row.item.multiple + row.item.uncertain} R</b></span></div> : '—'}</td>
+                <td>{row.valid ? <div className="batch-result-cell"><strong>{row.item.score}%</strong><span><b className="is-correct">{row.item.correct} A</b><b className="is-wrong">{row.item.wrong} E</b><b>{row.item.blank} B</b><b className="is-review">{row.item.multiple + row.item.uncertain} R</b>{row.item.cancelled > 0 && <b>{row.item.cancelled} C</b>}</span></div> : '—'}</td>
                 <td>{row.issue ? <Badge tone={row.issue.includes('duplicada') || row.item.error ? 'red' : 'ochre'}>{row.issue}</Badge> : row.needsReview ? <Badge tone="ochre">Revisar marcações</Badge> : row.existingSubmission ? <Badge tone="blue">Atualizará existente</Badge> : <Badge tone="green">Pronta</Badge>}</td>
                 <td><button className="icon-button" disabled={!row.item.previewUrl} onClick={() => openBatchPreview(row.index)} aria-label={`Visualizar folha ${row.item.pageNumber}`} title="Ver identificação e respostas"><Eye size={17} /></button></td>
               </tr>
@@ -972,7 +991,7 @@ export function CorrectionPage({ data, setData, notify }) {
 
         <div className="answer-review-panel panel scan-answer-review">
           <header className="answer-review-heading"><div><h3>Respostas encontradas</h3><p>Filtre os resultados ou clique em uma alternativa para corrigir a leitura.</p></div><Badge tone={result.multiple + result.uncertain ? 'ochre' : 'green'}>{result.answers.length} questões</Badge></header>
-          <div className="answer-filters"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todas <span>{result.answers.length}</span></button><button className={filter === 'correct' ? 'active' : ''} onClick={() => setFilter('correct')}>Acertos <span>{result.correct}</span></button><button className={filter === 'wrong' ? 'active' : ''} onClick={() => setFilter('wrong')}>Erros <span>{result.wrong}</span></button><button className={filter === 'blank' ? 'active' : ''} onClick={() => setFilter('blank')}>Em branco <span>{result.blank}</span></button><button className={filter === 'multiple' ? 'active' : ''} onClick={() => setFilter('multiple')}>Múltiplas <span>{result.multiple}</span></button><button className={filter === 'uncertain' ? 'active' : ''} onClick={() => setFilter('uncertain')}>Incertas <span>{result.uncertain}</span></button></div>
+          <div className="answer-filters"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todas <span>{result.answers.length}</span></button><button className={filter === 'correct' ? 'active' : ''} onClick={() => setFilter('correct')}>Acertos <span>{result.correct}</span></button><button className={filter === 'wrong' ? 'active' : ''} onClick={() => setFilter('wrong')}>Erros <span>{result.wrong}</span></button><button className={filter === 'blank' ? 'active' : ''} onClick={() => setFilter('blank')}>Em branco <span>{result.blank}</span></button><button className={filter === 'multiple' ? 'active' : ''} onClick={() => setFilter('multiple')}>Múltiplas <span>{result.multiple}</span></button><button className={filter === 'uncertain' ? 'active' : ''} onClick={() => setFilter('uncertain')}>Incertas <span>{result.uncertain}</span></button><button className={filter === 'cancelled' ? 'active' : ''} onClick={() => setFilter('cancelled')}>Canceladas <span>{result.cancelled || 0}</span></button></div>
           <DetailedAnswerList answers={visibleAnswers} assessment={resultAssessment} questionAreas={resultQuestionAreas} onChange={changeAnswer} />
         </div>
       </section>}
@@ -996,7 +1015,7 @@ export function CorrectionPage({ data, setData, notify }) {
             <div className="batch-preview-image"><img src={batchPreview.item.previewUrl} alt={batch?.sourceType === 'images' ? batchPreview.item.pageFilename : `Página ${batchPreview.item.pageNumber} do PDF`} /></div>
             {batchPreview.item.answers && batchPreview.assessment && <div className="answer-review-panel panel">
               <header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>Você pode ajustar a alternativa antes de fechar.</p></div><Badge tone={batchPreview.needsReview ? 'ochre' : 'green'}>{batchPreview.item.answers.length} questões</Badge></header>
-              <div className="answer-filters"><button className={batchFilter === 'all' ? 'active' : ''} onClick={() => setBatchFilter('all')}>Todas <span>{batchPreview.item.answers.length}</span></button><button className={batchFilter === 'correct' ? 'active' : ''} onClick={() => setBatchFilter('correct')}>Acertos <span>{batchPreview.item.correct}</span></button><button className={batchFilter === 'wrong' ? 'active' : ''} onClick={() => setBatchFilter('wrong')}>Erros <span>{batchPreview.item.wrong}</span></button><button className={batchFilter === 'blank' ? 'active' : ''} onClick={() => setBatchFilter('blank')}>Brancos <span>{batchPreview.item.blank}</span></button><button className={batchFilter === 'multiple' ? 'active' : ''} onClick={() => setBatchFilter('multiple')}>Múltiplas <span>{batchPreview.item.multiple}</span></button><button className={batchFilter === 'uncertain' ? 'active' : ''} onClick={() => setBatchFilter('uncertain')}>Incertas <span>{batchPreview.item.uncertain}</span></button></div>
+              <div className="answer-filters"><button className={batchFilter === 'all' ? 'active' : ''} onClick={() => setBatchFilter('all')}>Todas <span>{batchPreview.item.answers.length}</span></button><button className={batchFilter === 'correct' ? 'active' : ''} onClick={() => setBatchFilter('correct')}>Acertos <span>{batchPreview.item.correct}</span></button><button className={batchFilter === 'wrong' ? 'active' : ''} onClick={() => setBatchFilter('wrong')}>Erros <span>{batchPreview.item.wrong}</span></button><button className={batchFilter === 'blank' ? 'active' : ''} onClick={() => setBatchFilter('blank')}>Brancos <span>{batchPreview.item.blank}</span></button><button className={batchFilter === 'multiple' ? 'active' : ''} onClick={() => setBatchFilter('multiple')}>Múltiplas <span>{batchPreview.item.multiple}</span></button><button className={batchFilter === 'uncertain' ? 'active' : ''} onClick={() => setBatchFilter('uncertain')}>Incertas <span>{batchPreview.item.uncertain}</span></button><button className={batchFilter === 'cancelled' ? 'active' : ''} onClick={() => setBatchFilter('cancelled')}>Canceladas <span>{batchPreview.item.cancelled || 0}</span></button></div>
               <DetailedAnswerList answers={visibleBatchAnswers} assessment={batchPreview.assessment} questionAreas={batchPreviewAreas} onChange={(questionIndex, letter) => changeBatchAnswer(batchPreview.index, questionIndex, letter)} />
             </div>}
           </div>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
-import { bubbleCenter, getAnswerSheetLayout, MARKERS, SHEET } from '../lib/omr'
+import { bubbleCenter, CURRENT_MARKER_LAYOUT, getAnswerSheetLayout, getMarkerLayout, SHEET } from '../lib/omr'
 import { qrPayload } from '../lib/utils'
 
 const options = ['A', 'B', 'C', 'D', 'E']
@@ -9,7 +9,9 @@ const governmentLogo = `${import.meta.env.BASE_URL}assets/brasao-governo-es-hori
 export function AnswerSheet({ student, assessment, classroom, school, hideRegistration = false }) {
   const [qr, setQr] = useState('')
   const isBlank = !student
-  const payload = useMemo(() => qrPayload(student?.id, assessment.id), [student?.id, assessment.id])
+  const markerLayout = assessment.answerSheetMarkerLayout || CURRENT_MARKER_LAYOUT
+  const markers = getMarkerLayout(markerLayout)
+  const payload = useMemo(() => qrPayload(student?.id, assessment.id, markerLayout === 'page-v1' ? 1 : 2), [student?.id, assessment.id, markerLayout])
   const schoolLocation = [school.address, school.city && school.state ? `${school.city} – ${school.state}.` : school.city || school.state]
     .filter(Boolean)
     .join(', ')
@@ -23,7 +25,7 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
   return (
     <svg className="answer-sheet" viewBox={`0 0 ${SHEET.width} ${SHEET.height}`} role="img" aria-label={isBlank ? 'Folha de respostas sem aluno vinculado' : `Folha de respostas de ${student.name}`}>
       <rect width={SHEET.width} height={SHEET.height} fill="white" />
-      {Object.values(MARKERS).map((marker, index) => (
+      {Object.values(markers).map((marker, index) => (
         <g key={index}>
           <rect x={marker.x - 15} y={marker.y - 15} width="30" height="30" rx="2" fill="#111" />
           <rect x={marker.x - 7} y={marker.y - 7} width="14" height="14" fill="white" />
@@ -68,7 +70,7 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
       <circle cx="86" cy="329" r="6" fill="none" stroke="#52615b" strokeWidth="1.5" />
       <circle cx="86" cy="347" r="6" fill="#52615b" />
       <text x="101" y="332" fontFamily="Arial" fontSize="9" fill="#424c48">Use caneta azul ou preta e preencha completamente apenas uma alternativa.</text>
-      <text x="101" y="350" fontFamily="Arial" fontSize="9" fill="#424c48">Não rasure, não dobre a folha e mantenha os marcadores dos cantos visíveis.</text>
+      <text x="101" y="350" fontFamily="Arial" fontSize="9" fill="#424c48">Não rasure, não dobre a folha e mantenha visíveis os marcadores ao redor das respostas.</text>
 
       {Array.from({ length: layout.columns }, (_, column) => (
         <g key={column}>

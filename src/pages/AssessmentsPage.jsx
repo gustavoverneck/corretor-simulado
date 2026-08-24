@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine } from 'lucide-react'
+import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { PrintableSheets } from '../components/AnswerSheet'
-import { createRandomAnswerKey, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, hasCustomAnswerKey } from '../lib/assessment'
+import { CANCELLED_ANSWER, createRandomAnswerKey, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, hasCustomAnswerKey, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS, uniqueQuestionAreas } from '../lib/knowledgeAreas'
-import { getAnswerSheetLayout } from '../lib/omr'
+import { CURRENT_MARKER_LAYOUT, getAnswerSheetLayout } from '../lib/omr'
 import { average, cn, formatDate, initials, uid } from '../lib/utils'
 
 const subjectOptions = ['Língua Portuguesa', 'Matemática', 'Ciências da Natureza', 'Ciências Humanas', 'Linguagens']
@@ -28,6 +28,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const [editingAreas, setEditingAreas] = useState(false)
   const [areaDraft, setAreaDraft] = useState(() => getQuestionAreas(assessment))
   const [bulkAreaDraft, setBulkAreaDraft] = useState('')
+  const [editingAnswer, setEditingAnswer] = useState(null)
   const submissions = data.submissions.filter((item) => item.assessmentId === assessment.id)
   const totalStudents = data.students.filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo').length
   const progress = totalStudents ? Math.min(100, Math.round((submissions.length / totalStudents) * 100)) : 0
@@ -113,6 +114,72 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
     )
   }
 
+  function changeVersionAnswer(classId, version, questionIndex, answer) {
+    const explicitVersion = assessment.answerKeyVersions?.some((item) => item.id === version.id)
+    const versionSharedWithAnotherClass = explicitVersion && assessment.classIds.some((itemClassId) => (
+      itemClassId !== classId && assessment.answerKeyVersionIdsByClass?.[itemClassId]?.includes(version.id)
+    ))
+    const savedVersionId = versionSharedWithAnotherClass ? uid('version') : version.id
+    const previousAnswer = version.answerKey[questionIndex]
+    if (previousAnswer === answer) {
+      setEditingAnswer(null)
+      return
+    }
+
+    const affectedSubmissions = data.submissions.filter((submission) => {
+      if (submission.assessmentId !== assessment.id || !Array.isArray(submission.answers)) return false
+      const student = data.students.find((item) => item.id === submission.studentId)
+      if ((submission.classId || student?.classId) !== classId) return false
+      if (!explicitVersion) {
+        return true
+      }
+      if (submission.answerKeyVersionId) return submission.answerKeyVersionId === version.id
+      return getAnswerKeyVersionForStudent(assessment, student)?.id === version.id
+    })
+
+    setData((current) => {
+      const currentAssessment = current.assessments.find((item) => item.id === assessment.id)
+      if (!currentAssessment) return current
+      const storedVersion = currentAssessment.answerKeyVersions?.find((item) => item.id === version.id)
+      const currentKey = storedVersion?.answerKey || getAnswerKeyForClass(currentAssessment, classId)
+      const nextKey = currentKey.map((value, index) => index === questionIndex ? answer : value)
+      const updatedVersion = updateAnswerKeyVersionForClass(currentAssessment, classId, version.id, nextKey, current.students, () => savedVersionId)
+      const nextAssessment = updatedVersion.assessment
+
+      return {
+        ...current,
+        assessments: current.assessments.map((item) => item.id === assessment.id ? nextAssessment : item),
+        submissions: current.submissions.map((submission) => {
+          if (submission.assessmentId !== assessment.id || !Array.isArray(submission.answers)) return submission
+          const student = current.students.find((item) => item.id === submission.studentId)
+          const submissionClassId = submission.classId || student?.classId
+          const affected = submissionClassId === classId && (storedVersion
+            ? submission.answerKeyVersionId
+              ? submission.answerKeyVersionId === storedVersion.id
+              : getAnswerKeyVersionForStudent(currentAssessment, student)?.id === storedVersion.id
+            : true)
+          if (!affected) return submission
+          const graded = regradeAnswers(submission.answers, nextKey)
+          return {
+            ...submission,
+            ...graded,
+            answerKeySnapshot: [...nextKey],
+            answerKeyVersionId: storedVersion && updatedVersion.forked ? updatedVersion.versionId : submission.answerKeyVersionId,
+            answerKeyVersionLabel: storedVersion ? storedVersion.label : submission.answerKeyVersionLabel,
+            status: graded.multiple > 0 || graded.uncertain > 0 ? 'Revisar' : 'Corrigido',
+            regradedAt: new Date().toISOString(),
+          }
+        }),
+      }
+    })
+    setEditingAnswer(null)
+    const action = answer === null ? 'anulada' : answer === CANCELLED_ANSWER ? 'cancelada' : `alterada para ${answer}`
+    notify(
+      answer === null ? 'Questão anulada' : answer === CANCELLED_ANSWER ? 'Questão cancelada' : 'Gabarito atualizado',
+      `${version.label} de ${data.classes.find((item) => item.id === classId)?.name || 'turma'}, questão ${questionIndex + 1}: ${action}${affectedSubmissions.length ? `. ${affectedSubmissions.length} ${affectedSubmissions.length === 1 ? 'correção recalculada' : 'correções recalculadas'}` : ''}.`,
+    )
+  }
+
   return (
     <div className="assessment-detail">
       <div className="assessment-detail-heading">
@@ -151,7 +218,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       </section>
 
       <section className="assessment-detail-classes">
-        <header><h3>Turmas e gabaritos</h3><p>A versão correta será escolhida automaticamente pelo QR Code do aluno.</p></header>
+        <header><h3>Turmas e gabaritos</h3><p>Clique em uma resposta para alterá-la, anulá-la com ponto ou cancelá-la sem entrar na nota daquela versão.</p></header>
         {assessment.classIds.map((classId) => {
           const classroom = data.classes.find((item) => item.id === classId)
           const students = data.students.filter((student) => student.classId === classId && student.status === 'Ativo')
@@ -168,7 +235,28 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
                 <Badge tone={isCustom ? 'purple' : 'green'}>{keyVersions.length > 1 ? `${keyVersions.length} versões` : isCustom ? 'Gabarito específico' : 'Gabarito padrão'}</Badge>
               </div>
               <div className="assessment-detail-key-versions">
-                {(keyVersions.length ? keyVersions : [{ id: 'default', label: 'Gabarito', answerKey: key }]).map((version) => <div key={version.id}><strong>{version.label}</strong><div className="assessment-detail-key" aria-label={`${version.label} de ${classroom?.name}`}>{version.answerKey.map((answer, index) => <span key={index}><small>{String(index + 1).padStart(2, '0')}</small><strong>{answer || '—'}</strong></span>)}</div></div>)}
+                {(keyVersions.length ? keyVersions : [{ id: `class-${classId}`, label: 'Gabarito', answerKey: key }]).map((version) => {
+                  const activeQuestion = editingAnswer?.classId === classId && editingAnswer?.versionId === version.id ? editingAnswer.questionIndex : null
+                  return <div key={version.id}>
+                    <strong>{version.label}</strong>
+                    <div className="assessment-detail-key" aria-label={`${version.label} de ${classroom?.name}`}>
+                      {version.answerKey.map((answer, index) => <button type="button" key={index} className={cn(answer === null && 'is-annulled', answer === CANCELLED_ANSWER && 'is-cancelled', activeQuestion === index && 'is-editing')} onClick={() => setEditingAnswer({ classId, versionId: version.id, questionIndex: index })} aria-label={`Alterar questão ${index + 1}, ${answer === null ? 'anulada' : answer === CANCELLED_ANSWER ? 'cancelada' : `gabarito ${answer || 'não definido'}`}`} aria-expanded={activeQuestion === index}><small>{String(index + 1).padStart(2, '0')}</small><strong>{answer === null ? 'ANU' : answer === CANCELLED_ANSWER ? 'CAN' : answer || '—'}</strong></button>)}
+                    </div>
+                    {activeQuestion !== null && <div className="assessment-inline-key-editor">
+                      <div><span>Questão {String(activeQuestion + 1).padStart(2, '0')}</span><strong>{version.label} · {classroom?.name}</strong></div>
+                      <div className="assessment-inline-key-options" role="group" aria-label={`Novo gabarito da questão ${activeQuestion + 1}`}>
+                        {Array.from({ length: assessment.optionCount }, (_, optionIndex) => {
+                          const letter = String.fromCharCode(65 + optionIndex)
+                          return <button type="button" className={version.answerKey[activeQuestion] === letter ? 'selected' : ''} onClick={() => changeVersionAnswer(classId, version, activeQuestion, letter)} key={letter}>{letter}</button>
+                        })}
+                        <button type="button" className={cn('annul-question', version.answerKey[activeQuestion] === null && 'selected')} onClick={() => changeVersionAnswer(classId, version, activeQuestion, null)}><Ban size={13} /> Anular questão</button>
+                        <button type="button" className={cn('cancel-question', version.answerKey[activeQuestion] === CANCELLED_ANSWER && 'selected')} onClick={() => changeVersionAnswer(classId, version, activeQuestion, CANCELLED_ANSWER)}><CircleOff size={13} /> Cancelar questão</button>
+                        <button type="button" className="close-inline-key-editor" onClick={() => setEditingAnswer(null)} aria-label="Cancelar alteração"><X size={15} /></button>
+                      </div>
+                      <small>Anulada conta como acerto; cancelada é retirada do total de questões válidas. As correções desta versão são recalculadas automaticamente.</small>
+                    </div>}
+                  </div>
+                })}
               </div>
             </article>
           )
@@ -404,6 +492,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
       id: uid('assessment'), title: String(form.get('title')).trim(), code: String(form.get('code')).trim().toUpperCase(),
       subjects: [normalizedSubject], classIds: selectedClasses, questionCount, optionCount,
       answerSheetFormat: answerSheetLayout.id,
+      answerSheetMarkerLayout: CURRENT_MARKER_LAYOUT,
       questionAreas: normalizedAreas,
       answerKey: primaryAnswerKey,
       answerKeyVersions: savedVersions,
@@ -548,7 +637,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
                 </div>
                 <div className="bulk-area-control"><Field label="Aplicar uma área a todas"><input list="assessment-question-areas" value={bulkArea} onChange={(event) => setBulkArea(event.target.value)} placeholder="Digite ou selecione" /></Field><Button type="button" variant="secondary" icon={Layers3} onClick={applyAreaToAll}>Aplicar</Button></div>
               </div>
-              <div className="answer-sheet-format-note"><Badge tone="blue">Formato {answerSheetLayout.label}</Badge><span>O formato físico usa {answerSheetLayout.columns} {answerSheetLayout.columns === 1 ? 'coluna' : 'colunas'}, mas somente {questionCount} questão{questionCount !== 1 ? 'ões serão exibidas' : ' será exibida'}.</span></div>
+              <div className="answer-sheet-format-note"><Badge tone="blue">Formato {answerSheetLayout.label}</Badge><span>O formato físico usa {answerSheetLayout.columns} {answerSheetLayout.columns === 1 ? 'coluna' : 'colunas'} e marcadores protegidos ao redor das respostas; somente {questionCount} questão{questionCount !== 1 ? 'ões serão exibidas' : ' será exibida'}.</span></div>
 
               <div className="answer-key-version-manager">
                 <header><div className="answer-key-version-heading"><strong>Versões do gabarito</strong><small>Crie versões diferentes e escolha as turmas que receberão cada uma.</small></div><div className="answer-key-version-actions"><Button type="button" variant="ghost" size="sm" icon={Shuffle} onClick={randomizeActiveAnswerKey}>Aleatorizar {activeAnswerKeyVersion.label}</Button><Button type="button" variant="secondary" size="sm" icon={Plus} onClick={addAnswerKeyVersion}>Nova versão</Button></div></header>
@@ -576,7 +665,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
                 <label className="print-privacy-option"><input type="checkbox" checked={hidePrintRegistration} onChange={(event) => setHidePrintRegistration(event.target.checked)} /><span><strong>Ocultar matrícula</strong><small>O número de controle não aparecerá na folha.</small></span></label>
               </div>
               <div className="blank-sheet-note"><UserPlus size={17} /><p><strong>Aluno fora da lista?</strong>Use “Salvar folha sem aluno”. Nome, matrícula e turma poderão ser preenchidos à mão, e o cadastro será feito durante a correção.</p></div>
-              <div className="print-tip"><Printer size={18} /><p><strong>Configuração recomendada</strong>Papel A4, escala 100%, margens “nenhuma” e orientação retrato.</p></div>
+              <div className="print-tip"><Printer size={18} /><p><strong>Configuração recomendada</strong>Papel A4, escala 100%, margens “nenhuma” e orientação retrato. Os quatro marcadores ficam protegidos ao redor do quadro de respostas.</p></div>
             </aside>
             <div className="sheet-preview-area">
               {printStudents[0] && <div className="sheet-preview"><PrintableSheets students={[printStudents[0]]} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} /><span>Prévia · folha 1 de {printStudents.length}</span></div>}
