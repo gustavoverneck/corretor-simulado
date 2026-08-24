@@ -242,6 +242,31 @@ td > strong { color: #27362f; font-weight: 650; }
 .assessment-detail-progress > div:first-child { display: flex; align-items: center; justify-content: space-between; color: #6f7c76; font-size: 9px; }
 .assessment-detail-progress > div:first-child strong { color: #40534c; font-size: 9.5px; }
 .assessment-detail-progress .wide-progress { margin: 10px 0 4px; }
+.assessment-detail-areas { overflow: hidden; border: 1px solid #dfe6e2; border-radius: 10px; }
+.assessment-detail-areas > header { min-height: 67px; padding: 13px 15px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: #fafbfa; border-bottom: 1px solid #e7ebe8; }
+.assessment-detail-areas h3 { font-family: Georgia, serif; font-size: 15px; }
+.assessment-detail-areas header p { margin-top: 4px; color: #828e89; font-size: 9px; }
+.assessment-area-summary { padding: 11px 14px; display: flex; flex-wrap: wrap; gap: 7px; }
+.assessment-area-summary > span { min-height: 35px; padding: 7px 10px; display: flex; align-items: flex-start; flex-direction: column; justify-content: center; color: #48685e; background: #edf4f1; border: 1px solid #dbe8e2; border-radius: 7px; }
+.assessment-area-summary strong { font-size: 8.5px; }
+.assessment-area-summary small { margin-top: 3px; color: #7e8d87; font-size: 7px; }
+.assessment-area-editing { padding: 0 14px 14px; }
+.assessment-area-safety-note { padding: 10px 11px; display: flex; align-items: flex-start; gap: 9px; color: #4f7187; background: #f1f6f9; border: 1px solid #dce8ee; border-radius: 8px; }
+.assessment-area-safety-note svg { flex: 0 0 auto; }
+.assessment-area-safety-note p { display: flex; flex-direction: column; }
+.assessment-area-safety-note strong { color: #385b70; font-size: 9px; }
+.assessment-area-safety-note span { margin-top: 3px; color: #768791; font-size: 8px; line-height: 1.45; }
+.assessment-area-bulk { margin-top: 12px; display: flex; align-items: flex-end; gap: 7px; }
+.assessment-area-bulk .field { width: min(540px, 100%); }
+.assessment-area-choice { min-width: 0; display: grid; grid-template-columns: minmax(180px, 1fr) minmax(170px, .8fr); gap: 6px; }
+.assessment-area-grid { max-height: 330px; margin-top: 12px; padding: 10px; overflow: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; background: #f6f8f6; border: 1px solid #e5e9e6; border-radius: 9px; }
+.assessment-area-grid label { min-width: 0; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: white; border: 1px solid #e1e6e3; border-radius: 7px; }
+.assessment-area-grid label span { color: #697871; font-size: 7.5px; font-weight: 750; letter-spacing: .2px; text-transform: uppercase; }
+.assessment-area-grid .assessment-area-choice { grid-template-columns: 1fr; }
+.assessment-area-choice input, .assessment-area-choice select { min-width: 0; width: 100%; height: 30px; padding: 0 8px; color: #53615b; background-color: #fafbfa; border: 1px solid #dce2de; border-radius: 6px; font-size: 8.5px; }
+.assessment-area-choice select { padding-right: 28px; }
+.assessment-area-choice input:focus, .assessment-area-choice select:focus { border-color: #7d9e93; box-shadow: 0 0 0 2px rgba(78, 120, 108, .1); outline: 0; }
+.assessment-area-actions { margin-top: 12px; display: flex; justify-content: flex-end; gap: 7px; }
 .assessment-detail-classes > header { margin-bottom: 10px; }
 .assessment-detail-classes h3 { font-family: Georgia, serif; font-size: 15px; }
 .assessment-detail-classes header p { margin-top: 4px; color: #828e89; font-size: 9px; }
@@ -656,6 +681,13 @@ td > strong { color: #27362f; font-weight: 650; }
   .assessment-version-roster header label { align-items: stretch; }
   .assessment-version-roster header select { width: 100%; }
   .assessment-version-roster-summary { align-items: flex-start; flex-direction: column; }
+  .assessment-detail-areas > header { align-items: stretch; flex-direction: column; }
+  .assessment-detail-areas > header .button { width: 100%; }
+  .assessment-area-bulk { align-items: stretch; flex-direction: column; }
+  .assessment-area-bulk .field, .assessment-area-bulk .button { width: 100%; }
+  .assessment-area-grid { grid-template-columns: 1fr; }
+  .assessment-area-actions { flex-direction: column-reverse; }
+  .assessment-area-actions .button { width: 100%; }
   .modal-footer { flex-wrap: wrap; }
 }
 

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus } from 'lucide-react'
+import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { PrintableSheets } from '../components/AnswerSheet'
 import { createRandomAnswerKey, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, hasCustomAnswerKey } from '../lib/assessment'
-import { QUESTION_AREA_SUGGESTIONS, uniqueQuestionAreas } from '../lib/knowledgeAreas'
+import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS, uniqueQuestionAreas } from '../lib/knowledgeAreas'
 import { getAnswerSheetLayout } from '../lib/omr'
 import { average, cn, formatDate, initials, uid } from '../lib/utils'
 
@@ -25,11 +25,20 @@ function answerKeyVersionColor(assessment, versionId) {
 
 function AssessmentDetails({ assessment, data, setData, notify }) {
   const [studentClassFilter, setStudentClassFilter] = useState('all')
+  const [editingAreas, setEditingAreas] = useState(false)
+  const [areaDraft, setAreaDraft] = useState(() => getQuestionAreas(assessment))
+  const [bulkAreaDraft, setBulkAreaDraft] = useState('')
   const submissions = data.submissions.filter((item) => item.assessmentId === assessment.id)
   const totalStudents = data.students.filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo').length
   const progress = totalStudents ? Math.min(100, Math.round((submissions.length / totalStudents) * 100)) : 0
   const pendingReviews = submissions.filter((item) => item.status === 'Revisar').length
   const areaCount = uniqueQuestionAreas(assessment).length
+  const questionAreas = getQuestionAreas(assessment)
+  const areaSummary = [...questionAreas.reduce((summary, area) => summary.set(area, (summary.get(area) || 0) + 1), new Map()).entries()]
+  const declaredAreaOptions = [...new Set([
+    ...QUESTION_AREA_SUGGESTIONS,
+    ...data.assessments.flatMap((item) => getQuestionAreas(item)),
+  ])].filter(Boolean)
   const statusTone = assessment.status === 'Finalizado' ? 'neutral' : assessment.status.includes('andamento') ? 'ochre' : 'green'
   const versionedStudents = data.students
     .filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo')
@@ -57,6 +66,53 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
     notify('Versão alterada', `${student.name} agora está com ${selectedVersion.label}.`)
   }
 
+  function startEditingAreas() {
+    setAreaDraft(getQuestionAreas(assessment))
+    setBulkAreaDraft('')
+    setEditingAreas(true)
+  }
+
+  function cancelEditingAreas() {
+    setAreaDraft(getQuestionAreas(assessment))
+    setBulkAreaDraft('')
+    setEditingAreas(false)
+  }
+
+  function changeQuestionArea(index, value) {
+    setAreaDraft((current) => current.map((area, areaIndex) => areaIndex === index ? value : area))
+  }
+
+  function applyDetailAreaToAll() {
+    const normalized = bulkAreaDraft.trim()
+    if (!normalized) {
+      notify('Informe uma área', 'Digite ou selecione a área que será aplicada às questões.', 'warning')
+      return
+    }
+    setAreaDraft((current) => current.map(() => normalized))
+  }
+
+  function saveQuestionAreas() {
+    const normalizedAreas = areaDraft.slice(0, assessment.questionCount).map((area) => String(area || '').trim())
+    if (normalizedAreas.length !== assessment.questionCount || normalizedAreas.some((area) => !area)) {
+      notify('Área não definida', 'Informe a área de conhecimento de todas as questões.', 'warning')
+      return
+    }
+    const changedCount = normalizedAreas.filter((area, index) => area !== questionAreas[index]).length
+    setData((current) => ({
+      ...current,
+      assessments: current.assessments.map((item) => item.id === assessment.id ? { ...item, questionAreas: normalizedAreas } : item),
+    }))
+    setEditingAreas(false)
+    setBulkAreaDraft('')
+    notify(
+      changedCount ? 'Áreas atualizadas' : 'Áreas conferidas',
+      changedCount
+        ? `${changedCount} ${changedCount === 1 ? 'questão foi reclassificada' : 'questões foram reclassificadas'}. Notas e gabaritos não foram alterados.`
+        : 'Nenhuma classificação foi alterada.',
+      changedCount ? 'success' : 'info',
+    )
+  }
+
   return (
     <div className="assessment-detail">
       <div className="assessment-detail-heading">
@@ -72,6 +128,27 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       </div>
 
       <div className="assessment-detail-progress"><div><span>Andamento da correção</span><strong>{submissions.length} de {totalStudents}</strong></div><div className="wide-progress"><i style={{ width: `${progress}%` }} /></div></div>
+
+      <section className="assessment-detail-areas">
+        <header>
+          <div><h3>Áreas das questões</h3><p>Classifique cada questão para organizar os filtros e as análises pedagógicas.</p></div>
+          {!editingAreas && <Button variant="secondary" size="sm" icon={PencilLine} onClick={startEditingAreas}>Editar áreas</Button>}
+        </header>
+        <div className="assessment-area-summary">
+          {areaSummary.map(([area, count]) => <span key={area}><strong>{area}</strong><small>{count} {count === 1 ? 'questão' : 'questões'}</small></span>)}
+        </div>
+        {editingAreas && <div className="assessment-area-editing">
+          <div className="assessment-area-safety-note"><AlertTriangle size={17} /><p><strong>Alteração segura</strong><span>As respostas, os gabaritos e as notas não mudam. Resultados por área serão reagrupados, inclusive nas {submissions.length} {submissions.length === 1 ? 'correção existente' : 'correções existentes'}.</span></p></div>
+          <div className="assessment-area-bulk">
+            <Field label="Aplicar uma área a todas"><div className="assessment-area-choice"><input value={bulkAreaDraft} onChange={(event) => setBulkAreaDraft(event.target.value)} placeholder="Digite uma área personalizada" /><select value={declaredAreaOptions.includes(bulkAreaDraft) ? bulkAreaDraft : ''} onChange={(event) => event.target.value && setBulkAreaDraft(event.target.value)} aria-label="Escolher área cadastrada para todas as questões"><option value="">Escolher área cadastrada</option>{declaredAreaOptions.map((area) => <option value={area} key={area}>{area}</option>)}</select></div></Field>
+            <Button variant="secondary" size="sm" icon={Layers3} onClick={applyDetailAreaToAll}>Aplicar</Button>
+          </div>
+          <div className="assessment-area-grid">
+            {areaDraft.map((area, index) => <label key={index}><span>Questão {String(index + 1).padStart(2, '0')}</span><div className="assessment-area-choice"><input value={area} onChange={(event) => changeQuestionArea(index, event.target.value)} placeholder="Digite uma área personalizada" /><select value={declaredAreaOptions.includes(area) ? area : ''} onChange={(event) => event.target.value && changeQuestionArea(index, event.target.value)} aria-label={`Escolher área cadastrada para a questão ${index + 1}`}><option value="">Escolher área cadastrada</option>{declaredAreaOptions.map((option) => <option value={option} key={option}>{option}</option>)}</select></div></label>)}
+          </div>
+          <div className="assessment-area-actions"><Button variant="ghost" size="sm" icon={X} onClick={cancelEditingAreas}>Cancelar</Button><Button size="sm" icon={CheckCircle2} onClick={saveQuestionAreas}>Salvar áreas</Button></div>
+        </div>}
+      </section>
 
       <section className="assessment-detail-classes">
         <header><h3>Turmas e gabaritos</h3><p>A versão correta será escolhida automaticamente pelo QR Code do aluno.</p></header>
