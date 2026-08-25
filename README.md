@@ -46,11 +46,11 @@ npm run preview
 O caminho operacional adotado é o relatório nominal exportado pelo usuário institucional:
 
 1. gerar no SEGES a relação de alunos da escola para o ano letivo atual;
-2. incluir, quando disponíveis, matrícula, nome, turma, série/etapa, turno, situação, escola e INEP;
+2. gerar a relação com `Número`, `Nome do aluno`, `Status`, `Nome da turma` e `Data e hora da captura`;
 3. exportar em CSV ou XLSX;
-4. abrir **Importar SEGES**, enviar o arquivo, conferir o mapeamento e concluir.
+4. abrir **Importar SEGES**, enviar o arquivo, definir o turno, conferir o mapeamento e concluir.
 
-Matrícula, nome e turma são os únicos campos obrigatórios. Variações como `MATRICULA_ALUNO`, `Nome Civil`, `Classe`, `Série/Ano` e `Situação da Matrícula` são reconhecidas automaticamente. Turmas inexistentes são criadas; alunos existentes são atualizados pela matrícula.
+Nome, turma e status são os campos obrigatórios; o número sequencial do relatório não é tratado como matrícula. A série pode ser obtida do primeiro dígito da turma (`1`, `2` ou `3`), o turno pode ser definido manualmente e escola/INEP podem usar os dados cadastrados em **Configurações → Escola**. Somente alunos com status `Sem status` ou `Em transferência` são incluídos; registros `Transferido` e linhas auxiliares são ignorados. Turmas inexistentes são criadas e, sem matrícula externa, os alunos são conciliados por nome e turma.
 
 Documentos da SEDU confirmam que o SEGES concentra dados de alunos, turmas e escolas e disponibiliza relatórios. Uma especificação oficial também descreve o consumo de um relatório de alunos do SEGES e relaciona campos como matrícula, nome, tipo de ensino, série, turno e escola.
 

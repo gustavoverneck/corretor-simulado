@@ -5,13 +5,20 @@ import { nextStudentRegistration, normalize, uid } from './utils.js'
 export const fieldDefinitions = [
   { key: 'registration', label: 'Matrícula / ID', required: false, aliases: ['matricula', 'matricula aluno', 'id aluno', 'codigo aluno', 'cod aluno', 'inep aluno', 'codigo'] },
   { key: 'name', label: 'Nome do aluno', required: true, aliases: ['nome', 'aluno', 'nome aluno', 'nome civil', 'nome estudante', 'estudante'] },
-  { key: 'className', label: 'Turma', required: true, aliases: ['turma', 'classe', 'nome turma', 'descricao turma'] },
+  { key: 'className', label: 'Turma', required: true, aliases: ['turma', 'classe', 'nome turma', 'nome da turma', 'descricao turma'] },
   { key: 'grade', label: 'Série / etapa', required: false, aliases: ['serie', 'ano', 'etapa', 'ano serie', 'etapa modalidade', 'serie ano'] },
   { key: 'shift', label: 'Turno', required: false, aliases: ['turno', 'periodo', 'horario'] },
-  { key: 'status', label: 'Situação', required: false, aliases: ['situacao', 'status', 'situacao matricula', 'status aluno'] },
+  { key: 'status', label: 'Situação', required: true, aliases: ['situacao', 'status', 'situacao matricula', 'status aluno'] },
   { key: 'school', label: 'Escola', required: false, aliases: ['escola', 'nome escola', 'unidade escolar'] },
   { key: 'schoolInep', label: 'INEP da escola', required: false, aliases: ['inep escola', 'codigo inep escola', 'cod escola'] },
 ]
+
+export const mappingSources = {
+  gradeFromClass: '__grade_from_class__',
+  manualShift: '__manual_shift__',
+  settingsSchool: '__settings_school__',
+  settingsInep: '__settings_inep__',
+}
 
 export async function readSegesFile(file) {
   if (/\.csv$/i.test(file.name)) {
@@ -90,20 +97,66 @@ export function autoMapHeaders(headers) {
     const partial = headers.find((header) => aliasSet.some((alias) => normalize(header).includes(alias) || alias.includes(normalize(header))))
     mapping[field.key] = exact || partial || ''
   })
+  if (!mapping.grade && mapping.className) mapping.grade = mappingSources.gradeFromClass
+  if (!mapping.shift) mapping.shift = mappingSources.manualShift
+  if (!mapping.school) mapping.school = mappingSources.settingsSchool
+  if (!mapping.schoolInep) mapping.schoolInep = mappingSources.settingsInep
   return mapping
 }
 
-export function validateMapping(mapping) {
-  return fieldDefinitions
+export function validateMapping(mapping, options = {}) {
+  const missing = fieldDefinitions
     .filter((field) => field.required && !mapping[field.key])
     .map((field) => field.label)
+  if (mapping.shift === mappingSources.manualShift && !String(options.manualShift ?? '').trim()) {
+    missing.push('Turno (valor manual)')
+  }
+  return missing
 }
 
 function mapped(row, mapping, key) {
   return String(row[mapping[key]] ?? '').trim()
 }
 
-export function importSegesRows(state, rows, mapping, filename) {
+export function gradeFromClassName(className) {
+  const firstDigit = String(className ?? '').match(/\d/)?.[0]
+  return ['1', '2', '3'].includes(firstDigit) ? `${firstDigit}ª série` : ''
+}
+
+export function resolveSegesValue(row, mapping, key, options = {}) {
+  let value = ''
+  if (key === 'grade' && mapping[key] === mappingSources.gradeFromClass) {
+    value = gradeFromClassName(mapped(row, mapping, 'className'))
+  } else if (key === 'shift' && mapping[key] === mappingSources.manualShift) {
+    value = options.manualShift
+  } else if (key === 'school' && mapping[key] === mappingSources.settingsSchool) {
+    value = options.school?.name
+  } else if (key === 'schoolInep' && mapping[key] === mappingSources.settingsInep) {
+    value = options.school?.inep
+  } else {
+    value = mapped(row, mapping, key)
+  }
+  return String(value ?? '').replace(/\s+/g, ' ').trim()
+}
+
+export function isSegesStatusEligible(status) {
+  return ['sem status', 'em transferencia'].includes(normalize(status))
+}
+
+export function isSegesAuxiliaryRow(row) {
+  return Object.values(row).some((value) => normalize(value) === 'lancar para todos')
+}
+
+export function isSegesRowEligible(row, mapping, options = {}) {
+  if (isSegesAuxiliaryRow(row)) return false
+  if (mapping.status && !isSegesStatusEligible(resolveSegesValue(row, mapping, 'status', options))) return false
+  return Boolean(
+    resolveSegesValue(row, mapping, 'name', options)
+    && resolveSegesValue(row, mapping, 'className', options),
+  )
+}
+
+export function importSegesRows(state, rows, mapping, filename, options = {}) {
   const classes = [...state.classes]
   const students = [...state.students]
   const knownStudents = new Map(students.map((student, index) => [normalize(student.registration), index]))
@@ -115,11 +168,24 @@ export function importSegesRows(state, rows, mapping, filename) {
   const errors = []
 
   rows.forEach((row, rowIndex) => {
-    const providedRegistration = mapped(row, mapping, 'registration')
-    const name = mapped(row, mapping, 'name')
-    const className = mapped(row, mapping, 'className')
-    const grade = mapped(row, mapping, 'grade') || 'Não informada'
-    const shift = mapped(row, mapping, 'shift') || 'Não informado'
+    const resolverOptions = { ...options, school: state.school }
+    if (isSegesAuxiliaryRow(row)) {
+      skipped += 1
+      errors.push(`Linha ${rowIndex + 2}: linha auxiliar “LANÇAR PARA TODOS” ignorada.`)
+      return
+    }
+    const importedStatus = resolveSegesValue(row, mapping, 'status', resolverOptions)
+    if (mapping.status && !isSegesStatusEligible(importedStatus)) {
+      skipped += 1
+      errors.push(`Linha ${rowIndex + 2}: situação “${importedStatus || 'vazia'}” ignorada.`)
+      return
+    }
+
+    const providedRegistration = resolveSegesValue(row, mapping, 'registration', resolverOptions)
+    const name = resolveSegesValue(row, mapping, 'name', resolverOptions)
+    const className = resolveSegesValue(row, mapping, 'className', resolverOptions)
+    const grade = resolveSegesValue(row, mapping, 'grade', resolverOptions) || 'Não informada'
+    const shift = resolveSegesValue(row, mapping, 'shift', resolverOptions) || 'Não informado'
     if (!name || !className) {
       skipped += 1
       errors.push(`Linha ${rowIndex + 2}: nome ou turma ausente.`)
@@ -148,7 +214,8 @@ export function importSegesRows(state, rows, mapping, filename) {
       registrationType: providedRegistration ? 'external' : students[existingIndex]?.registrationType || 'internal',
       name,
       classId: classroom.id,
-      status: mapped(row, mapping, 'status') || 'Ativo',
+      status: 'Ativo',
+      sourceStatus: importedStatus || undefined,
       source: 'SEGES',
       updatedAt: new Date().toISOString(),
     }
@@ -167,6 +234,8 @@ export function importSegesRows(state, rows, mapping, filename) {
 
   const historyEntry = {
     id: uid('import'), filename, createdAt: new Date().toISOString(), added, updated, skipped, source: 'SEGES',
+    school: resolveSegesValue(rows[0] || {}, mapping, 'school', { ...options, school: state.school }) || state.school?.name,
+    schoolInep: resolveSegesValue(rows[0] || {}, mapping, 'schoolInep', { ...options, school: state.school }) || state.school?.inep,
   }
   return {
     state: { ...state, classes, students, importHistory: [historyEntry, ...state.importHistory] },
@@ -176,9 +245,9 @@ export function importSegesRows(state, rows, mapping, filename) {
 
 export function sampleCsv() {
   const rows = [
-    ['Matrícula', 'Nome do Aluno', 'Turma', 'Série', 'Turno', 'Situação', 'Escola', 'INEP Escola'],
-    ['20260012345', 'Maria da Silva Santos', '9º A', '9º ano', 'Matutino', 'Ativo', 'EEEFM Exemplo', '32000001'],
-    ['20260012346', 'João Pereira Souza', '9º A', '9º ano', 'Matutino', 'Ativo', 'EEEFM Exemplo', '32000001'],
+    ['Número', 'Nome do aluno', 'Status', 'Nome da turma', 'Data e hora da captura'],
+    ['1', 'Maria da Silva Santos', 'Sem status', '2ªIV01-EMI-LOG', '2026-08-25T19:13:52.389Z'],
+    ['2', 'João Pereira Souza', 'Transferido', '2ªIV01-EMI-LOG', '2026-08-25T19:13:52.390Z'],
   ]
   return rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';')).join('\n')
 }

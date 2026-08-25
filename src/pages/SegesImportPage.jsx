@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { UploadCloud, FileSpreadsheet, Database, CheckCircle2, AlertTriangle, Download, ArrowRight, RefreshCw, ShieldCheck, Clock3, FileCheck2, Info, X } from 'lucide-react'
 import { Badge, Button } from '../components/ui'
-import { autoMapHeaders, fieldDefinitions, importSegesRows, readSegesFile, sampleCsv, validateMapping } from '../lib/seges'
+import { autoMapHeaders, fieldDefinitions, importSegesRows, isSegesRowEligible, mappingSources, readSegesFile, resolveSegesValue, sampleCsv, validateMapping } from '../lib/seges'
 import { cn, downloadBlob, formatDateTime } from '../lib/utils'
 
 export function SegesImportPage({ data, setData, setPage, notify }) {
@@ -10,6 +10,7 @@ export function SegesImportPage({ data, setData, setPage, notify }) {
   const [loading, setLoading] = useState(false)
   const [fileInfo, setFileInfo] = useState(null)
   const [mapping, setMapping] = useState({})
+  const [manualShift, setManualShift] = useState('')
   const [summary, setSummary] = useState(null)
 
   async function selectFile(file) {
@@ -24,6 +25,7 @@ export function SegesImportPage({ data, setData, setPage, notify }) {
       if (!parsed.rows.length) throw new Error('A primeira planilha não contém registros.')
       setFileInfo({ ...parsed, name: file.name, size: file.size })
       setMapping(autoMapHeaders(parsed.headers))
+      setManualShift('')
     } catch (error) {
       notify('Falha ao abrir o relatório', error.message || 'Verifique o arquivo exportado.', 'warning')
     } finally {
@@ -32,24 +34,36 @@ export function SegesImportPage({ data, setData, setPage, notify }) {
   }
 
   function confirmImport() {
-    const missing = validateMapping(mapping)
+    const missing = validateMapping(mapping, { manualShift })
     if (missing.length) {
       notify('Mapeamento incompleto', `Associe as colunas: ${missing.join(', ')}.`, 'warning')
       return
     }
-    const imported = importSegesRows(data, fileInfo.rows, mapping, fileInfo.name)
+    const imported = importSegesRows(data, fileInfo.rows, mapping, fileInfo.name, { manualShift })
     setData(imported.state)
     setSummary(imported.summary)
     notify('Importação concluída', `${imported.summary.added} novos e ${imported.summary.updated} atualizados.`)
   }
 
   function clearFile() {
-    setFileInfo(null); setMapping({}); setSummary(null)
+    setFileInfo(null); setMapping({}); setManualShift(''); setSummary(null)
     if (inputRef.current) inputRef.current.value = ''
   }
 
   function downloadTemplate() {
     downloadBlob(new Blob([`\ufeff${sampleCsv()}`], { type: 'text/csv;charset=utf-8' }), 'modelo-importacao-seges.csv')
+  }
+
+  const resolverOptions = { manualShift, school: data.school }
+  const mappingMissing = validateMapping(mapping, { manualShift })
+  const importableRows = fileInfo?.rows.filter((row) => isSegesRowEligible(row, mapping, resolverOptions)) || []
+
+  function specialOptions(field) {
+    if (field.key === 'grade') return <option value={mappingSources.gradeFromClass}>Usar o 1º dígito da turma</option>
+    if (field.key === 'shift') return <option value={mappingSources.manualShift}>Definir manualmente</option>
+    if (field.key === 'school') return <option value={mappingSources.settingsSchool}>Usar escola das configurações</option>
+    if (field.key === 'schoolInep') return <option value={mappingSources.settingsInep}>Usar INEP das configurações</option>
+    return null
   }
 
   return (
@@ -80,18 +94,22 @@ export function SegesImportPage({ data, setData, setPage, notify }) {
           <aside className="panel seges-howto">
             <h3>Como obter o arquivo</h3>
             <ol><li><span>1</span><p>Acesse o <strong>SEGES</strong> com seu acesso institucional.</p></li><li><span>2</span><p>Abra a área de <strong>Relatórios</strong> e gere a relação nominal de alunos.</p></li><li><span>3</span><p>Filtre o <strong>ano letivo, escola e situação da matrícula</strong>.</p></li><li><span>4</span><p>Exporte em <strong>Excel ou CSV</strong> e envie ao lado.</p></li></ol>
-            <div className="howto-note"><Info size={17} /><p>Os nomes dos menus podem variar conforme seu nível de acesso no SEGES. Em dúvida, use a relação de alunos que contenha matrícula, nome, turma, série e turno.</p></div>
+            <div className="howto-note"><Info size={17} /><p>O formato com Número, Nome do aluno, Status, Nome da turma e Data da captura é reconhecido. Turno, escola e INEP podem vir das configurações.</p></div>
           </aside>
         </div>
       ) : !summary ? (
         <section className="panel mapping-panel">
           <header className="selected-file"><span><FileCheck2 size={24} /></span><div><strong>{fileInfo.name}</strong><small>{fileInfo.rows.length} linhas · {(fileInfo.size / 1024).toFixed(1)} KB · aba “{fileInfo.sheetName}”</small></div><Badge tone="green">Arquivo lido</Badge><button className="icon-button" onClick={clearFile}><X size={18} /></button></header>
-          <div className="mapping-heading"><div><h3>Associe as colunas</h3><p>Já reconhecemos as correspondências mais prováveis. Confira antes de importar.</p></div><Badge tone={validateMapping(mapping).length ? 'ochre' : 'green'}>{validateMapping(mapping).length ? `${validateMapping(mapping).length} obrigatória(s) pendente(s)` : 'Campos obrigatórios OK'}</Badge></div>
+          <div className="mapping-heading"><div><h3>Associe as colunas e fontes</h3><p>Use uma coluna do arquivo ou uma das opções automáticas. Confira antes de importar.</p></div><Badge tone={mappingMissing.length ? 'ochre' : 'green'}>{mappingMissing.length ? `${mappingMissing.length} configuração(ões) pendente(s)` : 'Campos obrigatórios OK'}</Badge></div>
           <div className="mapping-grid">
-            {fieldDefinitions.map((field) => <label className={cn('mapping-field', field.required && !mapping[field.key] && 'missing')} key={field.key}><span>{field.label}{field.required && <b> obrigatório</b>}</span><select value={mapping[field.key] || ''} onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Não importar</option>{fileInfo.headers.map((header) => <option value={header} key={header}>{header}</option>)}</select><small>Prévia: {mapping[field.key] ? String(fileInfo.rows[0][mapping[field.key]] || '—') : '—'}</small></label>)}
+            {fieldDefinitions.map((field) => {
+              const isMissing = (field.required && !mapping[field.key]) || (field.key === 'shift' && mapping.shift === mappingSources.manualShift && !manualShift)
+              const preview = resolveSegesValue(fileInfo.rows[0], mapping, field.key, resolverOptions)
+              return <label className={cn('mapping-field', isMissing && 'missing')} key={field.key}><span>{field.label}{field.required && <b> obrigatório</b>}</span><select value={mapping[field.key] || ''} onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}><option value="">Não importar</option>{specialOptions(field)}{fileInfo.headers.map((header) => <option value={header} key={header}>{header}</option>)}</select>{field.key === 'shift' && mapping.shift === mappingSources.manualShift && <select className="mapping-manual-control" aria-label="Turno definido manualmente" value={manualShift} onChange={(event) => setManualShift(event.target.value)}><option value="">Selecione o turno</option><option>Matutino</option><option>Vespertino</option><option>Noturno</option><option>Integral</option></select>}<small>Prévia: {preview || '—'}</small></label>
+            })}
           </div>
-          <div className="data-preview"><h3>Prévia dos registros <span>primeiras 5 linhas</span></h3><div className="table-wrap"><table><thead><tr><th>MATRÍCULA</th><th>NOME</th><th>TURMA</th><th>SÉRIE</th><th>TURNO</th><th>SITUAÇÃO</th></tr></thead><tbody>{fileInfo.rows.slice(0, 5).map((row, index) => <tr key={index}><td>{row[mapping.registration] || '—'}</td><td><strong>{row[mapping.name] || '—'}</strong></td><td>{row[mapping.className] || '—'}</td><td>{row[mapping.grade] || '—'}</td><td>{row[mapping.shift] || '—'}</td><td>{row[mapping.status] || 'Ativo'}</td></tr>)}</tbody></table></div></div>
-          <footer className="mapping-footer"><div><ShieldCheck size={18} /><p><strong>Matrícula opcional</strong>Quando não houver matrícula, o app criará um número interno automaticamente.</p></div><Button variant="ghost" onClick={clearFile}>Trocar arquivo</Button><Button icon={ArrowRight} onClick={confirmImport}>Importar {fileInfo.rows.length} registros</Button></footer>
+          <div className="data-preview"><h3>Prévia dos registros <span>primeiras 5 linhas</span></h3><div className="table-wrap"><table><thead><tr><th>MATRÍCULA</th><th>NOME</th><th>TURMA</th><th>SÉRIE</th><th>TURNO</th><th>SITUAÇÃO</th><th>IMPORTAÇÃO</th></tr></thead><tbody>{fileInfo.rows.slice(0, 5).map((row, index) => { const status = resolveSegesValue(row, mapping, 'status', resolverOptions); const eligible = isSegesRowEligible(row, mapping, resolverOptions); return <tr key={index}><td>{resolveSegesValue(row, mapping, 'registration', resolverOptions) || '—'}</td><td><strong>{resolveSegesValue(row, mapping, 'name', resolverOptions) || '—'}</strong></td><td>{resolveSegesValue(row, mapping, 'className', resolverOptions) || '—'}</td><td>{resolveSegesValue(row, mapping, 'grade', resolverOptions) || '—'}</td><td>{resolveSegesValue(row, mapping, 'shift', resolverOptions) || '—'}</td><td>{status || '—'}</td><td><Badge tone={eligible ? 'green' : 'neutral'}>{eligible ? 'Incluir' : 'Ignorar'}</Badge></td></tr> })}</tbody></table></div></div>
+          <footer className="mapping-footer"><div><ShieldCheck size={18} /><p><strong>Filtro automático do SEGES</strong>Somente “Sem status” e “Em transferência” são incluídos; transferidos são ignorados. Sem matrícula, o app cria um número interno.</p></div><Button variant="ghost" onClick={clearFile}>Trocar arquivo</Button><Button icon={ArrowRight} onClick={confirmImport}>Importar {importableRows.length} aluno{importableRows.length !== 1 ? 's' : ''}</Button></footer>
         </section>
       ) : (
         <section className="panel import-success">
