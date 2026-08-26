@@ -8,6 +8,14 @@ import {
   resolveSegesValue,
   validateMapping,
 } from '../src/lib/seges.js'
+import {
+  buildSegesResultRows,
+  calculateAssessmentResult,
+  formatSegesGrade,
+  SEGES_RESULT_STATUS,
+  segesResultsFilename,
+  serializeSegesResultsCsv,
+} from '../src/lib/segesResults.js'
 
 const headers = ['Número', 'Nome do aluno', 'Status', 'Nome da turma', 'Data e hora da captura']
 const parsed = await readSegesFile({
@@ -61,4 +69,80 @@ assert.equal(result.state.students.some((student) => student.name === 'Não aval
 assert.equal(result.state.importHistory[0].school, 'EEEFM Exemplo')
 assert.equal(result.state.importHistory[0].schoolInep, '32000001')
 
-console.log('Importador SEGES: todos os testes passaram.')
+const assessment = {
+  id: 'assessment-test',
+  code: 'SIM-01',
+  title: 'Simulado de teste',
+  classIds: ['class-a'],
+  questionCount: 4,
+  questionAreas: ['Matemática', 'Matemática', 'Linguagens', 'Linguagens'],
+  subjects: ['Matemática', 'Linguagens'],
+}
+const detailedSubmission = {
+  id: 'submission-a',
+  assessmentId: assessment.id,
+  studentId: 'student-a',
+  status: 'Corrigido',
+  answers: [
+    { status: 'correct' },
+    { status: 'wrong' },
+    { status: 'cancelled' },
+    { status: 'correct' },
+  ],
+}
+assert.deepEqual(calculateAssessmentResult(detailedSubmission, assessment, 'all', 10), {
+  correct: 2,
+  valid: 3,
+  percentage: 2 / 3 * 100,
+  grade: 6.7,
+})
+assert.deepEqual(calculateAssessmentResult(detailedSubmission, assessment, 'Matemática', 10), {
+  correct: 1,
+  valid: 2,
+  percentage: 50,
+  grade: 5,
+})
+assert.deepEqual(calculateAssessmentResult(detailedSubmission, assessment, 'Linguagens', 10), {
+  correct: 1,
+  valid: 1,
+  percentage: 100,
+  grade: 10,
+})
+assert.equal(formatSegesGrade(6.7), '6,7')
+
+const resultStudents = [
+  { id: 'student-a', registration: '100', name: 'ALUNA A', classId: 'class-a', status: 'Ativo' },
+  { id: 'student-b', registration: '101', name: 'ALUNO B', classId: 'class-a', status: 'Ativo' },
+  { id: 'student-c', registration: '102', name: 'ALUNO C', classId: 'class-a', status: 'Ativo' },
+]
+const resultRows = buildSegesResultRows({
+  assessment,
+  classes: [{ id: 'class-a', name: '1ªIV01-EM-MCN' }],
+  students: resultStudents,
+  submissions: [
+    detailedSubmission,
+    { ...detailedSubmission, id: 'submission-b', studentId: 'student-b', status: 'Revisar' },
+  ],
+  classIds: ['class-a'],
+  scope: 'Matemática',
+  maxGrade: 10,
+})
+assert.deepEqual(resultRows.map((row) => row.status), [
+  SEGES_RESULT_STATUS.ready,
+  SEGES_RESULT_STATUS.review,
+  SEGES_RESULT_STATUS.missing,
+])
+assert.deepEqual(resultRows.map((row) => row.exportable), [true, false, false])
+
+const resultCsv = serializeSegesResultsCsv(resultRows, {
+  assessment,
+  exportId: 'export-1',
+  scope: 'Matemática',
+  maxGrade: 10,
+})
+assert.match(resultCsv, /"AREA";"Matemática"/)
+assert.match(resultCsv, /"ALUNA A";"100";"1";"2";"5,0";"10,0";"PRONTO"/)
+assert.match(resultCsv, /"ALUNO B";"101";"1";"2";"";"10,0";"REVISAR"/)
+assert.equal(segesResultsFilename(assessment, 'Matemática'), 'notas-seges-sim-01-matematica.csv')
+
+console.log('Integração SEGES: todos os testes passaram.')

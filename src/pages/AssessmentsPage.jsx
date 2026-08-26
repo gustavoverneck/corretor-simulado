@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
-import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff } from 'lucide-react'
+import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff, Download, FileSpreadsheet } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { PrintableSheets } from '../components/AnswerSheet'
 import { CANCELLED_ANSWER, createRandomAnswerKey, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, hasCustomAnswerKey, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS, uniqueQuestionAreas } from '../lib/knowledgeAreas'
 import { CURRENT_MARKER_LAYOUT, getAnswerSheetLayout } from '../lib/omr'
-import { average, cn, formatDate, initials, uid } from '../lib/utils'
+import { buildSegesResultRows, calculateAssessmentResult, formatSegesGrade, SEGES_RESULT_STATUS, segesResultsFilename, serializeSegesResultsCsv, indexAssessmentSubmissions } from '../lib/segesResults'
+import { average, cn, downloadBlob, formatDate, initials, uid } from '../lib/utils'
 
 const subjectOptions = ['Língua Portuguesa', 'Matemática', 'Ciências da Natureza', 'Ciências Humanas', 'Linguagens']
 
@@ -25,6 +26,10 @@ function answerKeyVersionColor(assessment, versionId) {
 
 function AssessmentDetails({ assessment, data, setData, notify }) {
   const [studentClassFilter, setStudentClassFilter] = useState('all')
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportClassIds, setExportClassIds] = useState(assessment.classIds)
+  const [exportScope, setExportScope] = useState('all')
+  const [exportMaxGrade, setExportMaxGrade] = useState('10')
   const [editingAreas, setEditingAreas] = useState(false)
   const [areaDraft, setAreaDraft] = useState(() => getQuestionAreas(assessment))
   const [bulkAreaDraft, setBulkAreaDraft] = useState('')
@@ -36,6 +41,25 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const areaCount = uniqueQuestionAreas(assessment).length
   const questionAreas = getQuestionAreas(assessment)
   const areaSummary = [...questionAreas.reduce((summary, area) => summary.set(area, (summary.get(area) || 0) + 1), new Map()).entries()]
+  const submissionsByStudent = useMemo(
+    () => indexAssessmentSubmissions(data.submissions, assessment.id),
+    [assessment.id, data.submissions],
+  )
+  const parsedExportMaxGrade = Number(String(exportMaxGrade).replace(',', '.'))
+  const validExportMaxGrade = Number.isFinite(parsedExportMaxGrade) && parsedExportMaxGrade > 0 && parsedExportMaxGrade <= 100
+  const exportRows = useMemo(() => buildSegesResultRows({
+    assessment,
+    classes: data.classes,
+    students: data.students,
+    submissions: data.submissions,
+    classIds: exportClassIds,
+    scope: exportScope,
+    maxGrade: validExportMaxGrade ? parsedExportMaxGrade : 10,
+  }), [assessment, data.classes, data.students, data.submissions, exportClassIds, exportScope, parsedExportMaxGrade, validExportMaxGrade])
+  const exportSummary = exportRows.reduce((summary, row) => {
+    summary[row.status] = (summary[row.status] || 0) + 1
+    return summary
+  }, {})
   const declaredAreaOptions = [...new Set([
     ...QUESTION_AREA_SUGGESTIONS,
     ...data.assessments.flatMap((item) => getQuestionAreas(item)),
@@ -65,6 +89,52 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       } : item),
     }))
     notify('Versão alterada', `${student.name} agora está com ${selectedVersion.label}.`)
+  }
+
+  function openResultExport() {
+    setExportClassIds([...assessment.classIds])
+    setExportScope('all')
+    setExportMaxGrade('10')
+    setExportOpen(true)
+  }
+
+  function toggleExportClass(classId) {
+    setExportClassIds((current) => current.includes(classId)
+      ? current.filter((id) => id !== classId)
+      : [...current, classId])
+  }
+
+  function exportSegesResults() {
+    if (!exportClassIds.length) {
+      notify('Selecione uma turma', 'Inclua ao menos uma turma no arquivo de notas.', 'warning')
+      return
+    }
+    if (!validExportMaxGrade) {
+      notify('Nota máxima inválida', 'Informe um valor maior que zero e menor ou igual a 100.', 'warning')
+      return
+    }
+    const ready = exportRows.filter((row) => row.exportable).length
+    if (!ready) {
+      notify('Nenhuma nota pronta', 'O recorte selecionado não possui correções prontas para lançamento.', 'warning')
+      return
+    }
+
+    const csv = serializeSegesResultsCsv(exportRows, {
+      assessment,
+      exportId: `seges-${Date.now().toString(36)}`,
+      scope: exportScope,
+      maxGrade: parsedExportMaxGrade,
+    })
+    downloadBlob(
+      new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }),
+      segesResultsFilename(assessment, exportScope),
+    )
+    setExportOpen(false)
+    const pending = exportRows.length - ready
+    notify(
+      'Notas exportadas',
+      `${ready} ${ready === 1 ? 'nota pronta' : 'notas prontas'} para o SEGES${pending ? `; ${pending} pendência${pending !== 1 ? 's' : ''} registrada${pending !== 1 ? 's' : ''} no arquivo` : ''}.`,
+    )
   }
 
   function startEditingAreas() {
@@ -265,24 +335,65 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
 
       <section className="assessment-version-roster">
         <header>
-          <div><h3>Versão por aluno</h3><p>Informação exclusiva do professor. A versão não aparece na folha de respostas.</p></div>
-          <label><span>Filtrar por turma</span><select value={studentClassFilter} onChange={(event) => setStudentClassFilter(event.target.value)}><option value="all">Todas as turmas</option>{assessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); return <option value={classId} key={classId}>{classroom?.name || 'Turma removida'}</option> })}</select></label>
+          <div><h3>Alunos e resultados</h3><p>Confira a nota geral, a situação da correção e a versão de gabarito de cada aluno.</p></div>
+          <div className="assessment-roster-actions"><Button variant="secondary" size="sm" icon={Download} onClick={openResultExport}>Exportar notas</Button><label><span>Filtrar por turma</span><select value={studentClassFilter} onChange={(event) => setStudentClassFilter(event.target.value)}><option value="all">Todas as turmas</option>{assessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); return <option value={classId} key={classId}>{classroom?.name || 'Turma removida'}</option> })}</select></label></div>
         </header>
-        <div className="assessment-version-roster-summary"><Badge tone="blue">{versionedStudents.length} aluno{versionedStudents.length !== 1 ? 's' : ''}</Badge><span>Distribuição usada automaticamente na impressão e na correção.</span></div>
+        <div className="assessment-version-roster-summary"><Badge tone="blue">{versionedStudents.length} aluno{versionedStudents.length !== 1 ? 's' : ''}</Badge><span>Notas exibidas na escala de 0 a 10.</span></div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>ALUNO</th><th>TURMA</th><th>VERSÃO DO GABARITO</th></tr></thead>
+            <thead><tr><th>ALUNO</th><th>TURMA</th><th>NOTA GERAL</th><th>SITUAÇÃO</th><th>VERSÃO DO GABARITO</th></tr></thead>
             <tbody>{versionedStudents.map((student) => {
               const classroom = data.classes.find((item) => item.id === student.classId)
               const version = getAnswerKeyVersionForStudent(assessment, student)
               const allowedVersions = getAnswerKeyVersionsForClass(assessment, student.classId)
               const selectableVersions = allowedVersions.length ? allowedVersions : version ? [version] : []
-              return <tr key={student.id}><td><div className="assessment-version-student"><span style={{ background: `${classroom?.color}1c`, color: classroom?.color }}>{initials(student.name)}</span><div><strong>{student.name}</strong><small>{student.registration}</small></div></div></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || 'Turma removida'}</span></td><td><select className="assessment-student-version-select" style={answerKeyVersionColor(assessment, version?.id)} value={version?.id || ''} onChange={(event) => changeStudentVersion(student, event.target.value)} disabled={allowedVersions.length < 2} aria-label={`Versão do gabarito de ${student.name}`}>{selectableVersions.map((item) => <option value={item.id} style={answerKeyVersionColor(assessment, item.id)} key={item.id}>{item.label}</option>)}</select></td></tr>
+              const submission = submissionsByStudent.get(student.id)
+              const result = calculateAssessmentResult(submission, assessment, 'all', 10)
+              const resultTone = !submission ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'
+              const resultLabel = !submission ? 'Sem correção' : submission.status === 'Revisar' ? 'Revisar' : 'Corrigido'
+              return <tr key={student.id}><td><div className="assessment-version-student"><span style={{ background: `${classroom?.color}1c`, color: classroom?.color }}>{initials(student.name)}</span><div><strong>{student.name}</strong><small>{student.registration}</small></div></div></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || 'Turma removida'}</span></td><td><div className={cn('assessment-student-grade', !result && 'empty')}><strong>{result ? formatSegesGrade(result.grade) : '—'}</strong>{result && <small>{Math.round(result.percentage)}%</small>}</div></td><td><Badge tone={resultTone}>{resultLabel}</Badge></td><td><select className="assessment-student-version-select" style={answerKeyVersionColor(assessment, version?.id)} value={version?.id || ''} onChange={(event) => changeStudentVersion(student, event.target.value)} disabled={allowedVersions.length < 2} aria-label={`Versão do gabarito de ${student.name}`}>{selectableVersions.map((item) => <option value={item.id} style={answerKeyVersionColor(assessment, item.id)} key={item.id}>{item.label}</option>)}</select></td></tr>
             })}</tbody>
           </table>
         </div>
         {!versionedStudents.length && <div className="assessment-version-roster-empty">Nenhum aluno ativo nesta turma.</div>}
       </section>
+
+      <Modal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        title="Exportar notas para o SEGES"
+        subtitle="Gere um arquivo de um único simulado e recorte, pronto para conferência e lançamento."
+        size="lg"
+        footer={<><Button variant="ghost" onClick={() => setExportOpen(false)}>Cancelar</Button><Button icon={Download} disabled={!exportClassIds.length || !validExportMaxGrade || !(exportSummary[SEGES_RESULT_STATUS.ready] || 0)} onClick={exportSegesResults}>Exportar {exportSummary[SEGES_RESULT_STATUS.ready] || 0} nota{(exportSummary[SEGES_RESULT_STATUS.ready] || 0) !== 1 ? 's' : ''}</Button></>}
+      >
+        <div className="seges-results-export">
+          <div className="seges-results-export-intro"><FileSpreadsheet size={22} /><div><strong>{assessment.title}</strong><span>{assessment.code} · cada arquivo representa somente o recorte escolhido abaixo.</span></div></div>
+          <div className="seges-results-export-config">
+            <Field label="Resultado a exportar" hint="Para várias áreas, faça uma exportação separada de cada recorte."><select value={exportScope} onChange={(event) => setExportScope(event.target.value)}><option value="all">Nota geral do simulado</option>{areaSummary.map(([area, count]) => <option value={area} key={area}>{area} · {count} {count === 1 ? 'questão' : 'questões'}</option>)}</select></Field>
+            <Field label="Nota máxima" hint="A nota final é arredondada para uma casa decimal."><input type="text" inputMode="decimal" value={exportMaxGrade} onChange={(event) => setExportMaxGrade(event.target.value)} aria-invalid={!validExportMaxGrade} /></Field>
+          </div>
+          <section className="seges-results-export-classes">
+            <div><strong>Turmas incluídas</strong><span>O arquivo pode reunir várias turmas; a extensão usará a turma aberta no SEGES.</span></div>
+            <div>{assessment.classIds.map((classId) => {
+              const classroom = data.classes.find((item) => item.id === classId)
+              const checked = exportClassIds.includes(classId)
+              return <label className={cn(checked && 'checked')} key={classId}><input type="checkbox" checked={checked} onChange={() => toggleExportClass(classId)} /><span style={{ background: classroom?.color }} /><strong>{classroom?.name || 'Turma removida'}</strong><CheckCircle2 size={15} /></label>
+            })}</div>
+          </section>
+          <div className="seges-results-export-summary">
+            <div><small>PRONTAS</small><strong>{exportSummary[SEGES_RESULT_STATUS.ready] || 0}</strong></div>
+            <div><small>PARA REVISAR</small><strong>{exportSummary[SEGES_RESULT_STATUS.review] || 0}</strong></div>
+            <div><small>SEM CORREÇÃO</small><strong>{exportSummary[SEGES_RESULT_STATUS.missing] || 0}</strong></div>
+            <div><small>SEM DADOS DO RECORTE</small><strong>{exportSummary[SEGES_RESULT_STATUS.unavailable] || 0}</strong></div>
+          </div>
+          {(exportRows.length > (exportSummary[SEGES_RESULT_STATUS.ready] || 0)) && <div className="seges-results-export-warning"><AlertTriangle size={17} /><p><strong>Somente notas prontas recebem valor no arquivo.</strong><span>Pendências permanecem listadas com o respectivo status, mas a coluna de nota fica vazia para impedir lançamento indevido.</span></p></div>}
+          <div className="seges-results-export-preview">
+            <div><strong>Prévia</strong><span>{exportRows.length} aluno{exportRows.length !== 1 ? 's' : ''} nas turmas selecionadas</span></div>
+            <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>ACERTOS</th><th>NOTA</th><th>STATUS</th></tr></thead><tbody>{exportRows.slice(0, 8).map((row) => <tr key={row.student.id}><td><strong>{row.student.name}</strong></td><td>{row.classroom?.name || '—'}</td><td>{row.metrics ? `${row.metrics.correct}/${row.metrics.valid}` : '—'}</td><td>{row.exportable ? formatSegesGrade(row.metrics.grade) : '—'}</td><td><Badge tone={row.exportable ? 'green' : row.status === SEGES_RESULT_STATUS.review ? 'ochre' : 'neutral'}>{row.status.replaceAll('_', ' ')}</Badge></td></tr>)}</tbody></table></div>
+            {exportRows.length > 8 && <small>Exibindo os 8 primeiros registros. O arquivo incluirá todos os {exportRows.length} alunos selecionados.</small>}
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

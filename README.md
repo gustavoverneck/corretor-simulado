@@ -58,6 +58,12 @@ O Sistema de Avaliações foi intencionalmente mantido independente do SEGES: n�
 
 O cabeçalho institucional das folhas usa os dados cadastrados em **Configurações → Escola**, incluindo nome da unidade, endereço, município, UF e CEP.
 
+## Exportação de notas para o SEGES
+
+Em **Simulados → Detalhes**, a relação de alunos mostra a nota geral na escala de 0 a 10, o percentual de aproveitamento e a situação da correção. O botão **Exportar notas** permite escolher as turmas, a nota máxima e um único recorte por arquivo: resultado geral ou uma área/componente do simulado.
+
+O CSV usa UTF-8, separador ponto e vírgula e uma casa decimal. Questões canceladas não entram no total de questões válidas. Correções pendentes de revisão, alunos sem correção e registros sem respostas detalhadas permanecem identificados no arquivo, mas sem nota, evitando que sejam lançados automaticamente. Para exportar várias áreas, gere um arquivo separado para cada recorte.
+
 ## Correção de PDF em lote
 
 Na Central de correção, o campo de envio aceita imagens individuais ou um PDF com até 100 páginas e 100 MB. Cada página deve conter uma folha completa. O processamento ocorre localmente, identifica aluno, turma e simulado pelo QR Code e apresenta uma conferência do lote antes de salvar. Páginas sem identificação podem ser vinculadas manualmente; leituras ambíguas e páginas sem os quatro marcadores seguem para a fila de revisão.
