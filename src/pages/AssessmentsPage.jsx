@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff, Download, FileSpreadsheet, LockKeyhole, RotateCcw } from 'lucide-react'
+import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff, Download, FileSpreadsheet, LockKeyhole, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { PrintableSheets } from '../components/AnswerSheet'
 import { CANCELLED_ANSWER, closeAssessment, createRandomAnswerKey, getAssessmentStatusLabel, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, reopenAssessment, updateAnswerKeyVersionForClass } from '../lib/assessment'
@@ -34,6 +34,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const [areaDraft, setAreaDraft] = useState(() => getQuestionAreas(assessment))
   const [bulkAreaDraft, setBulkAreaDraft] = useState('')
   const [editingAnswer, setEditingAnswer] = useState(null)
+  const [studentSort, setStudentSort] = useState({ key: 'name', direction: 'asc' })
   const submissions = data.submissions.filter((item) => item.assessmentId === assessment.id)
   const closed = isAssessmentClosed(assessment)
   const totalStudents = data.students.filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo').length
@@ -69,10 +70,56 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const versionedStudents = data.students
     .filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo')
     .filter((student) => studentClassFilter === 'all' || student.classId === studentClassFilter)
-    .sort((first, second) => {
-      const classDifference = assessment.classIds.indexOf(first.classId) - assessment.classIds.indexOf(second.classId)
-      return classDifference || first.name.localeCompare(second.name, 'pt-BR')
-    })
+  const studentRows = versionedStudents.map((student) => {
+    const classroom = data.classes.find((item) => item.id === student.classId)
+    const version = getAnswerKeyVersionForStudent(assessment, student)
+    const allowedVersions = getAnswerKeyVersionsForClass(assessment, student.classId)
+    const submission = submissionsByStudent.get(student.id)
+    const result = calculateAssessmentResult(submission, assessment, 'all', 10)
+    const resultTone = !submission || (closed && submission.status === 'Revisar') ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'
+    const resultLabel = !submission ? closed ? 'Não participou' : 'Sem correção' : submission.status === 'Revisar' ? closed ? 'Encerrado com ressalva' : 'Revisar' : 'Corrigido'
+    return {
+      student,
+      classroom,
+      version,
+      allowedVersions,
+      selectableVersions: allowedVersions.length ? allowedVersions : version ? [version] : [],
+      result,
+      resultTone,
+      resultLabel,
+    }
+  })
+  const sortedStudentRows = [...studentRows].sort((first, second) => {
+    const nameComparison = first.student.name.localeCompare(second.student.name, 'pt-BR', { sensitivity: 'base' })
+    if (studentSort.key === 'grade' && Boolean(first.result) !== Boolean(second.result)) return first.result ? -1 : 1
+    let comparison = nameComparison
+    if (studentSort.key === 'class') comparison = String(first.classroom?.name || '').localeCompare(String(second.classroom?.name || ''), 'pt-BR', { sensitivity: 'base' })
+    if (studentSort.key === 'grade') comparison = Number(first.result?.grade || 0) - Number(second.result?.grade || 0)
+    if (studentSort.key === 'status') comparison = first.resultLabel.localeCompare(second.resultLabel, 'pt-BR', { sensitivity: 'base' })
+    if (studentSort.key === 'version') comparison = String(first.version?.label || '').localeCompare(String(second.version?.label || ''), 'pt-BR', { sensitivity: 'base' })
+    return (studentSort.direction === 'asc' ? comparison : -comparison) || nameComparison
+  })
+
+  function changeStudentSort(key) {
+    setStudentSort((current) => current.key === key
+      ? { ...current, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: key === 'grade' ? 'desc' : 'asc' })
+  }
+
+  function sortableStudentHeader(key, label) {
+    const active = studentSort.key === key
+    const SortIcon = !active ? ArrowUpDown : studentSort.direction === 'asc' ? ArrowUp : ArrowDown
+    const nextDirection = active
+      ? studentSort.direction === 'asc' ? 'decrescente' : 'crescente'
+      : key === 'grade' ? 'decrescente' : 'crescente'
+    return (
+      <th className={cn('sortable-column', active && 'is-sorted')} aria-sort={active ? studentSort.direction === 'asc' ? 'ascending' : 'descending' : 'none'}>
+        <button type="button" onClick={() => changeStudentSort(key)} title={`Ordenar ${label.toLowerCase()} em ordem ${nextDirection}`}>
+          <span>{label}</span><SortIcon size={13} />
+        </button>
+      </th>
+    )
+  }
 
   function changeStudentVersion(student, versionId) {
     const allowedVersions = getAnswerKeyVersionsForClass(assessment, student.classId)
@@ -343,18 +390,8 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
         <div className="assessment-version-roster-summary"><Badge tone="blue">{versionedStudents.length} aluno{versionedStudents.length !== 1 ? 's' : ''}</Badge><span>Notas exibidas na escala de 0 a 10.</span></div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>ALUNO</th><th>TURMA</th><th>NOTA GERAL</th><th>SITUAÇÃO</th><th>VERSÃO DO GABARITO</th></tr></thead>
-            <tbody>{versionedStudents.map((student) => {
-              const classroom = data.classes.find((item) => item.id === student.classId)
-              const version = getAnswerKeyVersionForStudent(assessment, student)
-              const allowedVersions = getAnswerKeyVersionsForClass(assessment, student.classId)
-              const selectableVersions = allowedVersions.length ? allowedVersions : version ? [version] : []
-              const submission = submissionsByStudent.get(student.id)
-              const result = calculateAssessmentResult(submission, assessment, 'all', 10)
-              const resultTone = !submission || closed && submission.status === 'Revisar' ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'
-              const resultLabel = !submission ? closed ? 'Não participou' : 'Sem correção' : submission.status === 'Revisar' ? closed ? 'Encerrado com ressalva' : 'Revisar' : 'Corrigido'
-              return <tr key={student.id}><td><div className="assessment-version-student"><span style={{ background: `${classroom?.color}1c`, color: classroom?.color }}>{initials(student.name)}</span><div><strong>{student.name}</strong><small>{student.registration}</small></div></div></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || 'Turma removida'}</span></td><td><div className={cn('assessment-student-grade', !result && 'empty')}><strong>{result ? formatSegesGrade(result.grade) : '—'}</strong>{result && <small>{Math.round(result.percentage)}%</small>}</div></td><td><Badge tone={resultTone}>{resultLabel}</Badge></td><td><select className="assessment-student-version-select" style={answerKeyVersionColor(assessment, version?.id)} value={version?.id || ''} onChange={(event) => changeStudentVersion(student, event.target.value)} disabled={closed || allowedVersions.length < 2} aria-label={`Versão do gabarito de ${student.name}`}>{selectableVersions.map((item) => <option value={item.id} style={answerKeyVersionColor(assessment, item.id)} key={item.id}>{item.label}</option>)}</select></td></tr>
-            })}</tbody>
+            <thead><tr>{sortableStudentHeader('name', 'Aluno')}{sortableStudentHeader('class', 'Turma')}{sortableStudentHeader('grade', 'Nota geral')}{sortableStudentHeader('status', 'Situação')}{sortableStudentHeader('version', 'Versão do gabarito')}</tr></thead>
+            <tbody>{sortedStudentRows.map(({ student, classroom, version, allowedVersions, selectableVersions, result, resultTone, resultLabel }) => <tr key={student.id}><td><div className="assessment-version-student"><span style={{ background: `${classroom?.color}1c`, color: classroom?.color }}>{initials(student.name)}</span><div><strong>{student.name}</strong><small>{student.registration}</small></div></div></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || 'Turma removida'}</span></td><td><div className={cn('assessment-student-grade', !result && 'empty')}><strong>{result ? formatSegesGrade(result.grade) : '—'}</strong>{result && <small>{Math.round(result.percentage)}%</small>}</div></td><td><Badge tone={resultTone}>{resultLabel}</Badge></td><td><select className="assessment-student-version-select" style={answerKeyVersionColor(assessment, version?.id)} value={version?.id || ''} onChange={(event) => changeStudentVersion(student, event.target.value)} disabled={closed || allowedVersions.length < 2} aria-label={`Versão do gabarito de ${student.name}`}>{selectableVersions.map((item) => <option value={item.id} style={answerKeyVersionColor(assessment, item.id)} key={item.id}>{item.label}</option>)}</select></td></tr>)}</tbody>
           </table>
         </div>
         {!versionedStudents.length && <div className="assessment-version-roster-empty">Nenhum aluno ativo nesta turma.</div>}

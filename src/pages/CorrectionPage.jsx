@@ -3,6 +3,7 @@ import {
   UploadCloud, Camera, ScanLine, CheckCircle2, AlertTriangle, FileImage, RotateCcw,
   Save, MoreHorizontal, QrCode, Focus, CircleDot, ChevronRight, X, ClipboardList,
   ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff, LockKeyhole,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { analyzeAnswerSheet } from '../lib/omr'
@@ -334,6 +335,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
   const [selectedId, setSelectedId] = useState(null)
   const [deleteId, setDeleteId] = useState(null)
   const [answerFilter, setAnswerFilter] = useState('all')
+  const [sort, setSort] = useState({ key: 'date', direction: 'desc' })
   const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
   const assessmentClosed = isAssessmentClosed(assessment)
   const selected = data.submissions.find((item) => item.id === selectedId)
@@ -361,7 +363,34 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
     .filter((row) => classId === 'all' || row.student?.classId === classId)
     .filter((row) => status === 'all' || row.submission.status === status)
     .filter((row) => !search.trim() || normalize(`${row.student?.name} ${row.student?.registration} ${row.classroom?.name}`).includes(normalize(search)))
-    .sort((first, second) => new Date(second.submission.correctedAt || 0) - new Date(first.submission.correctedAt || 0)), [assessment?.id, classId, data, search, status])
+    .sort((first, second) => {
+      const nameComparison = String(first.student?.name || '').localeCompare(String(second.student?.name || ''), 'pt-BR', { sensitivity: 'base' })
+      let comparison = nameComparison
+      if (sort.key === 'result') comparison = Number(first.submission.score || 0) - Number(second.submission.score || 0)
+      if (sort.key === 'date') comparison = (Date.parse(first.submission.correctedAt) || 0) - (Date.parse(second.submission.correctedAt) || 0)
+      return (sort.direction === 'asc' ? comparison : -comparison) || nameComparison
+    }), [assessment?.id, classId, data, search, sort, status])
+
+  function changeSort(key) {
+    setSort((current) => current.key === key
+      ? { ...current, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: key === 'name' ? 'asc' : 'desc' })
+  }
+
+  function sortableHeader(key, label) {
+    const active = sort.key === key
+    const SortIcon = !active ? ArrowUpDown : sort.direction === 'asc' ? ArrowUp : ArrowDown
+    const nextDirection = active
+      ? sort.direction === 'asc' ? 'decrescente' : 'crescente'
+      : key === 'name' ? 'crescente' : 'decrescente'
+    return (
+      <th className={cn('sortable-column', active && 'is-sorted')} aria-sort={active ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none'}>
+        <button type="button" onClick={() => changeSort(key)} title={`Ordenar ${label.toLowerCase()} em ordem ${nextDirection}`}>
+          <span>{label}</span><SortIcon size={13} />
+        </button>
+      </th>
+    )
+  }
 
   function chooseAssessment(nextId) {
     setAssessmentId(nextId)
@@ -399,7 +428,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
         </div>
         <div className="response-status-legend"><Badge tone="ochre">Revisar</Badge><span>A correção ainda precisa de conferência. Se a marcação múltipla ou em branco estiver correta, basta mantê-la e concluir a revisão.</span></div>
 
-        {rows.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>RESULTADO</th><th>RESPOSTAS</th><th>STATUS</th><th>CORRIGIDA EM</th><th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => { const archivedReview = assessmentClosed && submission.status === 'Revisar'; return <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{submission.gradedTotal ?? Math.max(0, assessment.questionCount - (submission.cancelled || 0))} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span>{submission.cancelled > 0 && <span className="cancelled">{submission.cancelled} C</span>}</div></td><td><Badge tone={archivedReview ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'}>{archivedReview ? 'Encerrado com ressalva' : submission.status}</Badge></td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr> })}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
+        {rows.length ? <div className="table-wrap"><table><thead><tr>{sortableHeader('name', 'Aluno')}<th>TURMA</th>{sortableHeader('result', 'Resultado')}<th>RESPOSTAS</th><th>STATUS</th>{sortableHeader('date', 'Corrigida em')}<th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => { const archivedReview = assessmentClosed && submission.status === 'Revisar'; return <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{submission.gradedTotal ?? Math.max(0, assessment.questionCount - (submission.cancelled || 0))} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span>{submission.cancelled > 0 && <span className="cancelled">{submission.cancelled} C</span>}</div></td><td><Badge tone={archivedReview ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'}>{archivedReview ? 'Encerrado com ressalva' : submission.status}</Badge></td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr> })}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
       </section>
 
       <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selectedStudent ? `Respostas de ${selectedStudent.name}` : 'Detalhes da correção'} subtitle={`${selectedClass?.name || 'Turma não encontrada'} · ${selectedAssessment?.title || ''}`} size="xl" footer={<><Button variant="danger" icon={Trash2} onClick={() => setDeleteId(selected.id)}>Excluir resposta</Button><Button onClick={() => setSelectedId(null)}>Fechar</Button></>}>
