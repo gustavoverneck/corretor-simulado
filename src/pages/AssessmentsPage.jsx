@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff, Download, FileSpreadsheet } from 'lucide-react'
+import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff, Download, FileSpreadsheet, LockKeyhole, RotateCcw } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { PrintableSheets } from '../components/AnswerSheet'
-import { CANCELLED_ANSWER, createRandomAnswerKey, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, hasCustomAnswerKey, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
+import { CANCELLED_ANSWER, closeAssessment, createRandomAnswerKey, getAssessmentStatusLabel, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, reopenAssessment, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS, uniqueQuestionAreas } from '../lib/knowledgeAreas'
 import { CURRENT_MARKER_LAYOUT, getAnswerSheetLayout } from '../lib/omr'
 import { buildSegesResultRows, calculateAssessmentResult, formatSegesGrade, SEGES_RESULT_STATUS, segesResultsFilename, serializeSegesResultsCsv, indexAssessmentSubmissions } from '../lib/segesResults'
@@ -35,9 +35,10 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const [bulkAreaDraft, setBulkAreaDraft] = useState('')
   const [editingAnswer, setEditingAnswer] = useState(null)
   const submissions = data.submissions.filter((item) => item.assessmentId === assessment.id)
+  const closed = isAssessmentClosed(assessment)
   const totalStudents = data.students.filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo').length
   const progress = totalStudents ? Math.min(100, Math.round((submissions.length / totalStudents) * 100)) : 0
-  const pendingReviews = submissions.filter((item) => item.status === 'Revisar').length
+  const pendingReviews = closed ? 0 : submissions.filter((item) => item.status === 'Revisar').length
   const areaCount = uniqueQuestionAreas(assessment).length
   const questionAreas = getQuestionAreas(assessment)
   const areaSummary = [...questionAreas.reduce((summary, area) => summary.set(area, (summary.get(area) || 0) + 1), new Map()).entries()]
@@ -64,7 +65,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
     ...QUESTION_AREA_SUGGESTIONS,
     ...data.assessments.flatMap((item) => getQuestionAreas(item)),
   ])].filter(Boolean)
-  const statusTone = assessment.status === 'Finalizado' ? 'neutral' : assessment.status.includes('andamento') ? 'ochre' : 'green'
+  const statusTone = closed ? 'neutral' : assessment.status.includes('andamento') ? 'ochre' : 'green'
   const versionedStudents = data.students
     .filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo')
     .filter((student) => studentClassFilter === 'all' || student.classId === studentClassFilter)
@@ -254,22 +255,23 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
     <div className="assessment-detail">
       <div className="assessment-detail-heading">
         <span className="assessment-detail-icon"><FileText size={23} /></span>
-        <div><div><Badge tone={statusTone} dot>{assessment.status}</Badge><em>{assessment.code}</em></div><strong>{assessment.subjects.join(' · ')}</strong><p>Aplicação em {formatDate(assessment.date)} · criado em {formatDate(assessment.createdAt)}</p></div>
+        <div><div><Badge tone={statusTone} dot>{getAssessmentStatusLabel(assessment)}</Badge><em>{assessment.code}</em></div><strong>{assessment.subjects.join(' · ')}</strong><p>Aplicação em {formatDate(assessment.date)} · criado em {formatDate(assessment.createdAt)}{assessment.closedAt ? ` · encerrado em ${formatDate(assessment.closedAt)}` : ''}</p></div>
       </div>
 
       <div className="assessment-detail-metrics">
         <div><small>QUESTÕES</small><strong>{assessment.questionCount}</strong><span>{areaCount} {areaCount === 1 ? 'área' : 'áreas'} · A–{String.fromCharCode(64 + assessment.optionCount)}</span></div>
         <div><small>ALUNOS</small><strong>{totalStudents}</strong><span>{assessment.classIds.length} {assessment.classIds.length === 1 ? 'turma' : 'turmas'}</span></div>
         <div><small>PROCESSADAS</small><strong>{submissions.length}</strong><span>{progress}% concluído</span></div>
-        <div><small>MÉDIA</small><strong>{submissions.length ? `${average(submissions.map((item) => item.score))}%` : '—'}</strong><span>{pendingReviews} para revisar</span></div>
+        <div><small>MÉDIA</small><strong>{submissions.length ? `${average(submissions.map((item) => item.score))}%` : '—'}</strong><span>{closed ? 'resultado encerrado' : `${pendingReviews} para revisar`}</span></div>
       </div>
 
-      <div className="assessment-detail-progress"><div><span>Andamento da correção</span><strong>{submissions.length} de {totalStudents}</strong></div><div className="wide-progress"><i style={{ width: `${progress}%` }} /></div></div>
+      <div className="assessment-detail-progress"><div><span>{closed ? 'Participação final registrada' : 'Andamento da correção'}</span><strong>{submissions.length} de {totalStudents}</strong></div><div className="wide-progress"><i style={{ width: `${progress}%` }} /></div></div>
 
       <section className="assessment-detail-areas">
         <header>
           <div><h3>Áreas das questões</h3><p>Classifique cada questão para organizar os filtros e as análises pedagógicas.</p></div>
-          {!editingAreas && <Button variant="secondary" size="sm" icon={PencilLine} onClick={startEditingAreas}>Editar áreas</Button>}
+          {!editingAreas && !closed && <Button variant="secondary" size="sm" icon={PencilLine} onClick={startEditingAreas}>Editar áreas</Button>}
+          {closed && <Badge tone="neutral"><LockKeyhole size={12} /> Reabra para editar</Badge>}
         </header>
         <div className="assessment-area-summary">
           {areaSummary.map(([area, count]) => <span key={area}><strong>{area}</strong><small>{count} {count === 1 ? 'questão' : 'questões'}</small></span>)}
@@ -310,7 +312,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
                   return <div key={version.id}>
                     <strong>{version.label}</strong>
                     <div className="assessment-detail-key" aria-label={`${version.label} de ${classroom?.name}`}>
-                      {version.answerKey.map((answer, index) => <button type="button" key={index} className={cn(answer === null && 'is-annulled', answer === CANCELLED_ANSWER && 'is-cancelled', activeQuestion === index && 'is-editing')} onClick={() => setEditingAnswer({ classId, versionId: version.id, questionIndex: index })} aria-label={`Alterar questão ${index + 1}, ${answer === null ? 'anulada' : answer === CANCELLED_ANSWER ? 'cancelada' : `gabarito ${answer || 'não definido'}`}`} aria-expanded={activeQuestion === index}><small>{String(index + 1).padStart(2, '0')}</small><strong>{answer === null ? 'ANU' : answer === CANCELLED_ANSWER ? 'CAN' : answer || '—'}</strong></button>)}
+                      {version.answerKey.map((answer, index) => <button type="button" key={index} disabled={closed} className={cn(answer === null && 'is-annulled', answer === CANCELLED_ANSWER && 'is-cancelled', activeQuestion === index && 'is-editing')} onClick={() => setEditingAnswer({ classId, versionId: version.id, questionIndex: index })} aria-label={`${closed ? 'Visualizar' : 'Alterar'} questão ${index + 1}, ${answer === null ? 'anulada' : answer === CANCELLED_ANSWER ? 'cancelada' : `gabarito ${answer || 'não definido'}`}`} aria-expanded={activeQuestion === index}><small>{String(index + 1).padStart(2, '0')}</small><strong>{answer === null ? 'ANU' : answer === CANCELLED_ANSWER ? 'CAN' : answer || '—'}</strong></button>)}
                     </div>
                     {activeQuestion !== null && <div className="assessment-inline-key-editor">
                       <div><span>Questão {String(activeQuestion + 1).padStart(2, '0')}</span><strong>{version.label} · {classroom?.name}</strong></div>
@@ -349,9 +351,9 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
               const selectableVersions = allowedVersions.length ? allowedVersions : version ? [version] : []
               const submission = submissionsByStudent.get(student.id)
               const result = calculateAssessmentResult(submission, assessment, 'all', 10)
-              const resultTone = !submission ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'
-              const resultLabel = !submission ? 'Sem correção' : submission.status === 'Revisar' ? 'Revisar' : 'Corrigido'
-              return <tr key={student.id}><td><div className="assessment-version-student"><span style={{ background: `${classroom?.color}1c`, color: classroom?.color }}>{initials(student.name)}</span><div><strong>{student.name}</strong><small>{student.registration}</small></div></div></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || 'Turma removida'}</span></td><td><div className={cn('assessment-student-grade', !result && 'empty')}><strong>{result ? formatSegesGrade(result.grade) : '—'}</strong>{result && <small>{Math.round(result.percentage)}%</small>}</div></td><td><Badge tone={resultTone}>{resultLabel}</Badge></td><td><select className="assessment-student-version-select" style={answerKeyVersionColor(assessment, version?.id)} value={version?.id || ''} onChange={(event) => changeStudentVersion(student, event.target.value)} disabled={allowedVersions.length < 2} aria-label={`Versão do gabarito de ${student.name}`}>{selectableVersions.map((item) => <option value={item.id} style={answerKeyVersionColor(assessment, item.id)} key={item.id}>{item.label}</option>)}</select></td></tr>
+              const resultTone = !submission || closed && submission.status === 'Revisar' ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'
+              const resultLabel = !submission ? closed ? 'Não participou' : 'Sem correção' : submission.status === 'Revisar' ? closed ? 'Encerrado com ressalva' : 'Revisar' : 'Corrigido'
+              return <tr key={student.id}><td><div className="assessment-version-student"><span style={{ background: `${classroom?.color}1c`, color: classroom?.color }}>{initials(student.name)}</span><div><strong>{student.name}</strong><small>{student.registration}</small></div></div></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || 'Turma removida'}</span></td><td><div className={cn('assessment-student-grade', !result && 'empty')}><strong>{result ? formatSegesGrade(result.grade) : '—'}</strong>{result && <small>{Math.round(result.percentage)}%</small>}</div></td><td><Badge tone={resultTone}>{resultLabel}</Badge></td><td><select className="assessment-student-version-select" style={answerKeyVersionColor(assessment, version?.id)} value={version?.id || ''} onChange={(event) => changeStudentVersion(student, event.target.value)} disabled={closed || allowedVersions.length < 2} aria-label={`Versão do gabarito de ${student.name}`}>{selectableVersions.map((item) => <option value={item.id} style={answerKeyVersionColor(assessment, item.id)} key={item.id}>{item.label}</option>)}</select></td></tr>
             })}</tbody>
           </table>
         </div>
@@ -405,6 +407,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const [createOpen, setCreateOpen] = useState(false)
   const [detailAssessmentId, setDetailAssessmentId] = useState(null)
   const [assessmentToDelete, setAssessmentToDelete] = useState(null)
+  const [assessmentLifecycleId, setAssessmentLifecycleId] = useState(null)
   const [printAssessmentId, setPrintAssessmentId] = useState(initialPrintAssessment?.id || null)
   const [printClassIds, setPrintClassIds] = useState(initialPrintAssessment?.classIds || [])
   const [hidePrintRegistration, setHidePrintRegistration] = useState(false)
@@ -420,9 +423,11 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
 
   const filtered = data.assessments.filter((assessment) => {
     const matchText = assessment.title.toLowerCase().includes(search.toLowerCase()) || assessment.code.toLowerCase().includes(search.toLowerCase())
-    return matchText && (status === 'all' || assessment.status === status)
+    const matchStatus = status === 'all' || status === 'closed' ? status === 'all' || isAssessmentClosed(assessment) : assessment.status === status
+    return matchText && matchStatus
   })
   const detailAssessment = data.assessments.find((item) => item.id === detailAssessmentId)
+  const lifecycleAssessment = data.assessments.find((item) => item.id === assessmentLifecycleId)
   const printAssessment = data.assessments.find((item) => item.id === printAssessmentId)
   const printStudents = useMemo(() => data.students.filter((student) => printClassIds.includes(student.classId) && student.status === 'Ativo'), [data.students, printClassIds])
   const answerSheetLayout = getAnswerSheetLayout(questionCount)
@@ -641,20 +646,42 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
     )
   }
 
+  function changeAssessmentLifecycle() {
+    if (!lifecycleAssessment) return
+    const wasClosed = isAssessmentClosed(lifecycleAssessment)
+    const hasSubmissions = data.submissions.some((submission) => submission.assessmentId === lifecycleAssessment.id)
+    setData((current) => ({
+      ...current,
+      assessments: current.assessments.map((assessment) => {
+        if (assessment.id !== lifecycleAssessment.id) return assessment
+        return wasClosed
+          ? reopenAssessment(assessment, { hasSubmissions })
+          : closeAssessment(assessment)
+      }),
+    }))
+    setAssessmentLifecycleId(null)
+    notify(
+      wasClosed ? 'Simulado reaberto' : 'Simulado encerrado',
+      wasClosed
+        ? hasSubmissions ? 'A correção voltou ao estado em andamento e suas revisões pendentes reaparecerão na fila.' : 'O simulado voltou a ficar pronto para aplicação.'
+        : 'As respostas foram preservadas e o simulado deixou de gerar pendências de correção.',
+    )
+  }
+
   return (
     <div className="page-stack assessments-page">
       <div className="page-actions-row">
         <div className="filter-inline">
           <label className="search-input"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar simulado" /></label>
-          <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos os status</option><option>Pronto para aplicar</option><option>Correção em andamento</option><option>Finalizado</option></select>
+          <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos os status</option><option>Pronto para aplicar</option><option>Correção em andamento</option><option value="closed">Encerrados</option></select>
         </div>
         <Button icon={Plus} onClick={() => setCreateOpen(true)}>Novo simulado</Button>
       </div>
 
       <div className="assessment-summary">
         <span><ClipboardList size={18} /><strong>{data.assessments.length}</strong> simulados</span>
-        <span><CalendarDays size={18} /><strong>{data.assessments.filter((item) => new Date(item.date) >= new Date()).length}</strong> próximos</span>
-        <span><ScanLine size={18} /><strong>{data.submissions.filter((item) => item.status === 'Revisar').length}</strong> revisões pendentes</span>
+        <span><CalendarDays size={18} /><strong>{data.assessments.filter((item) => !isAssessmentClosed(item) && new Date(item.date) >= new Date()).length}</strong> próximos</span>
+        <span><ScanLine size={18} /><strong>{getPendingReviewSubmissions(data.submissions, data.assessments).length}</strong> revisões pendentes</span>
       </div>
 
       <div className="assessment-list">
@@ -662,13 +689,14 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
           const classNames = assessment.classIds.map((id) => data.classes.find((item) => item.id === id)?.name).filter(Boolean)
           const totalStudents = data.students.filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo').length
           const submissions = data.submissions.filter((item) => item.assessmentId === assessment.id)
-          const progress = totalStudents ? Math.round(submissions.length / totalStudents * 100) : 0
-          const statusTone = assessment.status === 'Finalizado' ? 'neutral' : assessment.status.includes('andamento') ? 'ochre' : 'green'
+          const progress = totalStudents ? Math.min(100, Math.round(submissions.length / totalStudents * 100)) : 0
+          const closed = isAssessmentClosed(assessment)
+          const statusTone = closed ? 'neutral' : assessment.status.includes('andamento') ? 'ochre' : 'green'
           return (
             <article className="assessment-card" key={assessment.id}>
               <div className={`assessment-accent accent-${index % 4}`} />
               <div className="assessment-main">
-                <div className="assessment-title-row"><span className={`large-doc-icon accent-${index % 4}`}><FileText size={22} /></span><div><div className="assessment-badges"><Badge tone={statusTone} dot>{assessment.status}</Badge><span>{assessment.code}</span></div><h3>{assessment.title}</h3><p>{assessment.subjects.join(' · ')}</p></div></div>
+                <div className="assessment-title-row"><span className={`large-doc-icon accent-${index % 4}`}><FileText size={22} /></span><div><div className="assessment-badges"><Badge tone={statusTone} dot>{getAssessmentStatusLabel(assessment)}</Badge><span>{assessment.code}</span></div><h3>{assessment.title}</h3><p>{assessment.subjects.join(' · ')}</p></div></div>
                 <div className="assessment-meta">
                   <span><CalendarDays size={16} /><b>Aplicação</b>{formatDate(assessment.date)}</span>
                   <span><UsersRound size={16} /><b>Turmas</b>{classNames.join(', ')}</span>
@@ -676,14 +704,15 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
                 </div>
               </div>
               <div className="assessment-progress-block">
-                <div><span>Folhas processadas</span><strong>{submissions.length} <small>de {totalStudents}</small></strong></div>
+                <div><span>{closed ? 'Participação registrada' : 'Folhas processadas'}</span><strong>{submissions.length} <small>de {totalStudents}</small></strong></div>
                 <div className="wide-progress"><i style={{ width: `${progress}%` }} /></div>
-                <small>{progress}% concluído</small>
+                <small>{closed ? `Encerrado com ${progress}% de participação` : `${progress}% concluído`}</small>
               </div>
               <div className="assessment-actions">
                 <Button variant="secondary" size="sm" icon={Printer} onClick={() => openPrint(assessment)}>Folhas</Button>
                 {assessment.status.includes('andamento') && <Button size="sm" icon={ScanLine} onClick={() => openCorrection(assessment)}>Continuar correção</Button>}
                 <Button variant="ghost" size="sm" icon={Eye} onClick={() => setDetailAssessmentId(assessment.id)}>Detalhes</Button>
+                <Button variant="ghost" size="sm" icon={closed ? RotateCcw : LockKeyhole} onClick={() => setAssessmentLifecycleId(assessment.id)}>{closed ? 'Reabrir' : 'Encerrar'}</Button>
                 <button className="icon-button assessment-delete-button" title={`Excluir ${assessment.title}`} aria-label={`Excluir ${assessment.title}`} onClick={() => setAssessmentToDelete(assessment)}><Trash2 size={17} /></button>
               </div>
             </article>
@@ -698,9 +727,43 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
         title={detailAssessment?.title || 'Detalhes do simulado'}
         subtitle="Informações da aplicação, turmas participantes e gabaritos utilizados."
         size="lg"
-        footer={detailAssessment && <><Button variant="ghost" onClick={() => setDetailAssessmentId(null)}>Fechar</Button><Button variant="secondary" icon={Printer} onClick={() => { setDetailAssessmentId(null); openPrint(detailAssessment) }}>Gerar folhas</Button><Button icon={ScanLine} onClick={() => openCorrection(detailAssessment, 'responses')}>Ver correção</Button></>}
+        footer={detailAssessment && <><Button variant="ghost" onClick={() => setDetailAssessmentId(null)}>Fechar</Button><Button variant="secondary" icon={Printer} onClick={() => { setDetailAssessmentId(null); openPrint(detailAssessment) }}>Gerar folhas</Button><Button variant="secondary" icon={isAssessmentClosed(detailAssessment) ? RotateCcw : LockKeyhole} onClick={() => setAssessmentLifecycleId(detailAssessment.id)}>{isAssessmentClosed(detailAssessment) ? 'Reabrir simulado' : 'Encerrar simulado'}</Button><Button icon={ScanLine} onClick={() => openCorrection(detailAssessment, 'responses')}>Ver correção</Button></>}
       >
         {detailAssessment && <AssessmentDetails assessment={detailAssessment} data={data} setData={setData} notify={notify} />}
+      </Modal>
+
+      <Modal
+        open={Boolean(lifecycleAssessment)}
+        onClose={() => setAssessmentLifecycleId(null)}
+        title={isAssessmentClosed(lifecycleAssessment) ? 'Reabrir simulado?' : 'Encerrar simulado?'}
+        subtitle="A situação pode ser alterada novamente quando necessário."
+        footer={<><Button variant="ghost" onClick={() => setAssessmentLifecycleId(null)}>Cancelar</Button><Button icon={isAssessmentClosed(lifecycleAssessment) ? RotateCcw : LockKeyhole} onClick={changeAssessmentLifecycle}>{isAssessmentClosed(lifecycleAssessment) ? 'Reabrir simulado' : 'Encerrar simulado'}</Button></>}
+      >
+        {lifecycleAssessment && (() => {
+          const linkedSubmissions = data.submissions.filter((submission) => submission.assessmentId === lifecycleAssessment.id)
+          const activeStudentCount = data.students.filter((student) => student.status === 'Ativo' && lifecycleAssessment.classIds.includes(student.classId)).length
+          const correctedStudentIds = new Set(linkedSubmissions.map((submission) => submission.studentId))
+          const missingCount = Math.max(0, activeStudentCount - correctedStudentIds.size)
+          const reviewCount = linkedSubmissions.filter((submission) => submission.status === 'Revisar').length
+          const closed = isAssessmentClosed(lifecycleAssessment)
+          return (
+            <div className={cn('assessment-lifecycle-confirmation', closed && 'is-reopening')}>
+              <span>{closed ? <RotateCcw size={22} /> : <LockKeyhole size={22} />}</span>
+              <div>
+                <strong>{lifecycleAssessment.title}</strong>
+                <p>{closed
+                  ? 'Novas folhas poderão ser corrigidas e as revisões arquivadas voltarão para a fila de pendências.'
+                  : 'As notas e respostas existentes serão preservadas. Novas correções ficarão bloqueadas até que o simulado seja reaberto.'}</p>
+                <ul>
+                  <li>{linkedSubmissions.length} correção{linkedSubmissions.length !== 1 ? 'ões registradas' : ' registrada'}</li>
+                  <li>{missingCount} aluno{missingCount !== 1 ? 's sem correção' : ' sem correção'}</li>
+                  <li>{reviewCount} revisão{reviewCount !== 1 ? 'ões com ressalva' : ' com ressalva'}</li>
+                </ul>
+                {!closed && <small>Alunos sem correção e revisões com ressalva deixarão de aparecer como pendências operacionais.</small>}
+              </div>
+            </div>
+          )
+        })()}
       </Modal>
 
       <Modal

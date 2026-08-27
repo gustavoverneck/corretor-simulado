@@ -14,6 +14,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { Toast } from './components/ui'
 import { cn, formatDateTime } from './lib/utils'
 import { getQuestionAreas } from './lib/knowledgeAreas'
+import { getPendingReviewSubmissions } from './lib/assessment'
 
 const STORAGE_KEY = 'luma-avaliacoes-state-v1'
 
@@ -92,6 +93,7 @@ export default function App() {
 
   const currentTitle = titles[page] || titles.dashboard
   const activeStudents = data.students.filter((student) => student.status.toLowerCase() === 'ativo').length
+  const pendingReviewCount = getPendingReviewSubmissions(data.submissions, data.assessments).length
 
   return (
     <div className="app-shell">
@@ -112,7 +114,7 @@ export default function App() {
           <span className="nav-label">ESPAÇO DE TRABALHO</span>
           {navigation.map((item) => {
             const badge = item.id === 'correction'
-              ? data.submissions.filter((submission) => submission.status === 'Revisar').length
+              ? pendingReviewCount
               : null
             return (
               <button key={item.id} className={cn(page === item.id && 'active')} onClick={() => context.setPage(item.id)}>

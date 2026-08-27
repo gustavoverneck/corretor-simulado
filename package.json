@@ -15,7 +15,8 @@
     "make": "npm run build && electron-forge make",
     "preview": "vite preview",
     "test:seges": "node scripts/test-seges.mjs",
-    "test:omr": "node scripts/test-omr.mjs"
+    "test:omr": "node scripts/test-omr.mjs",
+    "test:assessment": "node scripts/test-assessment.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",

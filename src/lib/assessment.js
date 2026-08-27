@@ -6,6 +6,40 @@ function stableIndex(value, length) {
 }
 
 export const CANCELLED_ANSWER = 'CANCELLED'
+export const CLOSED_ASSESSMENT_STATUS = 'Encerrado'
+
+export function isAssessmentClosed(assessment) {
+  return ['Encerrado', 'Finalizado'].includes(assessment?.status)
+}
+
+export function getAssessmentStatusLabel(assessment) {
+  return isAssessmentClosed(assessment) ? CLOSED_ASSESSMENT_STATUS : assessment?.status || 'Sem status'
+}
+
+export function closeAssessment(assessment, closedAt = new Date().toISOString()) {
+  if (!assessment || isAssessmentClosed(assessment)) return assessment
+  return {
+    ...assessment,
+    statusBeforeClosing: assessment.status,
+    status: CLOSED_ASSESSMENT_STATUS,
+    closedAt,
+  }
+}
+
+export function reopenAssessment(assessment, { hasSubmissions = false, reopenedAt = new Date().toISOString() } = {}) {
+  if (!assessment || !isAssessmentClosed(assessment)) return assessment
+  const previousStatus = assessment.statusBeforeClosing
+  const status = previousStatus && !['Encerrado', 'Finalizado'].includes(previousStatus)
+    ? previousStatus
+    : hasSubmissions ? 'Correção em andamento' : 'Pronto para aplicar'
+  const { statusBeforeClosing: _statusBeforeClosing, ...reopened } = assessment
+  return { ...reopened, status, reopenedAt }
+}
+
+export function getPendingReviewSubmissions(submissions = [], assessments = []) {
+  const closedAssessmentIds = new Set(assessments.filter(isAssessmentClosed).map((assessment) => assessment.id))
+  return submissions.filter((submission) => submission.status === 'Revisar' && !closedAssessmentIds.has(submission.assessmentId))
+}
 
 export function createRandomAnswerKey(questionCount, optionCount, random = Math.random) {
   const count = Math.max(0, Math.floor(Number(questionCount) || 0))

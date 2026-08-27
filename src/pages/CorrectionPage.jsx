@@ -2,11 +2,11 @@ import { useMemo, useRef, useState } from 'react'
 import {
   UploadCloud, Camera, ScanLine, CheckCircle2, AlertTriangle, FileImage, RotateCcw,
   Save, MoreHorizontal, QrCode, Focus, CircleDot, ChevronRight, X, ClipboardList,
-  ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff,
+  ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff, LockKeyhole,
 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { analyzeAnswerSheet } from '../lib/omr'
-import { CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, hasCustomAnswerKey, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
+import { CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAreas'
 import { cn, formatDateTime, nextStudentRegistration, normalize, uid } from '../lib/utils'
 
@@ -87,6 +87,7 @@ function DetailedAnswerList({ answers, assessment, questionAreas, onChange, read
 function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
   const [assessmentId, setAssessmentId] = useState(initialAssessmentId || data.assessments[0]?.id)
   const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
+  const assessmentClosed = isAssessmentClosed(assessment)
   const [classId, setClassId] = useState(assessment?.classIds[0] || '')
   const [versionId, setVersionId] = useState('')
   const [editing, setEditing] = useState(false)
@@ -132,6 +133,10 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
   }
 
   function startEditing(key = answerKey) {
+    if (assessmentClosed) {
+      notify('Simulado encerrado', 'Reabra o simulado antes de alterar o gabarito.', 'warning')
+      return
+    }
     setDraft([...key])
     setAreaDraft([...questionAreas])
     setEditing(true)
@@ -152,6 +157,10 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
   }
 
   function saveAnswerKey() {
+    if (assessmentClosed) {
+      notify('Simulado encerrado', 'Reabra o simulado antes de salvar alterações no gabarito.', 'warning')
+      return
+    }
     if (draft.length !== assessment.questionCount || draft.some((answer) => answer === '' || answer === undefined)) {
       notify('Gabarito incompleto', 'Cada questão precisa ter uma resposta correta, estar anulada ou cancelada.', 'warning')
       return
@@ -214,7 +223,8 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
       <section className="panel answer-key-workspace">
         <header className="answer-key-header">
           <div><div className="eyebrow">GABARITO CADASTRADO</div><h2>{assessment.title}</h2><p>{assessment.subjects.join(' · ')} · {assessment.questionCount} questões · alternativas A–{String.fromCharCode(64 + assessment.optionCount)}</p></div>
-          {!editing && <Button icon={PencilLine} onClick={() => startEditing()}>Editar gabarito</Button>}
+          {!editing && !assessmentClosed && <Button icon={PencilLine} onClick={() => startEditing()}>Editar gabarito</Button>}
+          {!editing && assessmentClosed && <Badge tone="neutral"><LockKeyhole size={12} /> Encerrado · somente leitura</Badge>}
         </header>
 
         <div className="answer-key-class-tabs">
@@ -255,7 +265,7 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
 function ReviewQueue({ data, setData, notify }) {
   const [selectedId, setSelectedId] = useState(null)
   const [draftAnswers, setDraftAnswers] = useState([])
-  const pending = data.submissions.filter((item) => item.status === 'Revisar')
+  const pending = getPendingReviewSubmissions(data.submissions, data.assessments)
   const selected = data.submissions.find((item) => item.id === selectedId)
   const student = data.students.find((item) => item.id === selected?.studentId)
   const assessment = data.assessments.find((item) => item.id === selected?.assessmentId)
@@ -325,6 +335,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
   const [deleteId, setDeleteId] = useState(null)
   const [answerFilter, setAnswerFilter] = useState('all')
   const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
+  const assessmentClosed = isAssessmentClosed(assessment)
   const selected = data.submissions.find((item) => item.id === selectedId)
   const responseToDelete = data.submissions.find((item) => item.id === deleteId)
   const responseToDeleteStudent = data.students.find((item) => item.id === responseToDelete?.studentId)
@@ -332,6 +343,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
   const selectedStudent = data.students.find((item) => item.id === selected?.studentId)
   const selectedClass = data.classes.find((item) => item.id === selectedStudent?.classId)
   const selectedAssessment = data.assessments.find((item) => item.id === selected?.assessmentId)
+  const selectedAssessmentClosed = isAssessmentClosed(selectedAssessment)
   const selectedAnswerKey = selected?.answerKeySnapshot || getAnswerKeyForStudent(selectedAssessment, selectedStudent)
   const selectedQuestionAreas = getQuestionAreas(selectedAssessment)
   const selectedAnswers = Array.isArray(selected?.answers)
@@ -382,12 +394,12 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
         <div className="responses-toolbar">
           <label><span>Simulado</span><select value={assessment.id} onChange={(event) => chooseAssessment(event.target.value)}>{data.assessments.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
           <label><span>Turma</span><select value={classId} onChange={(event) => setClassId(event.target.value)}><option value="all">Todas as turmas</option>{assessment.classIds.map((id) => { const item = data.classes.find((entry) => entry.id === id); return <option value={id} key={id}>{item?.name || 'Turma removida'}</option> })}</select></label>
-          <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos</option><option value="Corrigido">Corrigidas</option><option value="Revisar">Para revisar</option></select></label>
+          <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos</option><option value="Corrigido">Corrigidas</option><option value="Revisar">{assessmentClosed ? 'Com ressalva' : 'Para revisar'}</option></select></label>
           <label className="responses-search"><span>Buscar aluno</span><div><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nome ou matrícula" />{search && <button type="button" onClick={() => setSearch('')} aria-label="Limpar busca"><X size={13} /></button>}</div></label>
         </div>
         <div className="response-status-legend"><Badge tone="ochre">Revisar</Badge><span>A correção ainda precisa de conferência. Se a marcação múltipla ou em branco estiver correta, basta mantê-la e concluir a revisão.</span></div>
 
-        {rows.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>RESULTADO</th><th>RESPOSTAS</th><th>STATUS</th><th>CORRIGIDA EM</th><th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{submission.gradedTotal ?? Math.max(0, assessment.questionCount - (submission.cancelled || 0))} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span>{submission.cancelled > 0 && <span className="cancelled">{submission.cancelled} C</span>}</div></td><td><Badge tone={submission.status === 'Revisar' ? 'ochre' : 'green'}>{submission.status}</Badge></td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
+        {rows.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>RESULTADO</th><th>RESPOSTAS</th><th>STATUS</th><th>CORRIGIDA EM</th><th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => { const archivedReview = assessmentClosed && submission.status === 'Revisar'; return <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{submission.gradedTotal ?? Math.max(0, assessment.questionCount - (submission.cancelled || 0))} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span>{submission.cancelled > 0 && <span className="cancelled">{submission.cancelled} C</span>}</div></td><td><Badge tone={archivedReview ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'}>{archivedReview ? 'Encerrado com ressalva' : submission.status}</Badge></td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr> })}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
       </section>
 
       <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selectedStudent ? `Respostas de ${selectedStudent.name}` : 'Detalhes da correção'} subtitle={`${selectedClass?.name || 'Turma não encontrada'} · ${selectedAssessment?.title || ''}`} size="xl" footer={<><Button variant="danger" icon={Trash2} onClick={() => setDeleteId(selected.id)}>Excluir resposta</Button><Button onClick={() => setSelectedId(null)}>Fechar</Button></>}>
@@ -402,7 +414,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
           <ResultBreakdown result={{ ...selected, total: selectedAssessment?.questionCount }} />
 
           {selectedAnswers.length ? <section className="answer-review-panel response-answer-view">
-            <header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>A alternativa marcada aparece preenchida; o contorno indica o gabarito.</p></div><Badge tone={selected.status === 'Revisar' ? 'ochre' : 'green'}>{selected.status}</Badge></header>
+            <header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>A alternativa marcada aparece preenchida; o contorno indica o gabarito.</p></div><Badge tone={selected.status === 'Revisar' ? selectedAssessmentClosed ? 'neutral' : 'ochre' : 'green'}>{selected.status === 'Revisar' && selectedAssessmentClosed ? 'Encerrado com ressalva' : selected.status}</Badge></header>
             <div className="answer-filters"><button className={answerFilter === 'all' ? 'active' : ''} onClick={() => setAnswerFilter('all')}>Todas <span>{selectedAnswers.length}</span></button><button className={answerFilter === 'correct' ? 'active' : ''} onClick={() => setAnswerFilter('correct')}>Acertos <span>{selected.correct || 0}</span></button><button className={answerFilter === 'wrong' ? 'active' : ''} onClick={() => setAnswerFilter('wrong')}>Erros <span>{selected.wrong || 0}</span></button><button className={answerFilter === 'blank' ? 'active' : ''} onClick={() => setAnswerFilter('blank')}>Em branco <span>{selected.blank || 0}</span></button><button className={answerFilter === 'multiple' ? 'active' : ''} onClick={() => setAnswerFilter('multiple')}>Múltiplas <span>{selected.multiple || 0}</span></button><button className={answerFilter === 'uncertain' ? 'active' : ''} onClick={() => setAnswerFilter('uncertain')}>Incertas <span>{selected.uncertain || 0}</span></button><button className={answerFilter === 'cancelled' ? 'active' : ''} onClick={() => setAnswerFilter('cancelled')}>Canceladas <span>{selected.cancelled || 0}</span></button></div>
             <DetailedAnswerList answers={visibleAnswers} assessment={selectedAssessment} questionAreas={selectedQuestionAreas} readOnly />
           </section> : <EmptyState icon={FileText} title="Detalhamento indisponível" description="Esta correção antiga possui apenas o resumo do resultado." />}
@@ -441,10 +453,13 @@ export function CorrectionPage({ data, setData, notify }) {
   const [fileName, setFileName] = useState('')
   const [filter, setFilter] = useState('all')
   const assessment = data.assessments.find((item) => item.id === assessmentId)
+  const assessmentClosed = isAssessmentClosed(assessment)
+  const pendingReviews = getPendingReviewSubmissions(data.submissions, data.assessments)
   const classroom = data.classes.find((item) => item.id === classId)
   const answerKey = getAnswerKeyForClass(assessment, classId)
   const eligibleStudents = data.students.filter((student) => student.classId === classId && student.status === 'Ativo')
   const resultAssessment = data.assessments.find((item) => item.id === result?.assessmentId) || assessment
+  const resultAssessmentClosed = isAssessmentClosed(resultAssessment)
   const detectedStudentId = result?.identity?.studentId || studentId
   const detectedStudent = data.students.find((item) => item.id === detectedStudentId)
   const resultClassId = result?.classId || detectedStudent?.classId || classId
@@ -470,6 +485,7 @@ export function CorrectionPage({ data, setData, notify }) {
         : null
       let issue = item.error || ''
       if (!issue && !itemAssessment) issue = 'Simulado não encontrado'
+      if (!issue && isAssessmentClosed(itemAssessment)) issue = 'Simulado encerrado — reabra antes de corrigir'
       if (!issue && !itemStudent) issue = 'Aluno não identificado'
       if (!issue && !itemAssessment.classIds.includes(itemStudent.classId)) issue = 'Turma incompatível'
       const pairKey = itemStudent && itemAssessment ? `${itemAssessment.id}:${itemStudent.id}` : ''
@@ -513,6 +529,11 @@ export function CorrectionPage({ data, setData, notify }) {
   function openNewStudent(context) {
     if (!context?.assessmentId) {
       notify('Simulado não identificado', 'Identifique o simulado antes de cadastrar o aluno.', 'warning')
+      return
+    }
+    const contextAssessment = data.assessments.find((item) => item.id === context.assessmentId)
+    if (isAssessmentClosed(contextAssessment)) {
+      notify('Simulado encerrado', 'Reabra o simulado antes de cadastrar e vincular um aluno à correção.', 'warning')
       return
     }
     setNewStudentContext(context)
@@ -618,6 +639,10 @@ export function CorrectionPage({ data, setData, notify }) {
 
   async function processFiles(fileList) {
     if (!assessment || processing) return
+    if (isAssessmentClosed(assessment)) {
+      notify('Simulado encerrado', 'Reabra o simulado na área de Simulados para registrar novas correções.', 'warning')
+      return
+    }
     const files = Array.from(fileList || [])
     if (!files.length) return
     const pdfFiles = files.filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
@@ -643,6 +668,10 @@ export function CorrectionPage({ data, setData, notify }) {
 
   async function processFile(file) {
     if (!file || !assessment) return
+    if (isAssessmentClosed(assessment)) {
+      notify('Simulado encerrado', 'Reabra o simulado na área de Simulados para registrar novas correções.', 'warning')
+      return
+    }
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
     if (isPdf) {
       await processPdf(file)
@@ -784,6 +813,10 @@ export function CorrectionPage({ data, setData, notify }) {
       notify('Identificação incompleta', 'Selecione o aluno e o simulado corretos.', 'warning')
       return
     }
+    if (isAssessmentClosed(finalAssessment)) {
+      notify('Simulado encerrado', 'Reabra o simulado antes de salvar esta correção.', 'warning')
+      return
+    }
     if (!finalAssessment.classIds.includes(finalStudent.classId)) {
       notify('Turma incompatível', 'Este aluno não pertence a uma turma associada ao simulado.', 'warning')
       return
@@ -866,7 +899,7 @@ export function CorrectionPage({ data, setData, notify }) {
   }
 
   const visibleAnswers = result?.answers.filter((answer) => filter === 'all' || answer.status === filter) || []
-  const resultReady = Boolean(result && detectedStudent && resultAssessment && resultClassCompatible)
+  const resultReady = Boolean(result && detectedStudent && resultAssessment && resultClassCompatible && !resultAssessmentClosed)
   const resultNeedsReview = Boolean(result && (result.multiple > 0 || result.uncertain > 0 || result.markersFound < 4))
   const resultNoticeCount = result ? [
     !detectedStudent,
@@ -876,11 +909,12 @@ export function CorrectionPage({ data, setData, notify }) {
     result.multiple > 0,
     result.uncertain > 0,
     Boolean(existingResultSubmission),
+    resultAssessmentClosed,
   ].filter(Boolean).length : 0
 
   return (
     <div className="page-stack correction-page">
-      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagens ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>Visualizar e editar</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{data.submissions.filter((item) => item.status === 'Revisar').length} pendentes</small></span></button></div>}
+      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagens ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>Visualizar e editar</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{pendingReviews.length} pendentes</small></span></button></div>}
 
       {!result && !batch && tab === 'responses' && <ResponsesPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'keys' && <AnswerKeysPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
@@ -890,22 +924,22 @@ export function CorrectionPage({ data, setData, notify }) {
         <div className="correction-layout">
           <section className="panel upload-panel">
             <div className="correction-step"><span>1</span><div><h3>Selecione o simulado e a turma</h3><p>O QR Code confirmará automaticamente essas informações na leitura.</p></div></div>
-            <div className="correction-selectors"><label><span>Simulado</span><select value={assessmentId} onChange={(event) => chooseAssessment(event.target.value)}>{data.assessments.map((item) => <option value={item.id} key={item.id}>{item.title} · {item.questionCount} questões</option>)}</select></label><label><span>Turma / versão</span><select value={classId} onChange={(event) => { setClassId(event.target.value); setStudentId('') }}>{assessment?.classIds.map((id) => { const item = data.classes.find((entry) => entry.id === id); return <option value={id} key={id}>{item?.name} · {item?.shift}</option> })}</select></label></div>
+            <div className="correction-selectors"><label><span>Simulado</span><select value={assessmentId} onChange={(event) => chooseAssessment(event.target.value)}>{data.assessments.map((item) => <option value={item.id} disabled={isAssessmentClosed(item)} key={item.id}>{item.title} · {item.questionCount} questões{isAssessmentClosed(item) ? ' · Encerrado' : ''}</option>)}</select></label><label><span>Turma / versão</span><select value={classId} disabled={assessmentClosed} onChange={(event) => { setClassId(event.target.value); setStudentId('') }}>{assessment?.classIds.map((id) => { const item = data.classes.find((entry) => entry.id === id); return <option value={id} key={id}>{item?.name} · {item?.shift}</option> })}</select></label></div>
             <div className="selected-key-preview"><div><span className="key-preview-icon"><ClipboardList size={18} /></span><p><small>GABARITO EM USO</small><strong>{classroom?.name} · {assessment?.code}</strong><em>{hasCustomAnswerKey(assessment, classId) ? 'Versão específica da turma' : 'Gabarito padrão'}</em></p></div><AnswerKeyStrip answerKey={answerKey} limit={12} compact /><button onClick={() => setTab('keys')}>Ver gabarito completo <ChevronRight size={14} /></button></div>
 
             <div className="correction-step second"><span>2</span><div><h3>Envie imagens ou um PDF completo</h3><p>Cada imagem ou página será identificada pelo QR e corrigida com o gabarito correspondente.</p></div></div>
-            <div className={cn('drop-zone', dragging && 'dragging', processing && 'processing')} onDragOver={(event) => { event.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); processFiles(event.dataTransfer.files) }}>
-              {processing ? <><span className="scan-animation"><ScanLine size={31} /><i /></span><h3>{processingProgress?.total ? `Analisando folha ${processingProgress.current} de ${processingProgress.total}` : 'Preparando arquivo...'}</h3><p>Lendo QR Codes, identificando turmas e aplicando os gabaritos</p>{processingProgress?.total > 0 && <div className="batch-processing-progress"><i style={{ width: `${Math.round((processingProgress.current / processingProgress.total) * 100)}%` }} /></div>}</> : <><span className="upload-illustration"><Files size={28} /><i><QrCode size={16} /></i></span><h3>Arraste imagens ou um PDF aqui</h3><p>Até 100 JPG, PNG ou WEBP de 15 MB cada · PDF com até 100 páginas e 100 MB</p><div><Button icon={UploadCloud} onClick={() => fileInput.current?.click()}>Selecionar arquivos</Button><Button variant="secondary" icon={Camera} onClick={() => cameraInput.current?.click()}>Usar câmera</Button></div></>}
-              <input ref={fileInput} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" multiple hidden onChange={(event) => { processFiles(event.target.files); event.target.value = '' }} />
-              <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { processFile(event.target.files[0]); event.target.value = '' }} />
+            <div className={cn('drop-zone', dragging && 'dragging', processing && 'processing', assessmentClosed && 'is-locked')} onDragOver={(event) => { event.preventDefault(); if (!assessmentClosed) setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); processFiles(event.dataTransfer.files) }}>
+              {assessmentClosed ? <><span className="upload-illustration"><LockKeyhole size={28} /></span><h3>Simulado encerrado</h3><p>Reabra este simulado na área de Simulados para registrar novas correções.</p></> : processing ? <><span className="scan-animation"><ScanLine size={31} /><i /></span><h3>{processingProgress?.total ? `Analisando folha ${processingProgress.current} de ${processingProgress.total}` : 'Preparando arquivo...'}</h3><p>Lendo QR Codes, identificando turmas e aplicando os gabaritos</p>{processingProgress?.total > 0 && <div className="batch-processing-progress"><i style={{ width: `${Math.round((processingProgress.current / processingProgress.total) * 100)}%` }} /></div>}</> : <><span className="upload-illustration"><Files size={28} /><i><QrCode size={16} /></i></span><h3>Arraste imagens ou um PDF aqui</h3><p>Até 100 JPG, PNG ou WEBP de 15 MB cada · PDF com até 100 páginas e 100 MB</p><div><Button icon={UploadCloud} onClick={() => fileInput.current?.click()}>Selecionar arquivos</Button><Button variant="secondary" icon={Camera} onClick={() => cameraInput.current?.click()}>Usar câmera</Button></div></>}
+              <input ref={fileInput} disabled={assessmentClosed} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" multiple hidden onChange={(event) => { processFiles(event.target.files); event.target.value = '' }} />
+              <input ref={cameraInput} disabled={assessmentClosed} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { processFile(event.target.files[0]); event.target.value = '' }} />
             </div>
-            <details className="manual-identification"><summary>QR Code danificado? Identificar manualmente <ChevronRight size={15} /></summary><div><select value={studentId} onChange={(event) => setStudentId(event.target.value)}><option value="">Selecione o aluno (opcional)</option>{eligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select></div></details>
+            {!assessmentClosed && <details className="manual-identification"><summary>QR Code danificado? Identificar manualmente <ChevronRight size={15} /></summary><div><select value={studentId} onChange={(event) => setStudentId(event.target.value)}><option value="">Selecione o aluno (opcional)</option>{eligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select></div></details>}
           </section>
 
           <aside className="correction-guide"><h3>Para uma leitura precisa</h3><div><span><Focus size={19} /></span><p><strong>Uma folha por arquivo</strong>Cada imagem ou página do PDF deve conter uma folha completa, sem cortes.</p></div><div><span><CircleDot size={19} /></span><p><strong>Digitalize com nitidez</strong>Prefira 200 ou 300 DPI e mantenha os quatro marcadores visíveis.</p></div><div><span><QrCode size={19} /></span><p><strong>Não cubra o QR Code</strong>Ele identifica o simulado e, nas folhas nominadas, também o aluno.</p></div><div className="privacy-note"><CheckCircle2 size={18} /><p><strong>Processamento privado</strong>As imagens e o PDF são analisados neste dispositivo e não são enviados para servidores.</p></div></aside>
         </div>
 
-        <section className="panel recent-corrections"><header className="panel-header"><div><h3>Correções recentes</h3><p>Últimas folhas processadas e o gabarito aplicado</p></div><button className="text-button" onClick={() => setTab('reviews')}>{data.submissions.filter((item) => item.status === 'Revisar').length} para revisar <ChevronRight size={14} /></button></header>{recent.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA / GABARITO</th><th>SIMULADO</th><th>RESULTADO</th><th>STATUS</th><th /></tr></thead><tbody>{recent.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span><small className="cell-subtitle">Gabarito {hasCustomAnswerKey(itemAssessment, itemStudent?.classId) ? 'específico' : 'padrão'}</small></td><td>{itemAssessment?.title}</td><td><strong>{submission.correct} / {validTotal}</strong><small className="cell-subtitle">{submission.score}% de acertos</small></td><td><Badge tone={submission.status === 'Revisar' ? 'ochre' : 'green'}>{submission.status}</Badge></td><td><button className="icon-button"><MoreHorizontal size={18} /></button></td></tr> })}</tbody></table></div> : <EmptyState icon={ScanLine} title="Nenhuma folha corrigida" description="As leituras aparecerão aqui." />}</section>
+        <section className="panel recent-corrections"><header className="panel-header"><div><h3>Correções recentes</h3><p>Últimas folhas processadas e o gabarito aplicado</p></div><button className="text-button" onClick={() => setTab('reviews')}>{pendingReviews.length} para revisar <ChevronRight size={14} /></button></header>{recent.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA / GABARITO</th><th>SIMULADO</th><th>RESULTADO</th><th>STATUS</th><th /></tr></thead><tbody>{recent.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const archivedReview = submission.status === 'Revisar' && isAssessmentClosed(itemAssessment); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span><small className="cell-subtitle">Gabarito {hasCustomAnswerKey(itemAssessment, itemStudent?.classId) ? 'específico' : 'padrão'}</small></td><td>{itemAssessment?.title}</td><td><strong>{submission.correct} / {validTotal}</strong><small className="cell-subtitle">{submission.score}% de acertos</small></td><td><Badge tone={archivedReview ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'}>{archivedReview ? 'Encerrado com ressalva' : submission.status}</Badge></td><td><button className="icon-button"><MoreHorizontal size={18} /></button></td></tr> })}</tbody></table></div> : <EmptyState icon={ScanLine} title="Nenhuma folha corrigida" description="As leituras aparecerão aqui." />}</section>
       </>}
 
       {batch && <section className="batch-review page-stack">
@@ -960,7 +994,7 @@ export function CorrectionPage({ data, setData, notify }) {
           <aside className="scan-review-sidebar">
             <section className={cn('scan-verdict', !resultReady ? 'is-pending' : resultNeedsReview ? 'needs-review' : 'is-ready')}>
               <span>{!resultReady || resultNeedsReview ? <AlertTriangle size={22} /> : <CheckCircle2 size={22} />}</span>
-              <div><small>RESULTADO DA LEITURA</small><strong>{!resultReady ? 'Identificação pendente' : resultNeedsReview ? 'Confira os avisos abaixo' : 'Pronta para salvar'}</strong><p>{!resultReady ? 'Complete os dados para aplicar o gabarito correto.' : resultNeedsReview ? 'A nota foi calculada, mas há ocorrências para revisar.' : 'Aluno, prova e respostas foram reconhecidos.'}</p></div>
+              <div><small>RESULTADO DA LEITURA</small><strong>{resultAssessmentClosed ? 'Simulado encerrado' : !resultReady ? 'Identificação pendente' : resultNeedsReview ? 'Confira os avisos abaixo' : 'Pronta para salvar'}</strong><p>{resultAssessmentClosed ? 'Reabra o simulado antes de salvar esta correção.' : !resultReady ? 'Complete os dados para aplicar o gabarito correto.' : resultNeedsReview ? 'A nota foi calculada, mas há ocorrências para revisar.' : 'Aluno, prova e respostas foram reconhecidos.'}</p></div>
               <Badge tone={!resultReady || resultNeedsReview ? 'ochre' : 'green'}>{resultNoticeCount ? `${resultNoticeCount} aviso${resultNoticeCount !== 1 ? 's' : ''}` : 'Sem pendências'}</Badge>
             </section>
 
@@ -977,6 +1011,7 @@ export function CorrectionPage({ data, setData, notify }) {
             <div className="scan-notice-stack compact-notices">
               {!detectedStudent && <div className="scan-notice is-warning"><UsersRound size={17} /><p><strong>{result.qrFound && !result.identity?.studentId ? 'Folha sem aluno vinculado.' : 'Aluno não encontrado.'}</strong> Selecione um cadastro existente ou cadastre o aluno acima.</p></div>}
               {!result.qrFound && <div className="scan-notice is-warning"><QrCode size={17} /><p><strong>QR não reconhecido.</strong> A prova selecionada foi usada como referência.</p></div>}
+              {resultAssessmentClosed && <div className="scan-notice is-warning"><LockKeyhole size={17} /><p><strong>Simulado encerrado.</strong> Reabra-o na área de Simulados para registrar esta correção.</p></div>}
               {detectedStudent && !resultClassCompatible && <div className="scan-notice is-error"><AlertTriangle size={17} /><p><strong>Turma incompatível.</strong> Este aluno não pertence às turmas do simulado.</p></div>}
               {result.markersFound < 4 && <div className="scan-notice is-warning"><Focus size={17} /><p><strong>Enquadramento estimado.</strong> {result.markersFound} de 4 marcadores encontrados.</p></div>}
               {result.multiple > 0 && <div className="scan-notice is-error"><CircleDot size={17} /><p><strong>{result.multiple} múltipla(s).</strong> Mais de uma alternativa detectada.</p></div>}

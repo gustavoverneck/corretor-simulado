@@ -30,6 +30,7 @@ npm run preview
 - associação de um mesmo simulado a uma ou mais turmas;
 - gabarito padrão ou versão específica para cada turma;
 - edição, cópia entre turmas e recálculo das correções após alterar um gabarito;
+- encerramento e reabertura de simulados, preservando resultados e retirando avaliações encerradas das filas de pendências;
 - folha A4 individual, com dados do aluno, QR Code e quatro marcadores de alinhamento;
 - impressão em lote ou geração de PDF, uma folha por aluno;
 - folha avulsa sem aluno vinculado, para preencher à mão e cadastrar o estudante durante a correção;

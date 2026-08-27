@@ -7,6 +7,7 @@ import {
 import { Badge, Button, StatCard } from '../components/ui'
 import { average, cn, downloadBlob, initials } from '../lib/utils'
 import { getQuestionAreas, uniqueQuestionAreas } from '../lib/knowledgeAreas'
+import { isAssessmentClosed } from '../lib/assessment'
 
 const areaColors = ['#47776a', '#a47245', '#6b6682', '#52718a', '#a65f5a', '#748b5f', '#8b6d48', '#5d7180']
 const performanceBands = [
@@ -126,6 +127,7 @@ export function ResultsPage({ data, notify }) {
   const [bandId, setBandId] = useState('all')
   const [selectedQuestion, setSelectedQuestion] = useState(null)
   const assessment = data.assessments.find((item) => item.id === assessmentId)
+  const assessmentClosed = isAssessmentClosed(assessment)
   const assessmentClasses = assessment?.classIds.map((id) => data.classes.find((item) => item.id === id)).filter(Boolean) || []
   const areas = uniqueQuestionAreas(assessment)
 
@@ -228,7 +230,7 @@ export function ResultsPage({ data, notify }) {
         <StatCard label="Média do recorte" value={`${avg}%`} note={area === 'all' ? 'de aproveitamento' : `em ${area}`} icon={Target} tone="green" />
         <StatCard label="Participação" value={`${studentRows.length}`} note={bandId === 'all' ? `de ${eligibleStudents} alunos elegíveis` : `de ${classScopedRows.length} correções no recorte`} icon={UsersRound} tone="blue" />
         <StatCard label="Maior resultado" value={`${studentRows[0]?.score || 0}%`} note={studentRows[0]?.student?.name?.split(' ')[0] || '—'} icon={Award} tone="ochre" />
-        <StatCard label="Para revisão" value={studentRows.filter((item) => item.status === 'Revisar').length} note="folhas com ressalva" icon={AlertTriangle} tone="purple" />
+        <StatCard label={assessmentClosed ? 'Com ressalva' : 'Para revisão'} value={studentRows.filter((item) => item.status === 'Revisar').length} note={assessmentClosed ? 'registradas no encerramento' : 'folhas com revisão pendente'} icon={AlertTriangle} tone="purple" />
       </div>
 
       <section className="panel knowledge-area-panel" id="area-analysis">
@@ -255,7 +257,7 @@ export function ResultsPage({ data, notify }) {
         <span><Lightbulb size={22} /></span><div><div className="eyebrow">LEITURA PEDAGÓGICA</div><h3>{weakestArea ? `${weakestArea.area} apresenta o menor aproveitamento no recorte: ${weakestArea.score}%.` : 'Ajuste os filtros para gerar uma leitura por área.'}</h3><p>{weakestArea ? `Foram ${weakestArea.correct} acertos em ${weakestArea.attempts} respostas analisadas. Use os gráficos interativos para localizar turmas, faixas e questões prioritárias.` : 'O sistema destacará automaticamente a área que requer maior atenção.'}</p></div><button onClick={() => document.getElementById('area-analysis')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Ver análise por área <ArrowUpRight size={16} /></button>
       </section>
 
-      <section className="panel ranking-panel"><header className="panel-header"><div><h3>Resultados por aluno</h3><p>Ranking atualizado conforme os filtros do painel</p></div><Badge tone="neutral">{studentRows.length} corrigidos</Badge></header>{studentRows.length ? <div className="table-wrap"><table><thead><tr><th>#</th><th>ALUNO</th><th>TURMA</th><th>ACERTOS</th><th>EM BRANCO</th><th>DESEMPENHO</th><th>STATUS</th></tr></thead><tbody>{studentRows.map((item, index) => <tr key={item.id}><td><span className={index < 3 ? 'rank-top' : 'rank'}>{index + 1}</span></td><td><div className="student-name"><span style={{ background: `${item.classroom?.color}1c`, color: item.classroom?.color }}>{initials(item.student?.name)}</span><strong>{item.student?.name || 'Aluno removido'}</strong></div></td><td>{item.classroom?.name || '—'}</td><td><strong>{item.correct}</strong> / {item.total}</td><td>{item.blank}</td><td><div className="student-score"><span><i style={{ width: `${item.score}%` }} /></span><strong>{item.score}%</strong>{item.score >= avg ? <TrendingUp size={15} /> : <TrendingDown size={15} />}</div></td><td><Badge tone={item.status === 'Revisar' ? 'ochre' : 'green'}>{item.status}</Badge></td></tr>)}</tbody></table></div> : <div className="results-empty-filter"><BarChart3 size={25} /><strong>Nenhum resultado neste recorte</strong><p>Altere a turma, a área ou a faixa de desempenho.</p><Button variant="ghost" icon={RotateCcw} onClick={resetFilters}>Limpar filtros</Button></div>}</section>
+      <section className="panel ranking-panel"><header className="panel-header"><div><h3>Resultados por aluno</h3><p>Ranking atualizado conforme os filtros do painel</p></div><Badge tone="neutral">{studentRows.length} corrigidos</Badge></header>{studentRows.length ? <div className="table-wrap"><table><thead><tr><th>#</th><th>ALUNO</th><th>TURMA</th><th>ACERTOS</th><th>EM BRANCO</th><th>DESEMPENHO</th><th>STATUS</th></tr></thead><tbody>{studentRows.map((item, index) => <tr key={item.id}><td><span className={index < 3 ? 'rank-top' : 'rank'}>{index + 1}</span></td><td><div className="student-name"><span style={{ background: `${item.classroom?.color}1c`, color: item.classroom?.color }}>{initials(item.student?.name)}</span><strong>{item.student?.name || 'Aluno removido'}</strong></div></td><td>{item.classroom?.name || '—'}</td><td><strong>{item.correct}</strong> / {item.total}</td><td>{item.blank}</td><td><div className="student-score"><span><i style={{ width: `${item.score}%` }} /></span><strong>{item.score}%</strong>{item.score >= avg ? <TrendingUp size={15} /> : <TrendingDown size={15} />}</div></td><td><Badge tone={item.status === 'Revisar' ? assessmentClosed ? 'neutral' : 'ochre' : 'green'}>{item.status === 'Revisar' && assessmentClosed ? 'Encerrado com ressalva' : item.status}</Badge></td></tr>)}</tbody></table></div> : <div className="results-empty-filter"><BarChart3 size={25} /><strong>Nenhum resultado neste recorte</strong><p>Altere a turma, a área ou a faixa de desempenho.</p><Button variant="ghost" icon={RotateCcw} onClick={resetFilters}>Limpar filtros</Button></div>}</section>
     </div>
   )
 }
