@@ -23,14 +23,14 @@ function matchesBand(score, bandId) {
   return band ? score >= band.min && score < band.max : true
 }
 
-function calculateSubmissionMetrics(submission, assessment, area = 'all') {
+function calculateSubmissionMetrics(submission, assessment, selectedAreas = []) {
   const questionAreas = getQuestionAreas(assessment)
   const questionIndexes = questionAreas
-    .map((questionArea, index) => area === 'all' || questionArea === area ? index : -1)
+    .map((questionArea, index) => !selectedAreas.length || selectedAreas.includes(questionArea) ? index : -1)
     .filter((index) => index >= 0)
 
   if (!Array.isArray(submission.answers)) {
-    if (area !== 'all') return null
+    if (selectedAreas.length && selectedAreas.length < new Set(questionAreas).size) return null
     return {
       total: Number(submission.gradedTotal ?? Math.max(0, assessment.questionCount - Number(submission.cancelled || 0))),
       correct: Number(submission.correct || 0),
@@ -95,11 +95,11 @@ function calculateAreaResults(assessment, submissions) {
   }))
 }
 
-function calculateQuestionResults(assessment, submissions, area) {
+function calculateQuestionResults(assessment, submissions, selectedAreas = []) {
   if (!assessment) return []
   const questionAreas = getQuestionAreas(assessment)
   return questionAreas.map((questionArea, index) => {
-    if (area !== 'all' && questionArea !== area) return null
+    if (selectedAreas.length && !selectedAreas.includes(questionArea)) return null
     const result = { index, number: index + 1, area: questionArea, attempts: 0, correct: 0, wrong: 0, blank: 0, cancelled: 0, review: 0, score: 0 }
     submissions.forEach((submission) => {
       const answer = submission.answers?.[index]
@@ -117,6 +117,16 @@ function calculateQuestionResults(assessment, submissions, area) {
     result.score = result.attempts ? Math.round((result.correct / result.attempts) * 100) : 0
     return result
   }).filter(Boolean)
+}
+
+function MultiFilter({ label, options, selected, onChange, allLabel }) {
+  const allSelected = selected.length === options.length
+  function toggle(value) {
+    const next = selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]
+    onChange(next.length ? next : options.map((option) => option.value))
+  }
+  const summary = allSelected ? allLabel : selected.length === 1 ? options.find((option) => option.value === selected[0])?.label : `${selected.length} selecionadas`
+  return <div className="results-multi-field"><span>{label}</span><details><summary>{summary}</summary><div><button type="button" className={allSelected ? 'active' : ''} onClick={() => onChange(options.map((option) => option.value))}>Todas</button>{options.map((option) => <label key={option.value}><input type="checkbox" checked={selected.includes(option.value)} onChange={() => toggle(option.value)} /><span>{option.label}</span></label>)}</div></details></div>
 }
 
 function pearsonCorrelation(firstValues, secondValues) {
@@ -257,8 +267,8 @@ export function StudentQuestionCorrelation({ assessment, submissions, students, 
 export function ResultsPage({ data, notify }) {
   const correctedAssessments = data.assessments.filter((assessment) => data.submissions.some((submission) => submission.assessmentId === assessment.id))
   const [assessmentId, setAssessmentId] = useState(correctedAssessments[0]?.id || '')
-  const [classId, setClassId] = useState('all')
-  const [area, setArea] = useState('all')
+  const [selectedClassIds, setSelectedClassIds] = useState(() => correctedAssessments[0]?.classIds || [])
+  const [selectedAreas, setSelectedAreas] = useState(() => uniqueQuestionAreas(correctedAssessments[0]))
   const [bandId, setBandId] = useState('all')
   const [selectedQuestion, setSelectedQuestion] = useState(null)
   const assessment = data.assessments.find((item) => item.id === assessmentId)
@@ -272,19 +282,19 @@ export function ResultsPage({ data, notify }) {
       const student = data.students.find((item) => item.id === submission.studentId)
       const rowClassId = student?.classId || submission.classId
       const classroom = data.classes.find((item) => item.id === rowClassId)
-      const metrics = calculateSubmissionMetrics(submission, assessment, area)
+      const metrics = calculateSubmissionMetrics(submission, assessment, selectedAreas)
       return metrics ? { ...submission, ...metrics, student, classroom, classId: rowClassId } : null
     })
-    .filter(Boolean), [area, assessment, assessmentId, data.classes, data.students, data.submissions])
+    .filter(Boolean), [selectedAreas, assessment, assessmentId, data.classes, data.students, data.submissions])
 
-  const classScopedRows = resultRows.filter((item) => classId === 'all' || item.classId === classId)
+  const classScopedRows = resultRows.filter((item) => selectedClassIds.includes(item.classId))
   const filteredRows = classScopedRows.filter((item) => matchesBand(item.score, bandId))
   const studentRows = [...filteredRows].sort((first, second) => second.score - first.score || String(first.student?.name).localeCompare(String(second.student?.name), 'pt-BR'))
   const avg = average(studentRows.map((item) => item.score))
   const detailedSubmissions = filteredRows.filter((item) => Array.isArray(item.answers))
-  const areaResults = calculateAreaResults(assessment, filteredRows)
+  const areaResults = calculateAreaResults(assessment, filteredRows).filter((item) => selectedAreas.includes(item.area))
   const weakestArea = [...areaResults].filter((item) => item.attempts > 0).sort((first, second) => first.score - second.score)[0]
-  const questionResults = calculateQuestionResults(assessment, filteredRows, area)
+  const questionResults = calculateQuestionResults(assessment, filteredRows, selectedAreas)
   const selectedQuestionResult = questionResults.find((item) => item.index === selectedQuestion)
 
   const classResults = assessmentClasses.map((classroom) => {
@@ -298,27 +308,38 @@ export function ResultsPage({ data, notify }) {
   }))
   const maxDistribution = Math.max(1, ...distribution.map((item) => item.count))
   const eligibleStudents = data.students.filter((student) => assessment?.classIds.includes(student.classId)
-    && student.status === 'Ativo' && (classId === 'all' || student.classId === classId)).length
-  const activeClass = data.classes.find((item) => item.id === classId)
+    && student.status === 'Ativo' && selectedClassIds.includes(student.classId)).length
+  const selectedClassNames = assessmentClasses.filter((item) => selectedClassIds.includes(item.id)).map((item) => item.name)
   const activeBand = performanceBands.find((item) => item.id === bandId)
-  const hasFilters = classId !== 'all' || area !== 'all' || bandId !== 'all'
+  const hasFilters = selectedClassIds.length !== assessmentClasses.length || selectedAreas.length !== areas.length || bandId !== 'all'
 
   function changeAssessment(nextAssessmentId) {
     setAssessmentId(nextAssessmentId)
-    setClassId('all')
-    setArea('all')
+    const nextAssessment = data.assessments.find((item) => item.id === nextAssessmentId)
+    setSelectedClassIds(nextAssessment?.classIds || [])
+    setSelectedAreas(uniqueQuestionAreas(nextAssessment))
     setBandId('all')
     setSelectedQuestion(null)
   }
 
-  function changeArea(nextArea) {
-    setArea(nextArea)
+  function changeAreas(nextAreas) {
+    setSelectedAreas(nextAreas)
     setSelectedQuestion(null)
   }
 
+  function toggleClass(classId) {
+    const next = selectedClassIds.includes(classId) ? selectedClassIds.filter((id) => id !== classId) : [...selectedClassIds, classId]
+    setSelectedClassIds(next.length ? next : assessmentClasses.map((item) => item.id))
+  }
+
+  function toggleArea(areaName) {
+    const next = selectedAreas.includes(areaName) ? selectedAreas.filter((item) => item !== areaName) : [...selectedAreas, areaName]
+    changeAreas(next.length ? next : areas)
+  }
+
   function resetFilters() {
-    setClassId('all')
-    setArea('all')
+    setSelectedClassIds(assessment?.classIds || [])
+    setSelectedAreas(areas)
     setBandId('all')
     setSelectedQuestion(null)
   }
@@ -326,8 +347,8 @@ export function ResultsPage({ data, notify }) {
   function exportResults() {
     const filterRows = [
       ['Simulado', assessment.title],
-      ['Turma', activeClass?.name || 'Todas'],
-      ['Área / componente', area === 'all' ? 'Todas' : area],
+      ['Turma', selectedClassIds.length === assessmentClasses.length ? 'Todas' : selectedClassNames.join(', ')],
+      ['Área / componente', selectedAreas.length === areas.length ? 'Todas' : selectedAreas.join(', ')],
       ['Faixa de desempenho', activeBand?.label || 'Todas'],
     ]
     const header = ['Matrícula', 'Aluno', 'Turma', 'Questões válidas', 'Acertos', 'Erros', 'Brancos', 'Canceladas', 'Revisões', 'Aproveitamento (%)']
@@ -353,16 +374,16 @@ export function ResultsPage({ data, notify }) {
         <header><div><span><SlidersHorizontal size={17} /></span><div><strong>Explorar resultados</strong><small>Combine os filtros ou clique diretamente nos gráficos.</small></div></div><Button variant="secondary" icon={Download} onClick={exportResults}>Exportar recorte</Button></header>
         <div className="results-filter-grid">
           <label><span>SIMULADO</span><select value={assessmentId} onChange={(event) => changeAssessment(event.target.value)}>{correctedAssessments.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
-          <label><span>TURMA</span><select value={classId} onChange={(event) => setClassId(event.target.value)}><option value="all">Todas as turmas</option>{assessmentClasses.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.shift}</option>)}</select></label>
-          <label><span>ÁREA / COMPONENTE</span><select value={area} onChange={(event) => changeArea(event.target.value)}><option value="all">Todas as áreas</option>{areas.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <MultiFilter label="TURMAS" options={assessmentClasses.map((item) => ({ value: item.id, label: `${item.name} · ${item.shift}` }))} selected={selectedClassIds} onChange={setSelectedClassIds} allLabel="Todas as turmas" />
+          <MultiFilter label="ÁREAS / COMPONENTES" options={areas.map((item) => ({ value: item, label: item }))} selected={selectedAreas} onChange={changeAreas} allLabel="Todas as áreas" />
           <label><span>FAIXA</span><select value={bandId} onChange={(event) => setBandId(event.target.value)}><option value="all">Todas as faixas</option>{performanceBands.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
           <Button variant="ghost" icon={RotateCcw} disabled={!hasFilters} onClick={resetFilters}>Limpar filtros</Button>
         </div>
-        <div className="results-filter-summary"><Badge tone={hasFilters ? 'blue' : 'neutral'}>{studentRows.length} resultado{studentRows.length !== 1 ? 's' : ''}</Badge><span>{activeClass?.name || 'Todas as turmas'} · {area === 'all' ? 'Todas as áreas' : area} · {activeBand?.label || 'Todas as faixas'}</span></div>
+        <div className="results-filter-summary"><Badge tone={hasFilters ? 'blue' : 'neutral'}>{studentRows.length} resultado{studentRows.length !== 1 ? 's' : ''}</Badge><span>{selectedClassIds.length === assessmentClasses.length ? 'Todas as turmas' : selectedClassNames.join(', ')} · {selectedAreas.length === areas.length ? 'Todas as áreas' : selectedAreas.join(', ')} · {activeBand?.label || 'Todas as faixas'}</span></div>
       </section>
 
       <div className="stats-grid">
-        <StatCard label="Média do recorte" value={`${avg}%`} note={area === 'all' ? 'de aproveitamento' : `em ${area}`} icon={Target} tone="green" />
+        <StatCard label="Média do recorte" value={`${avg}%`} note={selectedAreas.length === areas.length ? 'de aproveitamento' : `em ${selectedAreas.length} área${selectedAreas.length !== 1 ? 's' : ''}`} icon={Target} tone="green" />
         <StatCard label="Participação" value={`${studentRows.length}`} note={bandId === 'all' ? `de ${eligibleStudents} alunos elegíveis` : `de ${classScopedRows.length} correções no recorte`} icon={UsersRound} tone="blue" />
         <StatCard label="Maior resultado" value={`${studentRows[0]?.score || 0}%`} note={studentRows[0]?.student?.name?.split(' ')[0] || '—'} icon={Award} tone="ochre" />
         <StatCard label={assessmentClosed ? 'Com ressalva' : 'Para revisão'} value={studentRows.filter((item) => item.status === 'Revisar').length} note={assessmentClosed ? 'registradas no encerramento' : 'folhas com revisão pendente'} icon={AlertTriangle} tone="purple" />
@@ -370,7 +391,7 @@ export function ResultsPage({ data, notify }) {
 
       <section className="panel knowledge-area-panel" id="area-analysis">
         <header className="panel-header"><div><h3>Desempenho por área de conhecimento</h3><p>Clique em uma área para analisar somente as questões daquele componente</p></div><div className="interactive-chart-hint"><MousePointerClick size={14} /><span>Gráfico interativo</span><Badge tone={detailedSubmissions.length === filteredRows.length ? 'green' : 'ochre'}>{detailedSubmissions.length} detalhadas</Badge></div></header>
-        {detailedSubmissions.length ? <div className="area-performance-list">{areaResults.map((item) => <button type="button" className={cn('area-performance-row', area === item.area && 'selected')} key={item.area} onClick={() => changeArea(area === item.area ? 'all' : item.area)}>
+        {detailedSubmissions.length ? <div className="area-performance-list">{areaResults.map((item) => <button type="button" className={cn('area-performance-row', selectedAreas.includes(item.area) && selectedAreas.length < areas.length && 'selected')} key={item.area} onClick={() => toggleArea(item.area)}>
           <span className="area-performance-icon" style={{ '--area-color': item.color }}><BookOpenCheck size={18} /></span>
           <span className="area-performance-copy"><strong>{item.area}</strong><small>{item.questions} {item.questions === 1 ? 'questão' : 'questões'} · {item.attempts} respostas válidas{item.cancelled ? ` · ${item.cancelled} canceladas` : ''}</small></span>
           <span className="area-performance-bar"><span><i style={{ width: `${item.score}%`, background: item.color }} /></span><strong>{item.score}%</strong></span>
@@ -379,12 +400,12 @@ export function ResultsPage({ data, notify }) {
       </section>
 
       <div className="results-grid">
-        <section className="panel class-comparison"><header className="panel-header"><div><h3>Comparativo por turma</h3><p>Clique em uma turma para filtrar todo o painel</p></div></header><div className="horizontal-chart">{classResults.map((item) => <button type="button" className={cn(classId === item.classroom.id && 'selected')} key={item.classroom.id} onClick={() => setClassId(classId === item.classroom.id ? 'all' : item.classroom.id)}><span><strong>{item.classroom.name}</strong><small>{item.count} participantes</small></span><span><i style={{ width: `${item.avg}%`, background: item.classroom.color }} /><em>{item.avg}%</em></span></button>)}</div></section>
+        <section className="panel class-comparison"><header className="panel-header"><div><h3>Comparativo por turma</h3><p>Clique para adicionar ou remover turmas do recorte</p></div></header><div className="horizontal-chart">{classResults.map((item) => <button type="button" className={cn(selectedClassIds.includes(item.classroom.id) && selectedClassIds.length < assessmentClasses.length && 'selected')} key={item.classroom.id} onClick={() => toggleClass(item.classroom.id)}><span><strong>{item.classroom.name}</strong><small>{item.count} participantes</small></span><span><i style={{ width: `${item.avg}%`, background: item.classroom.color }} /><em>{item.avg}%</em></span></button>)}</div></section>
         <section className="panel distribution-panel"><header className="panel-header"><div><h3>Distribuição de desempenho</h3><p>Clique em uma faixa para selecionar os alunos</p></div></header><div className="distribution-chart">{distribution.map((item) => <button type="button" className={cn(bandId === item.id && 'selected')} key={item.id} onClick={() => setBandId(bandId === item.id ? 'all' : item.id)}><span className="distribution-bar"><i style={{ height: item.count ? `${Math.max(7, item.count / maxDistribution * 100)}%` : 0, background: item.color }}><span>{item.count}</span></i></span><small>{item.label}</small></button>)}</div></section>
       </div>
 
       <section className="panel question-performance-panel">
-        <header className="panel-header"><div><h3>Desempenho por questão</h3><p>{area === 'all' ? 'Todas as questões do simulado' : `Questões classificadas em ${area}`} · clique em uma barra para ver os detalhes</p></div><Badge tone="neutral">{questionResults.length} questões</Badge></header>
+        <header className="panel-header"><div><h3>Desempenho por questão</h3><p>{selectedAreas.length === areas.length ? 'Todas as questões do simulado' : `Questões de ${selectedAreas.join(', ')}`} · clique em uma barra para ver os detalhes</p></div><Badge tone="neutral">{questionResults.length} questões</Badge></header>
         {detailedSubmissions.length ? <><div className="question-chart-scroll"><div className="question-chart" style={{ minWidth: `${Math.max(520, questionResults.length * 36)}px` }}>{questionResults.map((item) => <button type="button" className={cn(selectedQuestion === item.index && 'selected')} key={item.index} title={`Questão ${item.number}: ${item.score}% de acertos${item.cancelled ? ` · ${item.cancelled} cancelada(s)` : ''}`} onClick={() => setSelectedQuestion(selectedQuestion === item.index ? null : item.index)}><span><i style={{ height: `${item.score}%`, background: item.score < 40 ? '#b9675f' : item.score < 60 ? '#c69558' : item.score < 80 ? '#7b9b72' : '#3f7968' }} /><em>{item.score}%</em></span><small>Q{item.number}</small></button>)}</div></div>{selectedQuestionResult && <div className="question-selection-detail"><span><strong>Questão {selectedQuestionResult.number}</strong><small>{selectedQuestionResult.area}</small></span><div><b>{selectedQuestionResult.score}%</b><small>aproveitamento</small></div><div><b>{selectedQuestionResult.correct}</b><small>acertos</small></div><div><b>{selectedQuestionResult.wrong}</b><small>erros</small></div><div><b>{selectedQuestionResult.blank}</b><small>brancos</small></div><div><b>{selectedQuestionResult.cancelled}</b><small>canceladas</small></div><div><b>{selectedQuestionResult.review}</b><small>revisar</small></div></div>}</> : <div className="area-analysis-empty"><BarChart3 size={24} /><div><strong>Sem respostas detalhadas</strong><p>Não há dados por questão disponíveis para o recorte selecionado.</p></div></div>}
       </section>
 
