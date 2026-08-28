@@ -17,11 +17,13 @@
     "test:seges": "node scripts/test-seges.mjs",
     "test:omr": "node scripts/test-omr.mjs",
     "test:assessment": "node scripts/test-assessment.mjs",
-    "test:network": "node scripts/test-network-analysis.mjs"
+    "test:network": "node scripts/test-network-analysis.mjs",
+    "test:full-assessment": "node scripts/test-full-assessment.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
     "jsqr": "^1.4.0",
+    "katex": "^0.18.4",
     "lucide-react": "^0.468.0",
     "pdfjs-dist": "^6.2.108",
     "qrcode": "^1.5.4",
