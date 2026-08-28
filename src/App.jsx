@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   LayoutDashboard, UsersRound, ClipboardList, ScanLine, BarChart3, Upload,
   Settings, Search, ChevronDown, GraduationCap, Menu, X, HelpCircle, HardDrive,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, GitCompare,
 } from 'lucide-react'
 import { createInitialState } from './data'
 import { DashboardPage } from './pages/DashboardPage'
@@ -11,6 +11,7 @@ import { AssessmentsPage } from './pages/AssessmentsPage'
 import { CorrectionPage } from './pages/CorrectionPage'
 import { SegesImportPage } from './pages/SegesImportPage'
 import { ResultsPage } from './pages/ResultsPage'
+import { CorrelationPage } from './pages/CorrelationPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { Toast } from './components/ui'
 import { cn, formatDateTime } from './lib/utils'
@@ -25,6 +26,7 @@ const navigation = [
   { id: 'assessments', label: 'Simulados', icon: ClipboardList },
   { id: 'correction', label: 'Correção', icon: ScanLine },
   { id: 'results', label: 'Resultados', icon: BarChart3 },
+  { id: 'correlation', label: 'Correlação', icon: GitCompare },
   { id: 'import', label: 'Importar SEGES', icon: Upload },
 ]
 
@@ -34,6 +36,7 @@ const titles = {
   assessments: ['Simulados', 'Crie, aplique e acompanhe seus instrumentos avaliativos.'],
   correction: ['Central de correção', 'Digitalize folhas e revise marcações com segurança.'],
   results: ['Resultados', 'Transforme respostas em decisões pedagógicas.'],
+  correlation: ['Correlação', 'Compare desempenhos e padrões de resposta entre alunos e simulados.'],
   import: ['Importar do SEGES', 'Atualize alunos e turmas a partir de um relatório oficial.'],
   settings: ['Configurações', 'Ajuste a escola, a leitura óptica e o banco de dados local.'],
 }
@@ -173,6 +176,7 @@ export default function App() {
           {page === 'assessments' && <AssessmentsPage {...context} />}
           {page === 'correction' && <CorrectionPage {...context} />}
           {page === 'results' && <ResultsPage {...context} />}
+          {page === 'correlation' && <CorrelationPage {...context} />}
           {page === 'import' && <SegesImportPage {...context} />}
           {page === 'settings' && <SettingsPage {...context} />}
         </section>

@@ -16,7 +16,8 @@
     "preview": "vite preview",
     "test:seges": "node scripts/test-seges.mjs",
     "test:omr": "node scripts/test-omr.mjs",
-    "test:assessment": "node scripts/test-assessment.mjs"
+    "test:assessment": "node scripts/test-assessment.mjs",
+    "test:network": "node scripts/test-network-analysis.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",

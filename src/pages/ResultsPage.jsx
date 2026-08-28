@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import {
   AlertTriangle, ArrowUpRight, Award, BarChart3, BookOpenCheck, Download,
   Lightbulb, MousePointerClick, RotateCcw, SlidersHorizontal, Target,
-  TrendingDown, TrendingUp, UsersRound,
+  TrendingDown, TrendingUp, UsersRound, Network,
 } from 'lucide-react'
 import { Badge, Button, StatCard } from '../components/ui'
 import { average, cn, downloadBlob, initials } from '../lib/utils'
@@ -117,6 +117,141 @@ function calculateQuestionResults(assessment, submissions, area) {
     result.score = result.attempts ? Math.round((result.correct / result.attempts) * 100) : 0
     return result
   }).filter(Boolean)
+}
+
+function pearsonCorrelation(firstValues, secondValues) {
+  if (firstValues.length < 2 || firstValues.length !== secondValues.length) return null
+  const firstAverage = average(firstValues)
+  const secondAverage = average(secondValues)
+  const numerator = firstValues.reduce((sum, value, index) => sum + ((value - firstAverage) * (secondValues[index] - secondAverage)), 0)
+  const firstDeviation = Math.sqrt(firstValues.reduce((sum, value) => sum + ((value - firstAverage) ** 2), 0))
+  const secondDeviation = Math.sqrt(secondValues.reduce((sum, value) => sum + ((value - secondAverage) ** 2), 0))
+  if (!firstDeviation || !secondDeviation) return null
+  return numerator / (firstDeviation * secondDeviation)
+}
+
+function buildAssessmentCorrelation(firstAssessment, secondAssessment, submissions, classId, metric) {
+  const firstRows = submissions.filter((submission) => submission.assessmentId === firstAssessment.id && (classId === 'all' || submission.classId === classId) && Array.isArray(submission.answers))
+  const secondRows = submissions.filter((submission) => submission.assessmentId === secondAssessment.id && (classId === 'all' || submission.classId === classId) && Array.isArray(submission.answers))
+  const secondByStudent = new Map(secondRows.map((submission) => [submission.studentId, submission]))
+  const pairedRows = firstRows.map((submission) => ({ first: submission, second: secondByStudent.get(submission.studentId) })).filter((pair) => pair.second)
+  if (metric === 'general') {
+    const correlation = pearsonCorrelation(pairedRows.map((pair) => Number(pair.first.score || 0)), pairedRows.map((pair) => Number(pair.second.score || 0)))
+    return correlation === null ? null : { correlation, observations: pairedRows.length }
+  }
+  const questionCount = Math.min(firstAssessment.questionCount, secondAssessment.questionCount)
+  const firstValues = []
+  const secondValues = []
+  pairedRows.forEach(({ first, second }) => {
+    for (let index = 0; index < questionCount; index += 1) {
+      firstValues.push(first.answers[index]?.status === 'correct' ? 1 : 0)
+      secondValues.push(second.answers[index]?.status === 'correct' ? 1 : 0)
+    }
+  })
+  const correlation = pearsonCorrelation(firstValues, secondValues)
+  return correlation === null ? null : { correlation, observations: pairedRows.length, questionObservations: firstValues.length }
+}
+
+export function AssessmentCorrelationNetwork({ assessments, submissions, classId }) {
+  const [metric, setMetric] = useState('general')
+  const network = useMemo(() => {
+    const nodes = assessments.map((assessment, index) => {
+      const angle = (Math.PI * 2 * index / Math.max(1, assessments.length)) - Math.PI / 2
+      return { assessment, x: 50 + Math.cos(angle) * 34, y: 48 + Math.sin(angle) * 34 }
+    })
+    const edges = []
+    for (let firstIndex = 0; firstIndex < nodes.length; firstIndex += 1) {
+      for (let secondIndex = firstIndex + 1; secondIndex < nodes.length; secondIndex += 1) {
+        const result = buildAssessmentCorrelation(nodes[firstIndex].assessment, nodes[secondIndex].assessment, submissions, classId, metric)
+        if (result) edges.push({ ...result, first: nodes[firstIndex], second: nodes[secondIndex] })
+      }
+    }
+    return { nodes, edges }
+  }, [assessments, classId, metric, submissions])
+  const strongest = [...network.edges].sort((first, second) => Math.abs(second.correlation) - Math.abs(first.correlation)).slice(0, 5)
+
+  return <section className="panel correlation-network-panel"><header className="panel-header"><div><h3>Correlação entre simulados</h3><p>As ligações usam apenas alunos presentes nos dois simulados.</p></div><div className="correlation-mode"><button className={metric === 'general' ? 'active' : ''} onClick={() => setMetric('general')}>Desempenho geral</button><button className={metric === 'question' ? 'active' : ''} onClick={() => setMetric('question')}>Por questão</button></div></header><div className="correlation-network-layout"><div className="correlation-network-graphic"><svg viewBox="0 0 100 100" role="img" aria-label={`Rede de correlação por ${metric === 'general' ? 'desempenho geral' : 'desempenho por questão'}`}><g className="correlation-edges">{network.edges.map((edge) => <line key={`${edge.first.assessment.id}-${edge.second.assessment.id}`} x1={edge.first.x} y1={edge.first.y} x2={edge.second.x} y2={edge.second.y} className={edge.correlation >= 0 ? 'positive' : 'negative'} strokeWidth={1 + Math.abs(edge.correlation) * 4} opacity={.2 + Math.abs(edge.correlation) * .65} />)}</g><g>{network.nodes.map((node) => <g key={node.assessment.id} className="correlation-node"><circle cx={node.x} cy={node.y} r="7" /><text x={node.x} y={node.y + .8}>{node.assessment.code || node.assessment.title.slice(0, 3).toUpperCase()}</text><title>{node.assessment.title}</title></g>)}</g></svg></div><div className="correlation-network-legend"><div><span className="correlation-line positive" /><p><strong>Correlação positiva</strong><small>Alunos com bom desempenho em uma prova tendem a repetir o padrão na outra.</small></p></div><div><span className="correlation-line negative" /><p><strong>Correlação negativa</strong><small>O desempenho varia em sentidos opostos entre as provas.</small></p></div><div className="correlation-network-list"><strong>Ligações mais fortes</strong>{strongest.length ? strongest.map((edge) => <div key={`${edge.first.assessment.id}-${edge.second.assessment.id}`}><span>{edge.first.assessment.code} × {edge.second.assessment.code}</span><b className={edge.correlation >= 0 ? 'positive-text' : 'negative-text'}>{edge.correlation > 0 ? '+' : ''}{Math.round(edge.correlation * 100)}%</b><small>{edge.observations} aluno{edge.observations !== 1 ? 's' : ''} em comum{edge.questionObservations ? ` · ${edge.questionObservations} observações por questão` : ''}</small></div>) : <small>Não há pares com dados suficientes para calcular a correlação.</small>}</div></div></div><footer className="correlation-network-footnote"><Network size={15} /> Pearson: -100% indica relação inversa, 0% indica ausência de relação linear e +100% indica relação positiva perfeita. A correlação por questão compara acerto/erro dos mesmos alunos nas posições correspondentes.</footer></section>
+}
+
+function studentAnswerValue(answer) {
+  const selected = Array.isArray(answer?.selected) ? [...answer.selected].sort() : []
+  return selected.join('+')
+}
+
+export function StudentCorrelationNetwork({ assessment, assessments, submissions, students, classId }) {
+  const [metric, setMetric] = useState('question')
+  const [questionIndex, setQuestionIndex] = useState(0)
+  const rows = useMemo(() => submissions
+    .filter((submission) => submission.assessmentId === assessment?.id && Array.isArray(submission.answers) && (classId === 'all' || submission.classId === classId))
+    .map((submission) => ({ submission, student: students.find((student) => student.id === submission.studentId) }))
+    .filter((row) => row.student), [assessment?.id, classId, students, submissions])
+  const network = useMemo(() => {
+    const nodes = rows.map((row, index) => {
+      const angle = (Math.PI * 2 * index / Math.max(1, rows.length)) - Math.PI / 2
+      return { ...row, x: 50 + Math.cos(angle) * 35, y: 48 + Math.sin(angle) * 35 }
+    })
+    const edges = []
+    for (let firstIndex = 0; firstIndex < nodes.length; firstIndex += 1) {
+      for (let secondIndex = firstIndex + 1; secondIndex < nodes.length; secondIndex += 1) {
+        const first = nodes[firstIndex]
+        const second = nodes[secondIndex]
+        let comparable = 0
+        let same = 0
+        let questionSame = false
+        if (metric === 'question') {
+          const firstAnswer = studentAnswerValue(first.submission.answers[questionIndex])
+          const secondAnswer = studentAnswerValue(second.submission.answers[questionIndex])
+          questionSame = Boolean(firstAnswer && secondAnswer && firstAnswer === secondAnswer)
+          comparable = firstAnswer || secondAnswer ? 1 : 0
+          same = questionSame ? 1 : 0
+        } else if (metric === 'assessment') {
+          const values = Array.from({ length: assessment.questionCount }, (_, index) => [studentAnswerValue(first.submission.answers[index]), studentAnswerValue(second.submission.answers[index])]).filter(([firstAnswer, secondAnswer]) => firstAnswer || secondAnswer)
+          comparable = values.length
+          same = values.filter(([firstAnswer, secondAnswer]) => firstAnswer === secondAnswer).length
+        } else {
+          assessments.forEach((item) => {
+            const firstSubmission = submissions.find((submission) => submission.assessmentId === item.id && submission.studentId === first.student.id && Array.isArray(submission.answers))
+            const secondSubmission = submissions.find((submission) => submission.assessmentId === item.id && submission.studentId === second.student.id && Array.isArray(submission.answers))
+            if (!firstSubmission || !secondSubmission) return
+            const count = Math.min(item.questionCount, firstSubmission.answers.length, secondSubmission.answers.length)
+            for (let index = 0; index < count; index += 1) {
+              const firstCorrect = firstSubmission.answers[index]?.status === 'correct'
+              const secondCorrect = secondSubmission.answers[index]?.status === 'correct'
+              comparable += 1
+              if (firstCorrect === secondCorrect) same += 1
+            }
+          })
+        }
+        if (comparable) edges.push({ first, second, similarity: Math.round((same / comparable) * 100), comparable, questionSame })
+      }
+    }
+    return { nodes, edges: edges.filter((edge) => metric === 'question' ? edge.questionSame : edge.similarity >= 65) }
+  }, [assessment, assessments, metric, questionIndex, rows, submissions])
+  const strongest = [...network.edges].sort((first, second) => second.similarity - first.similarity).slice(0, 6)
+  const strongestPair = strongest[0]
+
+  return <section className="panel student-network-panel"><header className="panel-header"><div><h3>Rede de correlação entre alunos</h3><p>Os nós representam alunos; cada ligação mostra um padrão compartilhado dentro da seleção.</p></div><div className="correlation-mode"><button className={metric === 'question' ? 'active' : ''} onClick={() => setMetric('question')}>Por questão</button><button className={metric === 'assessment' ? 'active' : ''} onClick={() => setMetric('assessment')}>No simulado</button><button className={metric === 'cross' ? 'active' : ''} onClick={() => setMetric('cross')}>Entre simulados</button></div></header><div className="student-network-controls">{metric === 'question' && <label><span>Questão analisada</span><select value={questionIndex} onChange={(event) => setQuestionIndex(Number(event.target.value))}>{Array.from({ length: assessment.questionCount }, (_, index) => <option value={index} key={index}>Questão {index + 1}</option>)}</select></label>}<p>{metric === 'question' ? 'A ligação aparece quando os dois alunos marcaram a mesma alternativa, sem contar dois brancos.' : metric === 'assessment' ? 'A ligação aparece a partir de 65% de respostas iguais no simulado.' : 'A ligação compara acerto e erro nas questões dos simulados feitos pelos dois alunos.'}</p></div><div className="student-network-layout"><div className="student-network-graphic"><svg viewBox="0 0 100 100" role="img" aria-label="Rede de correlação entre alunos"><g className="correlation-edges">{network.edges.map((edge) => <line key={`${edge.first.student.id}-${edge.second.student.id}`} x1={edge.first.x} y1={edge.first.y} x2={edge.second.x} y2={edge.second.y} strokeWidth={.7 + edge.similarity / 100 * 2.7} opacity={.25 + edge.similarity / 100 * .65} />)}</g>{network.nodes.map((node) => <g className="student-network-node" key={node.student.id}><circle cx={node.x} cy={node.y} r="5.8" /><text x={node.x} y={node.y + .7}>{node.student.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</text><title>{node.student.name}</title></g>)}</svg></div><div className="student-network-analysis"><div><strong>{network.edges.length}</strong><span>ligações encontradas</span></div><div><strong>{strongestPair ? `${strongestPair.similarity}%` : '—'}</strong><span>maior similaridade</span></div><section><strong>Análise automática</strong>{strongestPair ? <p>{strongestPair.first.student.name} e {strongestPair.second.student.name} formam o par mais próximo neste recorte, com {strongestPair.similarity}% de coincidência em {strongestPair.comparable} observações. Confirme a posição em sala, a aplicação e a folha original antes de interpretar o padrão.</p> : <p>Nenhuma ligação atingiu o critério atual. Selecione outra questão, turma ou modo de comparação.</p>}</section></div></div><footer className="correlation-network-footnote"><Network size={15} /><span>Uma ligação indica semelhança, não causalidade. Ela pode refletir conteúdo aprendido, dificuldade da questão, influência entre colegas ou outras condições da aplicação.</span></footer></section>
+}
+
+export function StudentQuestionCorrelation({ assessment, submissions, students, classId }) {
+  const [questionIndex, setQuestionIndex] = useState(0)
+  const studentRows = useMemo(() => {
+    const source = submissions
+      .filter((submission) => submission.assessmentId === assessment?.id && Array.isArray(submission.answers) && (classId === 'all' || submission.classId === classId))
+      .map((submission) => ({ submission, student: students.find((item) => item.id === submission.studentId) }))
+    return source.filter((row) => row.student)
+  }, [assessment?.id, classId, students, submissions])
+  const currentQuestion = studentRows.map((row) => ({ ...row, answer: studentAnswerValue(row.submission.answers[questionIndex]) || 'Em branco' }))
+  const answerGroups = [...new Set(currentQuestion.map((row) => row.answer))]
+  const pairs = useMemo(() => studentRows.flatMap((first, firstIndex) => studentRows.slice(firstIndex + 1).filter((second) => first.student.classId === second.student.classId).map((second) => {
+    const comparable = Array.from({ length: assessment.questionCount }, (_, index) => [studentAnswerValue(first.submission.answers[index]), studentAnswerValue(second.submission.answers[index])]).filter(([firstAnswer, secondAnswer]) => firstAnswer || secondAnswer)
+    const same = comparable.filter(([firstAnswer, secondAnswer]) => firstAnswer === secondAnswer).length
+    const selectedSame = studentAnswerValue(first.submission.answers[questionIndex]) === studentAnswerValue(second.submission.answers[questionIndex])
+      && Boolean(studentAnswerValue(first.submission.answers[questionIndex]))
+    return { first, second, same, comparable: comparable.length, selectedSame, similarity: comparable.length ? Math.round((same / comparable.length) * 100) : 0 }
+  })).sort((first, second) => Number(second.selectedSame) - Number(first.selectedSame) || second.similarity - first.similarity), [assessment.questionCount, questionIndex, studentRows])
+  if (!assessment) return null
+  return <section className="panel student-question-correlation"><header className="panel-header"><div><h3>Relação entre alunos por questão</h3><p>Veja como os estudantes responderam a uma questão e compare padrões dentro da mesma turma.</p></div><Badge tone="neutral">{currentQuestion.length} respostas</Badge></header><div className="student-question-toolbar"><label><span>Questão analisada</span><select value={questionIndex} onChange={(event) => setQuestionIndex(Number(event.target.value))}>{Array.from({ length: assessment.questionCount }, (_, index) => <option value={index} key={index}>Questão {index + 1}</option>)}</select></label><div className="student-question-distribution">{answerGroups.map((answer) => <div key={answer}><strong>{currentQuestion.filter((row) => row.answer === answer).length}</strong><span>{answer}</span></div>)}</div></div>{pairs.length ? <div className="table-wrap"><table className="student-question-table"><thead><tr><th>ALUNOS</th><th>QUESTÃO {questionIndex + 1}</th><th>PADRÃO COMPLETO</th><th>LEITURA</th></tr></thead><tbody>{pairs.slice(0, 20).map((pair) => <tr key={`${pair.first.student.id}-${pair.second.student.id}`} className={pair.selectedSame ? 'same-question' : ''}><td><strong>{pair.first.student.name}</strong><small className="cell-subtitle">{pair.second.student.name}</small></td><td><span>{studentAnswerValue(pair.first.submission.answers[questionIndex]) || 'Em branco'}</span><small className="cell-subtitle">{studentAnswerValue(pair.second.submission.answers[questionIndex]) || 'Em branco'}</small></td><td>{pair.same} de {pair.comparable} respostas consideradas <strong className="student-question-score">{pair.similarity}%</strong></td><td><Badge tone={pair.selectedSame ? 'ochre' : 'neutral'}>{pair.selectedSame ? 'Mesma marcação' : 'Diferente'}</Badge></td></tr>)}</tbody></table></div> : <div className="area-analysis-empty"><UsersRound size={24} /><div><strong>Sem pares na turma selecionada</strong><p>São necessárias pelo menos duas folhas corrigidas com respostas detalhadas.</p></div></div>}<footer className="correlation-network-footnote"><Network size={15} /><span>A coluna da questão mostra uma coincidência pontual. O percentual compara o padrão completo e desconsidera questões em branco dos dois estudantes.</span></footer></section>
 }
 
 export function ResultsPage({ data, notify }) {
