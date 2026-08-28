@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import {
   UploadCloud, Camera, ScanLine, CheckCircle2, AlertTriangle, FileImage, RotateCcw,
   Save, MoreHorizontal, QrCode, Focus, CircleDot, ChevronRight, X, ClipboardList,
-  ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff, LockKeyhole,
+  ListChecks, PencilLine, UsersRound, UserRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff, LockKeyhole, GitCompare,
   ArrowUp, ArrowDown, ArrowUpDown,
 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
@@ -457,6 +457,70 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
   )
 }
 
+function answerSignature(answer) {
+  const selected = Array.isArray(answer?.selected) ? [...answer.selected].sort() : []
+  return selected.join('+')
+}
+
+function compareResponsePair(first, second, questionCount) {
+  const firstAnswers = Array.isArray(first.submission.answers) ? first.submission.answers : []
+  const secondAnswers = Array.isArray(second.submission.answers) ? second.submission.answers : []
+  const questions = Array.from({ length: questionCount }, (_, index) => {
+    const firstAnswer = firstAnswers[index]
+    const secondAnswer = secondAnswers[index]
+    const firstSignature = answerSignature(firstAnswer)
+    const secondSignature = answerSignature(secondAnswer)
+    const markedByBoth = firstSignature && secondSignature
+    return { question: index + 1, first: firstSignature || 'Em branco', second: secondSignature || 'Em branco', same: firstSignature === secondSignature, markedByBoth, markedSame: markedByBoth && firstSignature === secondSignature }
+  })
+  const comparableQuestions = questions.filter((item) => item.first !== 'Em branco' || item.second !== 'Em branco')
+  const sameAnswers = comparableQuestions.filter((item) => item.same).length
+  const sameMarkedAnswers = questions.filter((item) => item.markedSame).length
+  const markedQuestions = questions.filter((item) => item.markedByBoth).length
+  return { questions, sameAnswers, sameMarkedAnswers, markedQuestions, comparableQuestions: comparableQuestions.length, similarity: comparableQuestions.length ? Math.round((sameAnswers / comparableQuestions.length) * 100) : 0 }
+}
+
+function PlagiarismPanel({ data, initialAssessmentId }) {
+  const [assessmentId, setAssessmentId] = useState(initialAssessmentId || data.assessments[0]?.id || '')
+  const [classId, setClassId] = useState('all')
+  const [mode, setMode] = useState('class')
+  const [firstStudentId, setFirstStudentId] = useState('')
+  const [secondStudentId, setSecondStudentId] = useState('')
+  const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
+  const classOptions = assessment?.classIds.map((id) => data.classes.find((item) => item.id === id)).filter(Boolean) || []
+  const rows = useMemo(() => data.submissions
+    .filter((submission) => submission.assessmentId === assessment?.id && Array.isArray(submission.answers))
+    .map((submission) => ({ submission, student: data.students.find((item) => item.id === submission.studentId), classroom: data.classes.find((item) => item.id === submission.classId || item.id === data.students.find((student) => student.id === submission.studentId)?.classId) }))
+    .filter((row) => row.student && (classId === 'all' || row.student.classId === classId)), [assessment?.id, classId, data])
+  const pairRows = useMemo(() => rows.flatMap((first, firstIndex) => rows.slice(firstIndex + 1).filter((second) => second.student.classId === first.student.classId).map((second) => ({ first, second, ...compareResponsePair(first, second, assessment?.questionCount || 0) }))).sort((first, second) => second.similarity - first.similarity || second.sameMarkedAnswers - first.sameMarkedAnswers), [assessment?.questionCount, rows])
+  const studentsWithResponses = rows.map((row) => row.student)
+  const first = rows.find((row) => row.student.id === firstStudentId)
+  const second = rows.find((row) => row.student.id === secondStudentId)
+  const selectedPair = first && second && first.student.id !== second.student.id ? compareResponsePair(first, second, assessment?.questionCount || 0) : null
+
+  function chooseAssessment(nextId) {
+    setAssessmentId(nextId)
+    setClassId('all')
+    setFirstStudentId('')
+    setSecondStudentId('')
+  }
+
+  function chooseClass(nextId) {
+    setClassId(nextId)
+    setFirstStudentId('')
+    setSecondStudentId('')
+  }
+
+  if (!assessment) return <EmptyState icon={GitCompare} title="Nenhum simulado" description="Crie um simulado antes de verificar a similaridade das respostas." />
+
+  return <section className="panel plagiarism-panel">
+    <header className="panel-header"><div><h3>Verificação de similaridade</h3><p>Compare respostas marcadas para identificar padrões que merecem conferência pedagógica.</p></div><Badge tone="blue">{rows.length} folha{rows.length !== 1 ? 's' : ''} detalhada{rows.length !== 1 ? 's' : ''}</Badge></header>
+    <div className="plagiarism-toolbar"><label><span>Simulado</span><select value={assessment.id} onChange={(event) => chooseAssessment(event.target.value)}>{data.assessments.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label><span>Turma</span><select value={classId} onChange={(event) => chooseClass(event.target.value)}><option value="all">Todas as turmas</option>{classOptions.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><div className="plagiarism-mode" role="group" aria-label="Modo de comparação"><button className={mode === 'class' ? 'active' : ''} onClick={() => setMode('class')}>Pares da seleção</button><button className={mode === 'students' ? 'active' : ''} onClick={() => setMode('students')}>Dois estudantes</button></div></div>
+    <div className="plagiarism-notice"><GitCompare size={17} /><p><strong>Indicador de similaridade, não prova de plágio.</strong> A análise considera respostas iguais na mesma posição. Duas respostas em branco não entram como coincidência marcada; confirme o contexto, a aplicação e a folha original antes de tomar qualquer decisão.</p></div>
+    {mode === 'class' ? <div className="plagiarism-results"><div className="plagiarism-summary"><div><strong>{pairRows.length}</strong><span>pares comparados na mesma turma</span></div><div><strong>{pairRows.filter((pair) => pair.similarity >= 80).length}</strong><span>com 80% ou mais de coincidência</span></div><div><strong>{rows.length}</strong><span>estudantes com respostas</span></div></div>{pairRows.length ? <div className="table-wrap"><table className="plagiarism-table"><thead><tr><th>ESTUDANTES</th><th>TURMA</th><th>RESPOSTAS IGUAIS</th><th>MARCADAS IGUAIS</th><th>SIMILARIDADE</th></tr></thead><tbody>{pairRows.map((pair) => <tr key={`${pair.first.student.id}-${pair.second.student.id}`}><td><strong>{pair.first.student.name}</strong><small className="cell-subtitle">{pair.second.student.name}</small></td><td>{pair.first.classroom?.name || '—'}</td><td>{pair.sameAnswers} de {pair.comparableQuestions} consideradas</td><td>{pair.sameMarkedAnswers}</td><td><span className={cn('plagiarism-score', pair.similarity >= 80 && 'high')}>{pair.similarity}%</span></td></tr>)}</tbody></table></div> : <EmptyState icon={GitCompare} title="Não há pares para comparar" description="É necessário ter pelo menos duas folhas corrigidas na mesma turma e com respostas detalhadas." />}</div> : <div className="plagiarism-student-compare"><label><span>Primeiro estudante</span><select value={firstStudentId} onChange={(event) => { setFirstStudentId(event.target.value); setSecondStudentId('') }}><option value="">Selecione...</option>{studentsWithResponses.map((student) => <option value={student.id} key={student.id}>{student.name} · {data.classes.find((item) => item.id === student.classId)?.name}</option>)}</select></label><label><span>Segundo estudante</span><select value={secondStudentId} onChange={(event) => setSecondStudentId(event.target.value)}><option value="">Selecione...</option>{studentsWithResponses.filter((student) => student.id !== firstStudentId && (!first || student.classId === first.student.classId)).map((student) => <option value={student.id} key={student.id}>{student.name} · {data.classes.find((item) => item.id === student.classId)?.name}</option>)}</select></label>{selectedPair ? <><div className="plagiarism-pair-summary"><strong>{selectedPair.similarity}%</strong><span>{selectedPair.sameAnswers} de {selectedPair.comparableQuestions} respostas consideradas · {selectedPair.sameMarkedAnswers} marcações iguais</span></div><div className="table-wrap"><table className="plagiarism-detail-table"><thead><tr><th>QUESTÃO</th><th>{first.student.name}</th><th>{second.student.name}</th><th>COMPARAÇÃO</th></tr></thead><tbody>{selectedPair.questions.map((question) => <tr key={question.question} className={question.markedSame ? 'same-marked' : ''}><td>{String(question.question).padStart(2, '0')}</td><td>{question.first}</td><td>{question.second}</td><td><Badge tone={question.markedSame ? 'ochre' : question.same ? 'neutral' : 'green'}>{question.markedSame ? 'Marcadas iguais' : question.same ? 'Ambas em branco' : 'Diferentes'}</Badge></td></tr>)}</tbody></table></div></> : <EmptyState icon={UserRound} title="Selecione dois estudantes" description="Escolha dois estudantes com folhas corrigidas para ver a comparação questão a questão." />}</div>}
+  </section>
+}
+
 export function CorrectionPage({ data, setData, notify }) {
   const fileInput = useRef(null)
   const cameraInput = useRef(null)
@@ -466,7 +530,7 @@ export function CorrectionPage({ data, setData, notify }) {
     || data.assessments[0]
   const [tab, setTab] = useState(() => {
     const requested = new URLSearchParams(window.location.search).get('tab')
-    return ['scan', 'responses', 'keys', 'reviews'].includes(requested) ? requested : 'scan'
+    return ['scan', 'responses', 'keys', 'reviews', 'plagiarism'].includes(requested) ? requested : 'scan'
   })
   const [assessmentId, setAssessmentId] = useState(initialAssessment?.id)
   const [classId, setClassId] = useState(initialAssessment?.classIds[0] || '')
@@ -943,20 +1007,17 @@ export function CorrectionPage({ data, setData, notify }) {
 
   return (
     <div className="page-stack correction-page">
-      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagens ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>Visualizar e editar</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{pendingReviews.length} pendentes</small></span></button></div>}
+      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagens ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>Visualizar e editar</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{pendingReviews.length} pendentes</small></span></button><button className={tab === 'plagiarism' ? 'active' : ''} onClick={() => setTab('plagiarism')}><GitCompare size={17} /><span>Verificar similaridade<small>Comparar respostas</small></span></button></div>}
 
       {!result && !batch && tab === 'responses' && <ResponsesPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'keys' && <AnswerKeysPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'reviews' && <ReviewQueue data={data} setData={setData} notify={notify} />}
+      {!result && !batch && tab === 'plagiarism' && <PlagiarismPanel data={data} initialAssessmentId={assessmentId} />}
 
       {!result && !batch && tab === 'scan' && <>
         <div className="correction-layout">
           <section className="panel upload-panel">
-            <div className="correction-step"><span>1</span><div><h3>Selecione o simulado e a turma</h3><p>O QR Code confirmará automaticamente essas informações na leitura.</p></div></div>
-            <div className="correction-selectors"><label><span>Simulado</span><select value={assessmentId} onChange={(event) => chooseAssessment(event.target.value)}>{data.assessments.map((item) => <option value={item.id} disabled={isAssessmentClosed(item)} key={item.id}>{item.title} · {item.questionCount} questões{isAssessmentClosed(item) ? ' · Encerrado' : ''}</option>)}</select></label><label><span>Turma / versão</span><select value={classId} disabled={assessmentClosed} onChange={(event) => { setClassId(event.target.value); setStudentId('') }}>{assessment?.classIds.map((id) => { const item = data.classes.find((entry) => entry.id === id); return <option value={id} key={id}>{item?.name} · {item?.shift}</option> })}</select></label></div>
-            <div className="selected-key-preview"><div><span className="key-preview-icon"><ClipboardList size={18} /></span><p><small>GABARITO EM USO</small><strong>{classroom?.name} · {assessment?.code}</strong><em>{hasCustomAnswerKey(assessment, classId) ? 'Versão específica da turma' : 'Gabarito padrão'}</em></p></div><AnswerKeyStrip answerKey={answerKey} limit={12} compact /><button onClick={() => setTab('keys')}>Ver gabarito completo <ChevronRight size={14} /></button></div>
-
-            <div className="correction-step second"><span>2</span><div><h3>Envie imagens ou um PDF completo</h3><p>Cada imagem ou página será identificada pelo QR e corrigida com o gabarito correspondente.</p></div></div>
+            <div className="correction-step"><span><ScanLine size={15} /></span><div><h3>Envie as folhas para correção</h3><p>Cada folha será identificada pelo QR Code, vinculada à pessoa e à avaliação e corrigida com o gabarito correspondente.</p></div></div>
             <div className={cn('drop-zone', dragging && 'dragging', processing && 'processing', assessmentClosed && 'is-locked')} onDragOver={(event) => { event.preventDefault(); if (!assessmentClosed) setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); processFiles(event.dataTransfer.files) }}>
               {assessmentClosed ? <><span className="upload-illustration"><LockKeyhole size={28} /></span><h3>Simulado encerrado</h3><p>Reabra este simulado na área de Simulados para registrar novas correções.</p></> : processing ? <><span className="scan-animation"><ScanLine size={31} /><i /></span><h3>{processingProgress?.total ? `Analisando folha ${processingProgress.current} de ${processingProgress.total}` : 'Preparando arquivo...'}</h3><p>Lendo QR Codes, identificando turmas e aplicando os gabaritos</p>{processingProgress?.total > 0 && <div className="batch-processing-progress"><i style={{ width: `${Math.round((processingProgress.current / processingProgress.total) * 100)}%` }} /></div>}</> : <><span className="upload-illustration"><Files size={28} /><i><QrCode size={16} /></i></span><h3>Arraste imagens ou um PDF aqui</h3><p>Até 100 JPG, PNG ou WEBP de 15 MB cada · PDF com até 100 páginas e 100 MB</p><div><Button icon={UploadCloud} onClick={() => fileInput.current?.click()}>Selecionar arquivos</Button><Button variant="secondary" icon={Camera} onClick={() => cameraInput.current?.click()}>Usar câmera</Button></div></>}
               <input ref={fileInput} disabled={assessmentClosed} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" multiple hidden onChange={(event) => { processFiles(event.target.files); event.target.value = '' }} />

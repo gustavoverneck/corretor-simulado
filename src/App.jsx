@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   LayoutDashboard, UsersRound, ClipboardList, ScanLine, BarChart3, Upload,
   Settings, Search, ChevronDown, GraduationCap, Menu, X, HelpCircle, HardDrive,
+  PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
 import { createInitialState } from './data'
 import { DashboardPage } from './pages/DashboardPage'
@@ -63,6 +64,7 @@ export default function App() {
     return titles[requested] ? requested : 'dashboard'
   })
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [toast, setToast] = useState(null)
   const [globalSearch, setGlobalSearch] = useState('')
 
@@ -96,13 +98,14 @@ export default function App() {
   const pendingReviewCount = getPendingReviewSubmissions(data.submissions, data.assessments).length
 
   return (
-    <div className="app-shell">
+    <div className={cn('app-shell', sidebarCollapsed && 'sidebar-collapsed')}>
       <aside className={cn('sidebar', sidebarOpen && 'sidebar-open')}>
         <div className="brand" onClick={() => context.setPage('dashboard')} role="button" tabIndex="0">
           <span className="brand-mark"><i /><i /><i /></span>
           <span><strong>Sistema de</strong><small>Avaliações</small></span>
         </div>
         <button className="sidebar-close" onClick={() => setSidebarOpen(false)}><X size={19} /></button>
+        <button className="sidebar-toggle" onClick={() => setSidebarCollapsed((current) => !current)} aria-label={sidebarCollapsed ? 'Expandir menu lateral' : 'Recolher menu lateral'} title={sidebarCollapsed ? 'Expandir menu lateral' : 'Recolher menu lateral'}>{sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
 
         <div className="school-chip">
           <span className="school-avatar"><GraduationCap size={18} /></span>
@@ -127,8 +130,8 @@ export default function App() {
         </nav>
 
         <div className="sidebar-bottom">
-          <button className={cn(page === 'settings' && 'active')} onClick={() => context.setPage('settings')}><Settings size={18} /> Configurações</button>
-          <button><HelpCircle size={18} /> Central de ajuda</button>
+          <button className={cn(page === 'settings' && 'active')} onClick={() => context.setPage('settings')}><Settings size={18} /><span>Configurações</span></button>
+          <button><HelpCircle size={18} /><span>Central de ajuda</span></button>
           <div className="storage-meter">
             <div><span>Dados locais</span><small>{activeStudents} alunos</small></div>
             <div className="meter"><i style={{ width: `${Math.min(92, 18 + activeStudents / 4)}%` }} /></div>
