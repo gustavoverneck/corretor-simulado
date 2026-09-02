@@ -53,12 +53,12 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
       <text x="216" y="162" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">ALUNO(A)</text>
       {!isBlank && <text x="216" y="184" fontFamily="Arial" fontSize="17" fontWeight="700" fill="#17221e">{student.name.toUpperCase()}</text>}
       <line x1="216" y1="195" x2="708" y2="195" stroke="#bfc8c4" />
-      {!hideRegistration && <text x="216" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">MATRÍCULA</text>}
-      {!hideRegistration && !isBlank && <text x="216" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{student.registration}</text>}
-      {!hideRegistration && isBlank && <line x1="216" y1="241" x2="379" y2="241" stroke="#bfc8c4" />}
-      <text x="407" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">TURMA</text>
-      {!isBlank && <text x="407" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{classroom?.name || '—'} · {classroom?.shift || ''}</text>}
-      {isBlank && <line x1="407" y1="241" x2="544" y2="241" stroke="#bfc8c4" />}
+      <text x="216" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">TURMA</text>
+      {!isBlank && <text x="216" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{classroom?.name || '—'} · {classroom?.shift || ''}</text>}
+      {isBlank && <line x1="216" y1="241" x2="379" y2="241" stroke="#bfc8c4" />}
+      {!hideRegistration && <text x="407" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">MATRÍCULA</text>}
+      {!hideRegistration && !isBlank && <text x="407" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">{student.registration}</text>}
+      {!hideRegistration && isBlank && <line x1="407" y1="241" x2="544" y2="241" stroke="#bfc8c4" />}
       <text x="566" y="217" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">DATA</text>
       <text x="566" y="237" fontFamily="Arial" fontSize="13" fill="#17221e">____ / ____ / ______</text>
       <text x="216" y="266" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">SIMULADO</text>

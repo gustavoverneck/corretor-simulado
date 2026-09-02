@@ -10,7 +10,7 @@ function LatexText({ value }) {
   return <>{parts.map((part, index) => { const display = part.startsWith('$$'); const inline = !display && part.startsWith('$'); if (!display && !inline) return <span key={index}>{part}</span>; const expression = part.slice(display ? 2 : 1, display ? -2 : -1); try { return <span key={index} className={display ? 'latex-display' : 'latex-inline'} dangerouslySetInnerHTML={{ __html: katex.renderToString(expression, { displayMode: display, throwOnError: false, strict: false }) }} /> } catch { return <span key={index}>{part}</span> } })}</>
 }
 
-function AssessmentPaper({ student, assessment, classroom, school }) {
+export function AssessmentPaper({ student, assessment, classroom, school }) {
   const version = getAnswerKeyVersionForStudent(assessment, student)
   const questions = getPrintableQuestions(assessment, version)
 

@@ -41,6 +41,44 @@ export function getPendingReviewSubmissions(submissions = [], assessments = []) 
   return submissions.filter((submission) => submission.status === 'Revisar' && !closedAssessmentIds.has(submission.assessmentId))
 }
 
+export function applyAssessmentRevision(data, revisedAssessment, { regradeSubmissions = false, regradedAt = new Date().toISOString() } = {}) {
+  const regradedSubmissionIds = []
+  const submissions = data.submissions.map((submission) => {
+    if (!regradeSubmissions || submission.assessmentId !== revisedAssessment.id || !Array.isArray(submission.answers)) return submission
+    const student = data.students?.find((item) => item.id === submission.studentId) || {
+      id: submission.studentId,
+      classId: submission.classId,
+    }
+    const version = getAnswerKeyVersionForStudent(revisedAssessment, student)
+    const answerKey = version?.answerKey || revisedAssessment.answerKey || []
+    const answers = Array.from({ length: revisedAssessment.questionCount }, (_, index) => submission.answers[index] || {
+      question: index + 1,
+      selected: [],
+      scores: [],
+      status: 'blank',
+    })
+    const graded = regradeAnswers(answers, answerKey)
+    regradedSubmissionIds.push(submission.id)
+    return {
+      ...submission,
+      ...graded,
+      answerKeySnapshot: [...answerKey],
+      answerKeyVersionId: version?.id,
+      answerKeyVersionLabel: version?.label,
+      status: graded.multiple > 0 || graded.uncertain > 0 ? 'Revisar' : 'Corrigido',
+      regradedAt,
+    }
+  })
+  return {
+    data: {
+      ...data,
+      assessments: data.assessments.map((assessment) => assessment.id === revisedAssessment.id ? revisedAssessment : assessment),
+      submissions,
+    },
+    regradedSubmissionIds,
+  }
+}
+
 export function createRandomAnswerKey(questionCount, optionCount, random = Math.random) {
   const count = Math.max(0, Math.floor(Number(questionCount) || 0))
   const alternatives = Math.max(1, Math.floor(Number(optionCount) || 1))

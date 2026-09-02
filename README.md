@@ -30,7 +30,8 @@ npm run preview
 - associação de um mesmo simulado a uma ou mais turmas;
 - gabarito padrão, versões compartilhadas por turma ou uma versão exclusiva por aluno;
 - aleatorização individual somente das questões, somente das alternativas ou de ambas;
-- edição, cópia entre turmas e recálculo das correções após alterar um gabarito;
+- edição posterior da identificação, turmas, questões, alternativas, gabaritos e versões do simulado;
+- aviso com a quantidade de provas afetadas e recálculo das correções, sem apagar as respostas digitalizadas, após mudanças estruturais;
 - encerramento e reabertura de simulados, preservando resultados e retirando avaliações encerradas das filas de pendências;
 - folha A4 individual, com dados do aluno, QR Code e quatro marcadores de alinhamento;
 - impressão em lote ou geração de PDF, com folha de respostas e prova agrupadas por aluno;
