@@ -28,11 +28,12 @@ npm run preview
 - criação de simulados com 10, 20, 30 ou 40 questões e alternativas A–D/A–E;
 - classificação de cada questão por área de conhecimento ou componente personalizado;
 - associação de um mesmo simulado a uma ou mais turmas;
-- gabarito padrão ou versão específica para cada turma;
+- gabarito padrão, versões compartilhadas por turma ou uma versão exclusiva por aluno;
+- aleatorização individual somente das questões, somente das alternativas ou de ambas;
 - edição, cópia entre turmas e recálculo das correções após alterar um gabarito;
 - encerramento e reabertura de simulados, preservando resultados e retirando avaliações encerradas das filas de pendências;
 - folha A4 individual, com dados do aluno, QR Code e quatro marcadores de alinhamento;
-- impressão em lote ou geração de PDF, uma folha por aluno;
+- impressão em lote ou geração de PDF, com folha de respostas e prova agrupadas por aluno;
 - folha avulsa sem aluno vinculado, para preencher à mão e cadastrar o estudante durante a correção;
 - leitura de JPG, PNG ou WEBP, inclusive pela câmera do celular;
 - detecção de QR Code, guias, marcações, respostas em branco, múltiplas e incertas;

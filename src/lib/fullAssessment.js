@@ -39,6 +39,28 @@ export function createPrintableVersions(questions, versions, { shuffleQuestions 
   })
 }
 
+export function createStudentPrintableVersions(questions, students, options = {}, createVersionId = (student) => `version-${student.id}`) {
+  const labelWidth = Math.max(2, String(students.length).length)
+  const versions = students.map((student, index) => ({
+    id: createVersionId(student, index),
+    label: `Versão ${String(index + 1).padStart(labelWidth, '0')}`,
+    classIds: [student.classId],
+    studentId: student.id,
+  }))
+  return createPrintableVersions(questions, versions, options)
+}
+
+export function getPrintableQuestions(assessment, version) {
+  if (Array.isArray(version?.questions) && version.questions.length) return version.questions
+  const sourceQuestions = Array.isArray(assessment?.questions) ? assessment.questions : []
+  if (!version || assessment?.contentMode !== 'full') return sourceQuestions
+  const printOptions = assessment.printOptions || {}
+  return createPrintableVersions(sourceQuestions, [version], {
+    shuffleQuestions: Boolean(printOptions.shuffleQuestions),
+    shuffleAlternatives: Boolean(printOptions.shuffleAlternatives),
+  })[0]?.questions || sourceQuestions
+}
+
 const escapeLatex = (value) => String(value || '').replace(/([%&#_{}])/g, '\\$1').replace(/\$/g, '\\textdollar{}')
 function richLatex(value) {
   return String(value || '').split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g).filter(Boolean).map((part) => {
@@ -48,7 +70,7 @@ function richLatex(value) {
   }).join('')
 }
 export function assessmentToLatex(assessment, student, version) {
-  const questions = version?.questions || assessment.questions || []
+  const questions = getPrintableQuestions(assessment, version)
   const body = questions.map((question) => `\\question ${richLatex(question.statement)}\n${question.imageName ? `% Imagem: ${escapeLatex(question.imageName)} (inclua o arquivo com \\includegraphics)` : ''}\n\\begin{choices}\n${question.alternatives.map((alternative, optionIndex) => `${optionIndex === question.correctIndex ? '\\CorrectChoice' : '\\choice'} ${richLatex(alternative)}`).join('\n')}\n\\end{choices}`).join('\n\n')
   return `\\documentclass[12pt,a4paper]{exam}\n\\usepackage[utf8]{inputenc}\n\\usepackage[T1]{fontenc}\n\\usepackage[brazil]{babel}\n\\usepackage{amsmath,amssymb,graphicx}\n\\usepackage[margin=1.7cm]{geometry}\n\\begin{document}\n\\begin{center}\\Large\\textbf{${escapeLatex(assessment.title)}}\\end{center}\n\\noindent Nome: ${escapeLatex(student?.name || '')} \\hfill Turma: ${escapeLatex(student?.className || '')} \\hfill Versão: ${escapeLatex(version?.label || 'A')}\n\\vspace{.5cm}\n\\begin{questions}\n${body}\n\\end{questions}\n\\end{document}\n`
 }

@@ -3,15 +3,20 @@ import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLin
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { PrintableSheets } from '../components/AnswerSheet'
 import { FullAssessmentEditor } from '../components/FullAssessmentEditor'
-import { AssessmentPapers } from '../components/AssessmentPaper'
+import { AssessmentPackets } from '../components/AssessmentPaper'
 import { CANCELLED_ANSWER, closeAssessment, createRandomAnswerKey, getAssessmentStatusLabel, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, reopenAssessment, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS, uniqueQuestionAreas } from '../lib/knowledgeAreas'
 import { CURRENT_MARKER_LAYOUT, getAnswerSheetLayout } from '../lib/omr'
 import { buildSegesResultRows, calculateAssessmentResult, formatSegesGrade, SEGES_RESULT_STATUS, segesResultsFilename, serializeSegesResultsCsv, indexAssessmentSubmissions } from '../lib/segesResults'
 import { average, cn, downloadBlob, formatDate, initials, uid } from '../lib/utils'
-import { assessmentToLatex, createPrintableVersions, emptyQuestion, resizeQuestions } from '../lib/fullAssessment'
+import { assessmentToLatex, createPrintableVersions, createStudentPrintableVersions, emptyQuestion, resizeQuestions } from '../lib/fullAssessment'
 
 const subjectOptions = ['Língua Portuguesa', 'Matemática', 'Ciências da Natureza', 'Ciências Humanas', 'Linguagens']
+const studentShuffleStrategies = [
+  { id: 'questions', label: 'Somente questões', description: 'Muda a ordem das questões e preserva A–E.' },
+  { id: 'alternatives', label: 'Somente alternativas', description: 'Mantém as questões e embaralha A–E.' },
+  { id: 'both', label: 'Questões + alternativas', description: 'Embaralha as duas ordens em cada prova.' },
+]
 
 function initialAnswerKeyVersions() {
   return [{ id: 'version-a', label: 'Versão A', answerKey: Array(90).fill(''), classIds: [] }]
@@ -464,7 +469,9 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const [questions, setQuestions] = useState(() => Array.from({ length: 40 }, (_, index) => emptyQuestion(4, index)))
   const [shuffleQuestions, setShuffleQuestions] = useState(false)
   const [shuffleAlternatives, setShuffleAlternatives] = useState(true)
-  const [printDocumentMode, setPrintDocumentMode] = useState('answer-sheet')
+  const [versionAssignmentMode, setVersionAssignmentMode] = useState('shared')
+  const [studentShuffleStrategy, setStudentShuffleStrategy] = useState('both')
+  const [printDocumentMode, setPrintDocumentMode] = useState(initialPrintAssessment?.contentMode === 'full' ? 'assessment' : 'answer-sheet')
 
   const filtered = data.assessments.filter((assessment) => {
     const matchText = assessment.title.toLowerCase().includes(search.toLowerCase()) || assessment.code.toLowerCase().includes(search.toLowerCase())
@@ -475,6 +482,15 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const lifecycleAssessment = data.assessments.find((item) => item.id === assessmentLifecycleId)
   const printAssessment = data.assessments.find((item) => item.id === printAssessmentId)
   const printStudents = useMemo(() => data.students.filter((student) => printClassIds.includes(student.classId) && student.status === 'Ativo'), [data.students, printClassIds])
+  const selectedActiveStudents = useMemo(() => {
+    const classOrder = new Map(selectedClasses.map((classId, index) => [classId, index]))
+    return data.students
+      .filter((student) => selectedClasses.includes(student.classId) && student.status === 'Ativo')
+      .sort((first, second) => (
+        (classOrder.get(first.classId) ?? Number.MAX_SAFE_INTEGER) - (classOrder.get(second.classId) ?? Number.MAX_SAFE_INTEGER)
+        || first.name.localeCompare(second.name, 'pt-BR', { sensitivity: 'base' })
+      ))
+  }, [data.students, selectedClasses])
   const answerSheetLayout = getAnswerSheetLayout(questionCount)
   const activeAnswerKeyVersion = answerKeyVersions.find((version) => version.id === activeAnswerKeyVersionId) || answerKeyVersions[0]
   const answerKey = activeAnswerKeyVersion?.answerKey || []
@@ -482,6 +498,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   function openPrint(assessment) {
     setPrintAssessmentId(assessment.id)
     setPrintClassIds(assessment.classIds)
+    setPrintDocumentMode(assessment.contentMode === 'full' ? 'assessment' : 'answer-sheet')
   }
 
   function closePrint() {
@@ -634,11 +651,26 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
       notify('Selecione ao menos uma turma', 'Cada simulado precisa estar associado a uma turma.', 'warning')
       return
     }
-    let assignedVersions = answerKeyVersions.filter((version) => version.classIds.some((classId) => selectedClasses.includes(classId)))
-    const classesWithoutVersion = selectedClasses.filter((classId) => !assignedVersions.some((version) => version.classIds.includes(classId)))
-    if (classesWithoutVersion.length) {
-      notify('Turma sem versão', 'Associe ao menos uma versão de gabarito a cada turma participante.', 'warning')
-      return
+    const individualVersionMode = creationMode === 'full' && versionAssignmentMode === 'student'
+    const effectivePrintOptions = individualVersionMode
+      ? {
+          shuffleQuestions: studentShuffleStrategy === 'questions' || studentShuffleStrategy === 'both',
+          shuffleAlternatives: studentShuffleStrategy === 'alternatives' || studentShuffleStrategy === 'both',
+        }
+      : { shuffleQuestions, shuffleAlternatives }
+    let assignedVersions = []
+    if (individualVersionMode) {
+      if (!selectedActiveStudents.length) {
+        notify('Nenhum aluno ativo', 'As turmas selecionadas precisam ter ao menos um aluno ativo para gerar versões individuais.', 'warning')
+        return
+      }
+    } else {
+      assignedVersions = answerKeyVersions.filter((version) => version.classIds.some((classId) => selectedClasses.includes(classId)))
+      const classesWithoutVersion = selectedClasses.filter((classId) => !assignedVersions.some((version) => version.classIds.includes(classId)))
+      if (classesWithoutVersion.length) {
+        notify('Turma sem versão', 'Associe ao menos uma versão de gabarito a cada turma participante.', 'warning')
+        return
+      }
     }
     if (creationMode === 'full') {
       const incompleteQuestion = questions.slice(0, questionCount).findIndex((question) => !question.statement.trim() || question.alternatives.some((alternative) => !alternative.trim()))
@@ -646,7 +678,9 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
         notify('Questão incompleta', `Preencha o enunciado e todas as alternativas da questão ${incompleteQuestion + 1}.`, 'warning')
         return
       }
-      assignedVersions = createPrintableVersions(questions.slice(0, questionCount), assignedVersions, { shuffleQuestions, shuffleAlternatives })
+      assignedVersions = individualVersionMode
+        ? createStudentPrintableVersions(questions.slice(0, questionCount), selectedActiveStudents, effectivePrintOptions, () => uid('version'))
+        : createPrintableVersions(questions.slice(0, questionCount), assignedVersions, effectivePrintOptions)
     }
     if (assignedVersions.some((version) => version.answerKey.slice(0, questionCount).some((value) => !value))) {
       notify('Gabarito incompleto', 'Complete todas as questões de cada versão associada a uma turma.', 'warning')
@@ -659,21 +693,24 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
       label: version.label,
       answerKey: version.answerKey.slice(0, questionCount),
       ...(creationMode === 'full' ? {
-        questions: version.questions,
+        ...(!individualVersionMode ? { questions: version.questions } : {}),
         questionOrder: version.questionOrder,
         questionAreas: version.questionOrder.map((sourceIndex) => normalizedAreas[sourceIndex]),
+        ...(version.studentId ? { studentId: version.studentId } : {}),
       } : {}),
     }))
     const answerKeyVersionIdsByClass = Object.fromEntries(selectedClasses.map((classId) => [
       classId,
       assignedVersions.filter((version) => version.classIds.includes(classId)).map((version) => version.id),
     ]))
-    const answerKeyVersionIdByStudent = Object.fromEntries(selectedClasses.flatMap((classId) => {
-      const versionIds = answerKeyVersionIdsByClass[classId]
-      return data.students
-        .filter((student) => student.classId === classId)
-        .map((student, index) => [student.id, versionIds[index % versionIds.length]])
-    }))
+    const answerKeyVersionIdByStudent = individualVersionMode
+      ? Object.fromEntries(savedVersions.map((version) => [version.studentId, version.id]))
+      : Object.fromEntries(selectedClasses.flatMap((classId) => {
+          const versionIds = answerKeyVersionIdsByClass[classId]
+          return data.students
+            .filter((student) => student.classId === classId)
+            .map((student, index) => [student.id, versionIds[index % versionIds.length]])
+        }))
     const primaryAnswerKey = savedVersions[0].answerKey
     const assessment = {
       id: uid('assessment'), title: String(form.get('title')).trim(), code: String(form.get('code')).trim().toUpperCase(),
@@ -683,7 +720,11 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
       questionAreas: normalizedAreas,
       contentMode: creationMode,
       questions: creationMode === 'full' ? questions.slice(0, questionCount) : undefined,
-      printOptions: creationMode === 'full' ? { shuffleQuestions, shuffleAlternatives } : undefined,
+      printOptions: creationMode === 'full' ? {
+        ...effectivePrintOptions,
+        versionAssignment: individualVersionMode ? 'student' : 'shared',
+        ...(individualVersionMode ? { studentShuffleStrategy } : {}),
+      } : undefined,
       answerKey: primaryAnswerKey,
       answerKeyVersions: savedVersions,
       answerKeyVersionIdsByClass,
@@ -697,8 +738,8 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
     }
     setData((current) => ({ ...current, assessments: [assessment, ...current.assessments] }))
     setCreateOpen(false)
-    setQuestionCount(40); setQuestionCountInput('40'); setOptionCount(4); setSubject(subjectOptions[0]); setAnswerKeyVersions(initialAnswerKeyVersions()); setActiveAnswerKeyVersionId('version-a'); setQuestionAreas(Array(90).fill(subjectOptions[0])); setBulkArea(subjectOptions[0]); setSelectedClasses([]); setCreationMode('key'); setQuestions(Array.from({ length: 40 }, (_, index) => emptyQuestion(4, index))); setShuffleQuestions(false); setShuffleAlternatives(true)
-    notify('Simulado criado', creationMode === 'full' ? 'A prova completa, suas versões e os gabaritos foram salvos.' : 'O gabarito foi salvo e as folhas já podem ser impressas.')
+    setQuestionCount(40); setQuestionCountInput('40'); setOptionCount(4); setSubject(subjectOptions[0]); setAnswerKeyVersions(initialAnswerKeyVersions()); setActiveAnswerKeyVersionId('version-a'); setQuestionAreas(Array(90).fill(subjectOptions[0])); setBulkArea(subjectOptions[0]); setSelectedClasses([]); setCreationMode('key'); setQuestions(Array.from({ length: 40 }, (_, index) => emptyQuestion(4, index))); setShuffleQuestions(false); setShuffleAlternatives(true); setVersionAssignmentMode('shared'); setStudentShuffleStrategy('both')
+    notify('Simulado criado', individualVersionMode ? `${savedVersions.length} versões individuais foram geradas e vinculadas aos alunos ativos.` : creationMode === 'full' ? 'A prova completa, suas versões e os gabaritos foram salvos.' : 'O gabarito foi salvo e as folhas já podem ser impressas.')
     openPrint(assessment)
   }
 
@@ -888,15 +929,35 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
               </div>
               <div className="answer-sheet-format-note"><Badge tone="blue">Formato {answerSheetLayout.label}</Badge><span>O formato físico usa {answerSheetLayout.columns} {answerSheetLayout.columns === 1 ? 'coluna' : 'colunas'} e marcadores protegidos ao redor das respostas; somente {questionCount} questão{questionCount !== 1 ? 'ões serão exibidas' : ' será exibida'}.</span></div>
 
-              {creationMode === 'full' && <><div className="full-assessment-options"><label><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /><span><strong>Questões diferentes por versão</strong><small>Embaralha a ordem e mantém gabarito e área sincronizados com a nova numeração.</small></span></label><label><input type="checkbox" checked={shuffleAlternatives} onChange={(event) => setShuffleAlternatives(event.target.checked)} /><span><strong>Alternativas diferentes por versão</strong><small>Embaralha A–E e recalcula automaticamente o gabarito de cada versão.</small></span></label></div><FullAssessmentEditor questions={questions.slice(0, questionCount)} optionCount={optionCount} onChange={(next) => setQuestions((current) => [...next, ...current.slice(questionCount)])} notify={notify} /></>}
+              {creationMode === 'full' && <>
+                <div className="full-version-distribution">
+                  <header><strong>Distribuição das versões</strong><small>Escolha como as provas serão geradas para os alunos selecionados.</small></header>
+                  <div>
+                    <button type="button" className={versionAssignmentMode === 'shared' ? 'active' : ''} aria-pressed={versionAssignmentMode === 'shared'} onClick={() => setVersionAssignmentMode('shared')}><Layers3 size={18} /><span><strong>Versões compartilhadas</strong><small>Crie versões e associe cada uma às turmas.</small></span></button>
+                    <button type="button" className={versionAssignmentMode === 'student' ? 'active' : ''} aria-pressed={versionAssignmentMode === 'student'} onClick={() => setVersionAssignmentMode('student')}><UsersRound size={18} /><span><strong>Versão diferente por aluno</strong><small>Gera automaticamente uma prova para cada aluno ativo.</small></span></button>
+                  </div>
+                </div>
+                {versionAssignmentMode === 'student' ? (
+                  <div className="student-version-randomization">
+                    <header><div><Shuffle size={17} /><span><strong>Como aleatorizar</strong><small>A estratégia será aplicada separadamente a cada aluno.</small></span></div><Badge tone="blue">{selectedActiveStudents.length} versões</Badge></header>
+                    <div role="radiogroup" aria-label="Estratégia de aleatorização por aluno">
+                      {studentShuffleStrategies.map((strategy) => <button type="button" role="radio" aria-checked={studentShuffleStrategy === strategy.id} className={studentShuffleStrategy === strategy.id ? 'active' : ''} key={strategy.id} onClick={() => setStudentShuffleStrategy(strategy.id)}><span><strong>{strategy.label}</strong><small>{strategy.description}</small></span><CheckCircle2 size={16} /></button>)}
+                    </div>
+                    <p>Será criada e vinculada uma versão exclusiva para cada aluno ativo das turmas participantes.</p>
+                  </div>
+                ) : (
+                  <div className="full-assessment-options"><label><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /><span><strong>Questões diferentes por versão</strong><small>Embaralha a ordem e mantém gabarito e área sincronizados com a nova numeração.</small></span></label><label><input type="checkbox" checked={shuffleAlternatives} onChange={(event) => setShuffleAlternatives(event.target.checked)} /><span><strong>Alternativas diferentes por versão</strong><small>Embaralha A–E e recalcula automaticamente o gabarito de cada versão.</small></span></label></div>
+                )}
+                <FullAssessmentEditor questions={questions.slice(0, questionCount)} optionCount={optionCount} onChange={(next) => setQuestions((current) => [...next, ...current.slice(questionCount)])} notify={notify} />
+              </>}
 
-              <div className="answer-key-version-manager">
+              {(creationMode !== 'full' || versionAssignmentMode === 'shared') && <div className="answer-key-version-manager">
                 <header><div className="answer-key-version-heading"><strong>Versões {creationMode === 'full' ? 'da prova' : 'do gabarito'}</strong><small>Crie versões diferentes e escolha as turmas que receberão cada uma.</small></div><div className="answer-key-version-actions">{creationMode === 'key' && <Button type="button" variant="ghost" size="sm" icon={Shuffle} onClick={randomizeActiveAnswerKey}>Aleatorizar {activeAnswerKeyVersion.label}</Button>}<Button type="button" variant="secondary" size="sm" icon={Plus} onClick={addAnswerKeyVersion}>Nova versão</Button></div></header>
                 <div className="answer-key-version-tabs">
                   {answerKeyVersions.map((version) => <div className={version.id === activeAnswerKeyVersionId ? 'active' : ''} key={version.id}><button type="button" onClick={() => setActiveAnswerKeyVersionId(version.id)}><strong>{version.label}</strong><small>{version.classIds.length ? `${version.classIds.length} turma${version.classIds.length !== 1 ? 's' : ''}` : 'Sem turma'}</small></button>{answerKeyVersions.length > 1 && <button type="button" className="remove-version" aria-label={`Remover ${version.label}`} onClick={() => removeAnswerKeyVersion(version.id)}><X size={13} /></button>}</div>)}
                 </div>
                 <div className="answer-key-version-classes"><span>Aplicar {activeAnswerKeyVersion.label} a:</span><div>{selectedClasses.length ? selectedClasses.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); const checked = activeAnswerKeyVersion.classIds.includes(classId); return <label className={checked ? 'checked' : ''} key={classId}><input type="checkbox" checked={checked} onChange={() => toggleVersionClass(classId)} /><span style={{ background: classroom?.color }} /><strong>{classroom?.name}</strong><CheckCircle2 size={14} /></label> }) : <small>Selecione as turmas participantes na etapa anterior.</small>}</div><p>Quando uma turma recebe mais de uma versão, elas são alternadas automaticamente entre seus alunos.</p></div>
-              </div>
+              </div>}
 
               <p className="area-editor-help">{creationMode === 'full' ? 'As respostas corretas são definidas dentro das questões; abaixo você classifica cada item.' : <>Editando <strong>{activeAnswerKeyVersion.label}</strong>. Cada questão pode ter uma área ou componente diferente.</>}</p>
               <div className="answer-key-editor">{Array.from({ length: questionCount }, (_, index) => <div className="key-row" key={index}><div className="key-answer-line"><strong>{String(index + 1).padStart(2, '0')}</strong>{creationMode === 'key' ? Array.from({ length: optionCount }, (_, optionIndex) => { const letter = String.fromCharCode(65 + optionIndex); return <button type="button" key={letter} className={answerKey[index] === letter ? 'selected' : ''} onClick={() => setKey(index, letter)}>{letter}</button> }) : <Badge tone="green">Correta: {String.fromCharCode(65 + questions[index].correctIndex)}</Badge>}</div><input className="question-area-input" list="assessment-question-areas" value={questionAreas[index]} onChange={(event) => setQuestionArea(index, event.target.value)} aria-label={`Área da questão ${index + 1}`} placeholder="Área da questão" /></div>)}</div>
@@ -905,7 +966,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
         </form>
       </Modal>
 
-      <Modal open={Boolean(printAssessment)} onClose={closePrint} title={printAssessment?.contentMode === 'full' ? 'Gerar provas e folhas' : 'Gerar folhas de respostas'} subtitle="Os documentos são agrupados por aluno e versão, prontos para impressão em sequência." size="xl" footer={<><span className="footer-note"><CheckCircle2 size={16} /> {printStudents.length} alunos prontos</span><Button variant="ghost" onClick={closePrint}>Fechar</Button>{printAssessment?.contentMode === 'full' && <Button variant="secondary" icon={FileCode2} disabled={!printStudents.length} onClick={exportLatex}>Exportar .tex</Button>}<Button icon={Printer} disabled={!printStudents.length} onClick={() => printSheets(printDocumentMode === 'assessment' ? 'assessment-papers' : 'students')}>Imprimir / salvar PDF</Button></>}>
+      <Modal open={Boolean(printAssessment)} onClose={closePrint} title={printAssessment?.contentMode === 'full' ? 'Gerar provas e folhas' : 'Gerar folhas de respostas'} subtitle={printAssessment?.contentMode === 'full' ? 'Cada aluno recebe a folha de respostas seguida da respectiva prova, em sequência.' : 'As folhas são agrupadas por aluno e versão, prontas para impressão em sequência.'} size="xl" footer={<><span className="footer-note"><CheckCircle2 size={16} /> {printStudents.length} alunos prontos</span><Button variant="ghost" onClick={closePrint}>Fechar</Button>{printAssessment?.contentMode === 'full' && <Button variant="secondary" icon={FileCode2} disabled={!printStudents.length} onClick={exportLatex}>Exportar .tex</Button>}<Button icon={Printer} disabled={!printStudents.length} onClick={() => printSheets(printDocumentMode === 'assessment' ? 'assessment-packets' : 'students')}>Imprimir / salvar PDF</Button></>}>
         {printAssessment && (
           <div className="print-modal-layout">
             <aside className="print-options">
@@ -913,18 +974,18 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
               {printAssessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); const count = data.students.filter((student) => student.classId === classId && student.status === 'Ativo').length; const checked = printClassIds.includes(classId); return <label key={classId} className="print-class-option"><input type="checkbox" checked={checked} onChange={() => setPrintClassIds((current) => checked ? current.filter((id) => id !== classId) : [...current, classId])} /><span><strong>{classroom?.name}</strong><small>{count} alunos · {classroom?.shift}</small></span></label> })}
               <div className="print-sheet-options">
                 <h4>Dados visíveis</h4>
-                {printAssessment.contentMode === 'full' && <div className="print-document-mode"><button className={printDocumentMode === 'assessment' ? 'active' : ''} onClick={() => setPrintDocumentMode('assessment')}><FileText size={16} />Provas completas</button><button className={printDocumentMode === 'answer-sheet' ? 'active' : ''} onClick={() => setPrintDocumentMode('answer-sheet')}><ClipboardList size={16} />Folhas de respostas</button></div>}
+                {printAssessment.contentMode === 'full' && <div className="print-document-mode"><button type="button" className={printDocumentMode === 'assessment' ? 'active' : ''} onClick={() => setPrintDocumentMode('assessment')}><FileText size={16} />Folha + prova</button><button type="button" className={printDocumentMode === 'answer-sheet' ? 'active' : ''} onClick={() => setPrintDocumentMode('answer-sheet')}><ClipboardList size={16} />Somente folhas</button></div>}
                 <label className="print-privacy-option"><input type="checkbox" checked={hidePrintRegistration} onChange={(event) => setHidePrintRegistration(event.target.checked)} /><span><strong>Ocultar matrícula</strong><small>O número de controle não aparecerá na folha.</small></span></label>
               </div>
               <div className="blank-sheet-note"><UserPlus size={17} /><p><strong>Aluno fora da lista?</strong>Use “Salvar folha sem aluno”. Nome, matrícula e turma poderão ser preenchidos à mão, e o cadastro será feito durante a correção.</p></div>
               <div className="print-tip"><Printer size={18} /><p><strong>Configuração recomendada</strong>Papel A4, escala 100%, margens “nenhuma” e orientação retrato. Os quatro marcadores ficam protegidos ao redor do quadro de respostas.</p></div>
             </aside>
             <div className="sheet-preview-area">
-              {printStudents[0] && <div className="sheet-preview">{printDocumentMode === 'assessment' && printAssessment.contentMode === 'full' ? <AssessmentPapers students={[printStudents[0]]} assessment={printAssessment} classes={data.classes} school={data.school} /> : <PrintableSheets students={[printStudents[0]]} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} />}<span>Prévia · documento 1 de {printStudents.length}</span></div>}
+              {printStudents[0] && <div className="sheet-preview"><PrintableSheets students={[printStudents[0]]} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} /><span>{printDocumentMode === 'assessment' && printAssessment.contentMode === 'full' ? `Pacote 1 de ${printStudents.length} · folha + prova` : `Prévia · documento 1 de ${printStudents.length}`}</span></div>}
               {!printStudents.length && <div className="no-print-students"><UsersRound size={30} /><strong>Nenhuma turma selecionada</strong></div>}
             </div>
             <div className="all-print-sheets student-print-sheets"><PrintableSheets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} /></div>
-            <div className="all-print-sheets assessment-print-papers"><AssessmentPapers students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} /></div>
+            <div className="all-print-sheets assessment-print-packets"><AssessmentPackets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} /></div>
             <div className="all-print-sheets blank-print-sheet"><PrintableSheets students={[null]} assessment={printAssessment} classes={data.classes} school={data.school} /></div>
           </div>
         )}
