@@ -19,11 +19,11 @@ import {
 
 const headers = ['Número', 'Nome do aluno', 'Status', 'Nome da turma', 'Data e hora da captura']
 const parsed = await readSegesFile({
-  name: 'alunos.csv',
-  text: async () => `${headers.join(',')}\n1,AGATHA   PRADO SOUZA,Sem status,2ªIV01-EMI-LOG,2026-08-25T19:13:52.389Z`,
+  name: 'alunos-ficticios.csv',
+  text: async () => `${headers.join(',')}\n1,ESTUDANTE   FICTÍCIO UM,Sem status,2ªIV01-EMI-LOG,2026-08-25T19:13:52.389Z`,
 })
 assert.deepEqual(parsed.headers, headers)
-assert.equal(parsed.rows[0]['Nome do aluno'], 'AGATHA   PRADO SOUZA')
+assert.equal(parsed.rows[0]['Nome do aluno'], 'ESTUDANTE   FICTÍCIO UM')
 
 const mapping = autoMapHeaders(headers)
 
@@ -39,21 +39,21 @@ assert.deepEqual(validateMapping(mapping), ['Turno (valor manual)'])
 assert.deepEqual(validateMapping(mapping, { manualShift: 'Vespertino' }), [])
 assert.deepEqual(validateMapping({ ...mapping, status: '' }, { manualShift: 'Vespertino' }), ['Situação'])
 assert.equal(gradeFromClassName('2ªIV01-EMI-LOG'), '2ª série')
-assert.equal(resolveSegesValue({}, mapping, 'schoolInep', { school: { inep: '32000001' } }), '32000001')
+assert.equal(resolveSegesValue({}, mapping, 'schoolInep', { school: { inep: '00000000' } }), '00000000')
 
 const rows = [
-  { Número: '1', 'Nome do aluno': 'AGATHA   PRADO SOUZA', Status: 'Sem status', 'Nome da turma': '2ªIV01-EMI-LOG', 'Data e hora da captura': '2026-08-25T19:13:52.389Z' },
-  { Número: '2', 'Nome do aluno': 'ARIELLY ALVES FERREIRA', Status: 'Transferido', 'Nome da turma': '2ªIV01-EMI-LOG', 'Data e hora da captura': '2026-08-25T19:13:52.390Z' },
-  { Número: '3', 'Nome do aluno': 'JOÃO DE SOUZA', Status: 'Em transferência', 'Nome da turma': '2ªIV01-EMI-LOG', 'Data e hora da captura': '2026-08-25T19:13:52.391Z' },
+  { Número: '1', 'Nome do aluno': 'ESTUDANTE FICTÍCIO UM', Status: 'Sem status', 'Nome da turma': '2ªIV01-EMI-LOG', 'Data e hora da captura': '2026-08-25T19:13:52.389Z' },
+  { Número: '2', 'Nome do aluno': 'ESTUDANTE FICTÍCIO DOIS', Status: 'Transferido', 'Nome da turma': '2ªIV01-EMI-LOG', 'Data e hora da captura': '2026-08-25T19:13:52.390Z' },
+  { Número: '3', 'Nome do aluno': 'ESTUDANTE FICTÍCIO TRÊS', Status: 'Em transferência', 'Nome da turma': '2ªIV01-EMI-LOG', 'Data e hora da captura': '2026-08-25T19:13:52.391Z' },
   { Número: 'LANÇAR PARA TODOS', 'Nome do aluno': 'Não avaliado', Status: 'Sem status', 'Nome da turma': '2ªIV01-EMI-LOG', 'Data e hora da captura': '2026-08-25T19:13:52.392Z' },
 ]
 const state = {
-  school: { name: 'EEEFM Exemplo', inep: '32000001' },
+  school: { name: 'Escola Fictícia de Teste', inep: '00000000' },
   classes: [],
   students: [],
   importHistory: [],
 }
-const result = importSegesRows(state, rows, mapping, 'alunos.csv', { manualShift: 'Vespertino' })
+const result = importSegesRows(state, rows, mapping, 'alunos-ficticios.csv', { manualShift: 'Vespertino' })
 
 assert.equal(result.summary.added, 2)
 assert.equal(result.summary.updated, 0)
@@ -61,13 +61,13 @@ assert.equal(result.summary.skipped, 2)
 assert.equal(result.state.classes.length, 1)
 assert.equal(result.state.classes[0].grade, '2ª série')
 assert.equal(result.state.classes[0].shift, 'Vespertino')
-assert.equal(result.state.students[0].name, 'AGATHA PRADO SOUZA')
+assert.equal(result.state.students[0].name, 'ESTUDANTE FICTÍCIO UM')
 assert.equal(result.state.students[0].status, 'Ativo')
 assert.equal(result.state.students[0].sourceStatus, 'Sem status')
 assert.equal(result.state.students[1].sourceStatus, 'Em transferência')
 assert.equal(result.state.students.some((student) => student.name === 'Não avaliado'), false)
-assert.equal(result.state.importHistory[0].school, 'EEEFM Exemplo')
-assert.equal(result.state.importHistory[0].schoolInep, '32000001')
+assert.equal(result.state.importHistory[0].school, 'Escola Fictícia de Teste')
+assert.equal(result.state.importHistory[0].schoolInep, '00000000')
 
 const assessment = {
   id: 'assessment-test',
@@ -111,9 +111,9 @@ assert.deepEqual(calculateAssessmentResult(detailedSubmission, assessment, 'Ling
 assert.equal(formatSegesGrade(6.7), '6,7')
 
 const resultStudents = [
-  { id: 'student-a', registration: '100', name: 'ALUNA A', classId: 'class-a', status: 'Ativo' },
-  { id: 'student-b', registration: '101', name: 'ALUNO B', classId: 'class-a', status: 'Ativo' },
-  { id: 'student-c', registration: '102', name: 'ALUNO C', classId: 'class-a', status: 'Ativo' },
+  { id: 'student-a', registration: 'DEMO-001', name: 'ESTUDANTE FICTÍCIO A', classId: 'class-a', status: 'Ativo' },
+  { id: 'student-b', registration: 'DEMO-002', name: 'ESTUDANTE FICTÍCIO B', classId: 'class-a', status: 'Ativo' },
+  { id: 'student-c', registration: 'DEMO-003', name: 'ESTUDANTE FICTÍCIO C', classId: 'class-a', status: 'Ativo' },
 ]
 const resultRows = buildSegesResultRows({
   assessment,
@@ -141,8 +141,8 @@ const resultCsv = serializeSegesResultsCsv(resultRows, {
   maxGrade: 10,
 })
 assert.match(resultCsv, /"AREA";"Matemática"/)
-assert.match(resultCsv, /"ALUNA A";"100";"1";"2";"5,0";"10,0";"PRONTO"/)
-assert.match(resultCsv, /"ALUNO B";"101";"1";"2";"";"10,0";"REVISAR"/)
+assert.match(resultCsv, /"ESTUDANTE FICTÍCIO A";"DEMO-001";"1";"2";"5,0";"10,0";"PRONTO"/)
+assert.match(resultCsv, /"ESTUDANTE FICTÍCIO B";"DEMO-002";"1";"2";"";"10,0";"REVISAR"/)
 assert.equal(segesResultsFilename(assessment, 'Matemática'), 'notas-seges-sim-01-matematica.csv')
 
 console.log('Integração SEGES: todos os testes passaram.')

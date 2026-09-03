@@ -246,8 +246,8 @@ export function importSegesRows(state, rows, mapping, filename, options = {}) {
 export function sampleCsv() {
   const rows = [
     ['Número', 'Nome do aluno', 'Status', 'Nome da turma', 'Data e hora da captura'],
-    ['1', 'Maria da Silva Santos', 'Sem status', '2ªIV01-EMI-LOG', '2026-08-25T19:13:52.389Z'],
-    ['2', 'João Pereira Souza', 'Transferido', '2ªIV01-EMI-LOG', '2026-08-25T19:13:52.390Z'],
+    ['1', 'Estudante Fictício 001', 'Sem status', '2ªIV01-EMI-LOG', '2026-08-25T19:13:52.389Z'],
+    ['2', 'Estudante Fictício 002', 'Transferido', '2ªIV01-EMI-LOG', '2026-08-25T19:13:52.390Z'],
   ]
   return rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';')).join('\n')
 }

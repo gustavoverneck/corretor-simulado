@@ -33,7 +33,7 @@ const compactStudentVersion = { ...fullStudentVersion, questions: undefined }
 const rebuiltQuestions = getPrintableQuestions({ contentMode: 'full', questions, printOptions: { shuffleQuestions: true, shuffleAlternatives: true } }, compactStudentVersion)
 assert.deepEqual(rebuiltQuestions, fullStudentVersion.questions)
 assert.deepEqual(rebuiltQuestions.map((question) => String.fromCharCode(65 + question.correctIndex)), fullStudentVersion.answerKey)
-const source = assessmentToLatex({ title: 'Teste', subjects: ['Matemática'], questions }, { name: 'Aluno' }, versions[0])
+const source = assessmentToLatex({ title: 'Teste', subjects: ['Matemática'], questions }, { name: 'Estudante Fictício' }, versions[0])
 assert.match(source, /\\documentclass/)
 assert.match(source, /\\\(x_0 \+ 1\\\)/)
 console.log('Full assessment tests passed.')

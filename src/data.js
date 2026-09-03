@@ -1,16 +1,3 @@
-const firstNames = [
-  'Ana Clara', 'Arthur', 'Beatriz', 'Bernardo', 'Caio', 'Cecília', 'Davi', 'Eduarda',
-  'Elisa', 'Enzo', 'Felipe', 'Gabriela', 'Guilherme', 'Helena', 'Isabela', 'João Pedro',
-  'Laura', 'Leonardo', 'Lívia', 'Lucas', 'Manuela', 'Maria Eduarda', 'Matheus', 'Miguel',
-  'Nicolas', 'Pedro', 'Rafaela', 'Samuel', 'Sofia', 'Valentina', 'Vinícius', 'Yasmin',
-]
-
-const lastNames = [
-  'Almeida', 'Barbosa', 'Cardoso', 'Costa', 'Ferreira', 'Gomes', 'Lima', 'Martins',
-  'Mendes', 'Nascimento', 'Oliveira', 'Pereira', 'Ramos', 'Rocha', 'Rodrigues', 'Santos',
-  'Silva', 'Souza', 'Teixeira', 'Vieira',
-]
-
 export const initialClasses = [
   { id: 'class-9a', name: '9º A', grade: '9º ano', shift: 'Matutino', year: 2026, color: '#4d7c6f' },
   { id: 'class-9b', name: '9º B', grade: '9º ano', shift: 'Matutino', year: 2026, color: '#748b5f' },
@@ -23,15 +10,12 @@ function makeStudents() {
   const totals = [31, 29, 30, 28, 24]
   let cursor = 0
   return initialClasses.flatMap((classroom, classIndex) =>
-    Array.from({ length: totals[classIndex] }, (_, index) => {
-      const first = firstNames[cursor % firstNames.length]
-      const last = lastNames[(cursor * 7 + classIndex) % lastNames.length]
-      const secondLast = lastNames[(cursor * 3 + 5) % lastNames.length]
+    Array.from({ length: totals[classIndex] }, () => {
       cursor += 1
       return {
         id: `student-${String(cursor).padStart(3, '0')}`,
-        registration: `2026${String(1800 + cursor).padStart(5, '0')}`,
-        name: `${first} ${last} ${secondLast}`,
+        registration: `DEMO-2026-${String(cursor).padStart(4, '0')}`,
+        name: `Estudante Fictício ${String(cursor).padStart(3, '0')}`,
         classId: classroom.id,
         status: cursor % 29 === 0 ? 'Transferido' : 'Ativo',
         source: 'SEGES',
@@ -57,8 +41,8 @@ function alternateKey(key, optionCount, offset = 1) {
 export const initialAssessments = [
   {
     id: 'assessment-saeb',
-    title: 'Simulado SAEB · Agosto',
-    code: 'SAEB-AGO-26',
+    title: 'Simulado Demonstrativo · Linguagens e Matemática',
+    code: 'DEMO-LM-40',
     subjects: ['Língua Portuguesa', 'Matemática'],
     classIds: ['class-9a', 'class-9b'],
     questionCount: 40,
@@ -75,8 +59,8 @@ export const initialAssessments = [
   },
   {
     id: 'assessment-diagnostico',
-    title: 'Diagnóstico · 2º trimestre',
-    code: 'DIAG-T2-26',
+    title: 'Avaliação Fictícia · Ciências da Natureza',
+    code: 'DEMO-CN-30',
     subjects: ['Ciências da Natureza'],
     classIds: ['class-1a', 'class-2a'],
     questionCount: 30,
@@ -93,8 +77,8 @@ export const initialAssessments = [
   },
   {
     id: 'assessment-revisao',
-    title: 'Revisão ENEM · Linguagens',
-    code: 'ENEM-LIN-03',
+    title: 'Exercício Demonstrativo · Linguagens',
+    code: 'DEMO-LIN-20',
     subjects: ['Linguagens'],
     classIds: ['class-3a'],
     questionCount: 20,
@@ -150,12 +134,12 @@ export function createInitialState() {
     version: 1,
     school: {
       id: 'school-1',
-      name: 'EEEFM Jesus Cristo Rei',
-      inep: '32000001',
-      address: 'Rua Padre Leandro Del’Homo S/nº São Francisco',
-      postalCode: '29145-405',
-      city: 'Cariacica',
-      state: 'ES',
+      name: 'Escola Fictícia de Demonstração',
+      inep: '00000000',
+      address: 'Rua Exemplo, 000',
+      postalCode: '00000-000',
+      city: 'Município Fictício',
+      state: 'XX',
     },
     classes: initialClasses,
     students,
@@ -167,7 +151,7 @@ export function createInitialState() {
     importHistory: [
       {
         id: 'import-001',
-        filename: 'Relatorio_Alunos_SEGES_2026.xlsx',
+        filename: 'alunos-ficticios-2026.xlsx',
         createdAt: '2026-08-01T13:40:00.000Z',
         added: 142,
         updated: 0,

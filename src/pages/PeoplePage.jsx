@@ -496,7 +496,7 @@ export function PeoplePage({ data, setData, setPage, notify, initialSearch }) {
 
       <Modal open={studentModal} onClose={closeStudentModal} title={editingStudent ? 'Editar aluno' : 'Adicionar aluno'} subtitle={editingStudent ? 'Atualize o nome, a turma ou a situação do aluno.' : 'A matrícula é opcional e pode ser gerada automaticamente pelo app.'} footer={<><Button variant="ghost" onClick={closeStudentModal}>Cancelar</Button><Button type="submit" form="student-form">{editingStudent ? 'Salvar alterações' : 'Adicionar aluno'}</Button></>}>
         <form key={editingStudent?.id || 'new-student'} id="student-form" onSubmit={saveStudent} className="form-grid">
-          <Field label="Nome completo" required><input name="name" required defaultValue={editingStudent?.name || ''} placeholder="Ex.: Ana Clara dos Santos" /></Field>
+          <Field label="Nome completo" required><input name="name" required defaultValue={editingStudent?.name || ''} placeholder="Ex.: Estudante Fictício 001" /></Field>
           <Field label="Matrícula" hint="Opcional. Se ficar vazia, um número de controle será criado."><input name="registration" inputMode="numeric" defaultValue={editingStudent?.registration || ''} placeholder="Deixe em branco para gerar automaticamente" /></Field>
           <Field label="Turma" required><select name="classId" required defaultValue={editingStudent?.classId || ''}><option value="" disabled>Selecione</option>{data.classes.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.shift}</option>)}</select></Field>
           {editingStudent && <Field label="Situação" required><select name="status" defaultValue={editingStudent.status || 'Ativo'}><option>Ativo</option><option>Inativo</option></select></Field>}
@@ -547,7 +547,7 @@ export function PeoplePage({ data, setData, setPage, notify, initialSearch }) {
                 <span><ClipboardPaste size={28} /></span>
                 <h3>Cole uma lista</h3>
                 <p>Copie nomes ou células do Excel e pressione Ctrl+V (ou ⌘V no Mac).</p>
-                <textarea autoFocus aria-label="Cole aqui a lista de alunos" onPaste={pasteStudentList} placeholder={'Ana Clara dos Santos\nBruno Ferreira Lima\nCarla Souza'} />
+                <textarea autoFocus aria-label="Cole aqui a lista de alunos" onPaste={pasteStudentList} placeholder={'Estudante Fictício 001\nEstudante Fictício 002\nEstudante Fictício 003'} />
                 <small>A lista pode ter uma ou várias colunas.</small>
               </label>
               <div className="class-student-import-or"><span>OU</span></div>

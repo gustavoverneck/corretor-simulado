@@ -49,9 +49,6 @@ function loadInitialState() {
       const assessments = Array.isArray(parsed?.assessments)
         ? parsed.assessments.map((assessment) => ({ ...assessment, questionAreas: getQuestionAreas(assessment) }))
         : parsed.assessments
-      if (parsed?.school?.id === 'school-1' && parsed.school.name === 'EEEFM Maria Ortiz') {
-        return { ...parsed, school: createInitialState().school, assessments }
-      }
       return { ...parsed, assessments }
     }
   } catch {
