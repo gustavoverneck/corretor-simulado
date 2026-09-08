@@ -91,6 +91,9 @@ function assessmentEditorStructureSignature({
       statement: question.statement,
       image: question.image || null,
       imageName: question.imageName || '',
+      imageWidth: Number(question.imageWidth) || 60,
+      imageSource: question.imageSource || '',
+      postImageText: question.postImageText || '',
       alternatives: question.alternatives.slice(0, optionCount),
       correctIndex: question.correctIndex,
     })) : undefined,
@@ -626,6 +629,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const [selectedClasses, setSelectedClasses] = useState([])
   const [creationMode, setCreationMode] = useState('key')
   const [questions, setQuestions] = useState(() => Array.from({ length: 40 }, (_, index) => emptyQuestion(4, index)))
+  const [assessmentPreviewOpen, setAssessmentPreviewOpen] = useState(false)
   const [shuffleQuestions, setShuffleQuestions] = useState(false)
   const [shuffleAlternatives, setShuffleAlternatives] = useState(true)
   const [versionAssignmentMode, setVersionAssignmentMode] = useState('shared')
@@ -671,6 +675,29 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const answerSheetLayout = getAnswerSheetLayout(questionCount)
   const activeAnswerKeyVersion = answerKeyVersions.find((version) => version.id === activeAnswerKeyVersionId) || answerKeyVersions[0]
   const answerKey = activeAnswerKeyVersion?.answerKey || []
+  const assessmentPreviewClassroom = data.classes.find((classroom) => classroom.id === (selectedActiveStudents[0]?.classId || selectedClasses[0])) || { id: 'preview-class', name: 'Turma' }
+  const assessmentPreviewStudent = selectedActiveStudents[0] || { id: 'preview-student', name: 'Nome do aluno', classId: assessmentPreviewClassroom.id }
+  const assessmentPreviewVersion = {
+    id: 'preview-version',
+    label: activeAnswerKeyVersion?.label.trim() || 'Versão A',
+    answerKey: questions.slice(0, questionCount).map((question) => String.fromCharCode(65 + question.correctIndex)),
+    questions: questions.slice(0, questionCount),
+  }
+  const assessmentPreview = {
+    id: editingAssessment?.id || 'assessment-preview',
+    title: assessmentTitle.trim() || 'Título do simulado',
+    code: assessmentCode.trim().toUpperCase() || 'CÓDIGO',
+    subjects: [subject.trim() || 'Componente curricular'],
+    classIds: [assessmentPreviewClassroom.id],
+    questionCount,
+    optionCount,
+    contentMode: 'full',
+    questions: assessmentPreviewVersion.questions,
+    answerKey: assessmentPreviewVersion.answerKey,
+    answerKeyVersions: [assessmentPreviewVersion],
+    answerKeyVersionIdsByClass: { [assessmentPreviewClassroom.id]: [assessmentPreviewVersion.id] },
+    answerKeyVersionIdByStudent: { [assessmentPreviewStudent.id]: assessmentPreviewVersion.id },
+  }
 
   function resetAssessmentEditor() {
     setEditingAssessmentId(null)
@@ -703,8 +730,22 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   }
 
   function closeAssessmentEditor() {
+    setAssessmentPreviewOpen(false)
     setCreateOpen(false)
     resetAssessmentEditor()
+  }
+
+  function openAssessmentPreview() {
+    setPrintPreviewZoom(PRINT_PREVIEW_DEFAULT_ZOOM)
+    setPrintPreviewDragging(false)
+    printPreviewDragRef.current = null
+    setAssessmentPreviewOpen(true)
+  }
+
+  function closeAssessmentPreview() {
+    setAssessmentPreviewOpen(false)
+    setPrintPreviewDragging(false)
+    printPreviewDragRef.current = null
   }
 
   function openAssessmentEditor(assessment) {
@@ -1379,7 +1420,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
         )}
       </Modal>
 
-      <Modal open={createOpen} onClose={closeAssessmentEditor} title={editingAssessment ? 'Editar simulado' : 'Criar novo simulado'} subtitle={editingAssessment ? 'Altere identificação, questões, gabaritos, turmas e versões.' : 'Defina as turmas e o gabarito que será usado na correção.'} size="lg" footer={<><Button variant="ghost" onClick={closeAssessmentEditor}>Cancelar</Button><Button type="submit" form="assessment-form" icon={CheckCircle2}>{editingAssessment ? 'Salvar alterações' : 'Salvar e gerar folhas'}</Button></>}>
+      <Modal open={createOpen} onClose={closeAssessmentEditor} title={editingAssessment ? 'Editar simulado' : 'Criar novo simulado'} subtitle={editingAssessment ? 'Altere identificação, questões, gabaritos, turmas e versões.' : 'Defina as turmas e o gabarito que será usado na correção.'} size="lg" footer={<>{creationMode === 'full' && <Button variant="secondary" icon={Eye} onClick={openAssessmentPreview}>Visualizar prévia</Button>}<Button variant="ghost" onClick={closeAssessmentEditor}>Cancelar</Button><Button type="submit" form="assessment-form" icon={CheckCircle2}>{editingAssessment ? 'Salvar alterações' : 'Salvar e gerar folhas'}</Button></>}>
         <form id="assessment-form" onSubmit={createAssessment} className="assessment-form">
           <datalist id="assessment-question-areas">{QUESTION_AREA_SUGGESTIONS.map((area) => <option value={area} key={area} />)}</datalist>
           <datalist id="assessment-subjects">{subjectOptions.map((item) => <option value={item} key={item} />)}</datalist>
@@ -1439,6 +1480,38 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
             </div>
           </div>
         </form>
+      </Modal>
+
+      <Modal open={assessmentPreviewOpen} onClose={closeAssessmentPreview} title="Prévia da prova" subtitle="Visualização dos dados atuais do editor; não é necessário salvar para conferir." size="xl" footer={<Button onClick={closeAssessmentPreview}>Voltar à edição</Button>}>
+        <div className="assessment-editor-preview">
+          <div className="print-preview">
+            <div className="print-preview-toolbar">
+              <div className="assessment-editor-preview-status"><Eye size={15} /><span>Prévia em tempo real</span></div>
+              <div className="print-preview-zoom">
+                <button type="button" disabled={printPreviewZoom <= PRINT_PREVIEW_MIN_ZOOM} onClick={() => changePrintPreviewZoom(-0.1)} aria-label="Diminuir zoom" title="Diminuir zoom"><ZoomOut size={16} /></button>
+                <span>{Math.round(printPreviewZoom * 100)}%</span>
+                <button type="button" disabled={printPreviewZoom >= PRINT_PREVIEW_MAX_ZOOM} onClick={() => changePrintPreviewZoom(0.1)} aria-label="Aumentar zoom" title="Aumentar zoom"><ZoomIn size={16} /></button>
+                <button type="button" onClick={fitPrintPreview} aria-label="Ajustar página à área de visualização" title="Ajustar à tela"><Maximize2 size={15} /><span>Ajustar</span></button>
+              </div>
+            </div>
+            <div
+              ref={printPreviewViewportRef}
+              className={cn('print-preview-viewport', printPreviewDragging && 'is-dragging')}
+              onPointerDown={startPrintPreviewDrag}
+              onPointerMove={movePrintPreview}
+              onPointerUp={stopPrintPreviewDrag}
+              onPointerCancel={stopPrintPreviewDrag}
+              aria-label="Prévia da prova; arraste para reposicionar a página"
+            >
+              <div className="print-preview-positioner">
+                <div className="print-preview-document" style={{ zoom: printPreviewZoom }}>
+                  <AssessmentPaper student={assessmentPreviewStudent} assessment={assessmentPreview} classroom={assessmentPreviewClassroom} school={data.school} />
+                </div>
+              </div>
+            </div>
+            <div className="print-preview-caption"><div><strong>{assessmentPreview.title}</strong><span>{assessmentPreviewStudent.name} · {assessmentPreviewClassroom.name} · {assessmentPreviewVersion.label}</span></div><small>Arraste a página para reposicionar</small></div>
+          </div>
+        </div>
       </Modal>
 
       <Modal open={Boolean(printAssessment)} onClose={closePrint} title={printAssessment?.contentMode === 'full' ? 'Gerar provas e folhas' : 'Gerar folhas de respostas'} subtitle={printAssessment?.contentMode === 'full' ? 'Cada aluno recebe a folha de respostas seguida da respectiva prova, em sequência.' : 'As folhas são agrupadas por aluno e versão, prontas para impressão em sequência.'} size="xl" footer={<><span className="footer-note"><CheckCircle2 size={16} /> {printStudents.length} alunos prontos</span><Button variant="ghost" onClick={closePrint}>Fechar</Button>{printAssessment?.contentMode === 'full' && <Button variant="secondary" icon={FileCode2} disabled={!printStudents.length} onClick={exportLatex}>Exportar .tex</Button>}<Button icon={Printer} disabled={!printStudents.length} onClick={() => printSheets(printDocumentMode === 'assessment' ? 'assessment-packets' : 'students')}>Imprimir / salvar PDF</Button></>}>

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { assessmentToLatex, createPrintableVersions, createStudentPrintableVersions, getPrintableQuestions, resizeQuestions } from '../src/lib/fullAssessment.js'
+import { assessmentToLatex, createPrintableVersions, createStudentPrintableVersions, formatImageSource, getPrintableQuestions, resizeQuestions } from '../src/lib/fullAssessment.js'
 
 const questions = resizeQuestions([], 3, 4).map((question, index) => ({ ...question, statement: `Resolva $x_${index} + 1$.`, alternatives: ['1', '2', '3', '4'], correctIndex: index % 4 }))
 const versions = createPrintableVersions(questions, [{ id: 'a', label: 'Versão A' }, { id: 'b', label: 'Versão B' }], { shuffleAlternatives: true })
@@ -36,4 +36,11 @@ assert.deepEqual(rebuiltQuestions.map((question) => String.fromCharCode(65 + que
 const source = assessmentToLatex({ title: 'Teste', subjects: ['Matemática'], questions }, { name: 'Estudante Fictício' }, versions[0])
 assert.match(source, /\\documentclass/)
 assert.match(source, /\\\(x_0 \+ 1\\\)/)
+assert.equal(formatImageSource('IBGE (2024).'), 'Fonte: IBGE (2024).')
+assert.equal(formatImageSource('Fonte: autoria própria.'), 'Fonte: autoria própria.')
+const imageQuestion = { ...questions[0], image: 'data:image/png;base64,AA==', imageName: 'grafico.png', imageWidth: 75, imageSource: 'IBGE (2024).', postImageText: 'Observe que $x = 2$.' }
+const imageLatex = assessmentToLatex({ title: 'Teste', subjects: ['Matemática'], questions: [imageQuestion] }, { name: 'Estudante' })
+assert.match(imageLatex, /width=0\.75\\linewidth/)
+assert.match(imageLatex, /Fonte: IBGE \(2024\)\./)
+assert.match(imageLatex, /Observe que \\\(x = 2\\\)\./)
 console.log('Full assessment tests passed.')

@@ -16,7 +16,7 @@ function shuffledIndexes(length, seed) {
 }
 
 export function emptyQuestion(optionCount = 4, index = 0) {
-  return { id: `question-${Date.now().toString(36)}-${index}`, statement: '', image: null, imageName: '', alternatives: Array.from({ length: optionCount }, () => ''), correctIndex: 0 }
+  return { id: `question-${Date.now().toString(36)}-${index}`, statement: '', image: null, imageName: '', imageWidth: 60, imageSource: '', postImageText: '', alternatives: Array.from({ length: optionCount }, () => ''), correctIndex: 0 }
 }
 
 export function resizeQuestions(questions, count, optionCount) {
@@ -62,6 +62,12 @@ export function getPrintableQuestions(assessment, version) {
 }
 
 const escapeLatex = (value) => String(value || '').replace(/([%&#_{}])/g, '\\$1').replace(/\$/g, '\\textdollar{}')
+export function formatImageSource(value) {
+  const source = String(value || '').trim()
+  if (!source) return ''
+  return /^fonte\s*:/i.test(source) ? source : `Fonte: ${source}`
+}
+
 function richLatex(value) {
   return String(value || '').split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g).filter(Boolean).map((part) => {
     if (part.startsWith('$$')) return `\\[${part.slice(2, -2)}\\]`
@@ -71,6 +77,14 @@ function richLatex(value) {
 }
 export function assessmentToLatex(assessment, student, version) {
   const questions = getPrintableQuestions(assessment, version)
-  const body = questions.map((question) => `\\question ${richLatex(question.statement)}\n${question.imageName ? `% Imagem: ${escapeLatex(question.imageName)} (inclua o arquivo com \\includegraphics)` : ''}\n\\begin{choices}\n${question.alternatives.map((alternative, optionIndex) => `${optionIndex === question.correctIndex ? '\\CorrectChoice' : '\\choice'} ${richLatex(alternative)}`).join('\n')}\n\\end{choices}`).join('\n\n')
+  const body = questions.map((question) => {
+    const imageWidth = Math.min(100, Math.max(20, Number(question.imageWidth) || 60)) / 100
+    const imageSource = formatImageSource(question.imageSource)
+    const imageComment = question.imageName
+      ? `% Imagem: ${escapeLatex(question.imageName)} (inclua o arquivo manualmente)\n% \\begin{center}\\includegraphics[width=${imageWidth.toFixed(2)}\\linewidth]{${escapeLatex(question.imageName)}}\\end{center}${imageSource ? `\n% \\begin{flushright}\\footnotesize ${escapeLatex(imageSource)}\\end{flushright}` : ''}`
+      : ''
+    const postImageText = question.image && question.postImageText ? richLatex(question.postImageText) : ''
+    return `\\question ${richLatex(question.statement)}\n${imageComment}${postImageText ? `\n${postImageText}` : ''}\n\\begin{choices}\n${question.alternatives.map((alternative, optionIndex) => `${optionIndex === question.correctIndex ? '\\CorrectChoice' : '\\choice'} ${richLatex(alternative)}`).join('\n')}\n\\end{choices}`
+  }).join('\n\n')
   return `\\documentclass[12pt,a4paper]{exam}\n\\usepackage[utf8]{inputenc}\n\\usepackage[T1]{fontenc}\n\\usepackage[brazil]{babel}\n\\usepackage{amsmath,amssymb,graphicx}\n\\usepackage[margin=1.7cm]{geometry}\n\\begin{document}\n\\begin{center}\\Large\\textbf{${escapeLatex(assessment.title)}}\\end{center}\n\\noindent Nome: ${escapeLatex(student?.name || '')} \\hfill Turma: ${escapeLatex(student?.className || '')} \\hfill Versão: ${escapeLatex(version?.label || 'A')}\n\\vspace{.5cm}\n\\begin{questions}\n${body}\n\\end{questions}\n\\end{document}\n`
 }
