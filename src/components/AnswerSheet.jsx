@@ -1,25 +1,31 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import QRCode from 'qrcode'
-import { bubbleCenter, CURRENT_MARKER_LAYOUT, getAnswerSheetLayout, getMarkerLayout, SHEET } from '../lib/omr'
+import { layoutBubbleCenter, MARKERS, SHEET } from '../lib/omr'
+import { FIXED_SHEET_LAYOUT, getSheetFormat } from '../lib/sheetFormat'
 import { qrPayload } from '../lib/utils'
 
 const options = ['A', 'B', 'C', 'D', 'E']
 const governmentLogo = `${import.meta.env.BASE_URL}assets/brasao-governo-es-horizontal.png`
 
 export function AnswerSheet({ student, assessment, classroom, school, hideRegistration = false }) {
-  const [qr, setQr] = useState('')
   const isBlank = !student
-  const markerLayout = assessment.answerSheetMarkerLayout || CURRENT_MARKER_LAYOUT
-  const markers = getMarkerLayout(markerLayout)
-  const payload = useMemo(() => qrPayload(student?.id, assessment.id, markerLayout === 'page-v1' ? 1 : 2), [student?.id, assessment.id, markerLayout])
+  const sheetFormat = getSheetFormat(assessment.questionCount, assessment.optionCount)
+  const markers = MARKERS
+  const payload = useMemo(() => qrPayload(student?.id, assessment.id, sheetFormat), [student?.id, assessment.id, assessment.questionCount, assessment.optionCount])
   const schoolLocation = [school.address, school.city && school.state ? `${school.city} – ${school.state}.` : school.city || school.state]
     .filter(Boolean)
     .join(', ')
-  const layout = getAnswerSheetLayout(assessment.questionCount)
+  const layout = FIXED_SHEET_LAYOUT
 
-  useEffect(() => {
-    QRCode.toDataURL(payload, { margin: 1, width: 220, errorCorrectionLevel: 'M', color: { dark: '#111111', light: '#ffffff' } })
-      .then(setQr)
+  const qr = useMemo(() => {
+    const { modules } = QRCode.create(payload, { errorCorrectionLevel: 'M' })
+    const cells = []
+    for (let y = 0; y < modules.size; y += 1) {
+      for (let x = 0; x < modules.size; x += 1) {
+        if (modules.get(y, x)) cells.push(`M${x + 4} ${y + 4}h1v1h-1z`)
+      }
+    }
+    return { size: modules.size + 8, path: cells.join('') }
   }, [payload])
 
   return (
@@ -46,7 +52,10 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
       <text x="94" y="130" fontFamily="Arial, sans-serif" fontSize="9" fontWeight="700" fill="#48685e" letterSpacing=".9">SISTEMA DE AVALIAÇÕES</text>
       <text x="692" y="130" textAnchor="end" fontFamily="Arial, sans-serif" fontSize="9" fontWeight="700" fill="#48685e" letterSpacing=".9">FOLHA DE RESPOSTAS</text>
 
-      {qr && <image href={qr} x="65" y="148" width="122" height="122" />}
+      <svg x="65" y="148" width="122" height="122" viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges">
+        <rect width={qr.size} height={qr.size} fill="white" />
+        <path d={qr.path} fill="#111" />
+      </svg>
       <rect x="65" y="148" width="122" height="122" fill="none" stroke="#202a26" strokeWidth="1" />
       <text x="126" y="284" textAnchor="middle" fontFamily="Arial" fontSize="8" fill="#5e6864">IDENTIFICAÇÃO DIGITAL</text>
 
@@ -86,9 +95,9 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
             return (
               <g key={row}>
                 {row > 0 && <line x1={73 + column * layout.columnStep} y1={layout.bubbleY - layout.rowStep / 2 + row * layout.rowStep} x2={62 + layout.panelWidth + column * layout.columnStep} y2={layout.bubbleY - layout.rowStep / 2 + row * layout.rowStep} stroke="#edf0ee" />}
-                <text x={layout.numberX + column * layout.columnStep} y={bubbleCenter(questionIndex, 0, assessment.questionCount).y + 3.2} textAnchor="middle" fontFamily="Arial" fontSize={layout.rowsPerColumn === 30 ? 8 : 10} fontWeight="700" fill="#26312d">{String(questionIndex + 1).padStart(2, '0')}</text>
+                <text x={layout.numberX + column * layout.columnStep} y={layoutBubbleCenter(questionIndex, 0, layout).y + 3.2} textAnchor="middle" fontFamily="Arial" fontSize={layout.rowsPerColumn === 30 ? 8 : 10} fontWeight="700" fill="#26312d">{String(questionIndex + 1).padStart(2, '0')}</text>
                 {options.slice(0, assessment.optionCount).map((option, optionIndex) => {
-                  const center = bubbleCenter(questionIndex, optionIndex, assessment.questionCount)
+                  const center = layoutBubbleCenter(questionIndex, optionIndex, layout)
                   return (
                     <g key={option}>
                       <circle cx={center.x} cy={center.y} r={layout.bubbleRadius} fill="white" stroke="#4b5651" strokeWidth={layout.rowsPerColumn === 30 ? 1 : 1.25} />
@@ -104,7 +113,7 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
 
       <line x1="66" y1="1023" x2="728" y2="1023" stroke="#d8dedb" />
       <text x="66" y="1045" fontFamily="Arial" fontSize="8.5" fill="#69736f">{school.name} · {school.city}/{school.state}</text>
-      <text x="728" y="1045" textAnchor="end" fontFamily="Arial" fontSize="8.5" fill="#69736f">{assessment.questionCount} questões</text>
+      <text x="728" y="1045" textAnchor="end" fontFamily="Arial" fontSize="8.5" fill="#69736f">{assessment.questionCount} questões · Página única</text>
       <text x="397" y="1090" textAnchor="middle" fontFamily="Arial" fontSize="7" fill="#a2aaa6">{payload}</text>
     </svg>
   )

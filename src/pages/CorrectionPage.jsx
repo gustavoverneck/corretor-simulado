@@ -584,7 +584,7 @@ export function CorrectionPage({ data, setData, notify }) {
       const pairKey = itemStudent && itemAssessment ? `${itemAssessment.id}:${itemStudent.id}` : ''
       if (!issue && seen.has(pairKey)) issue = 'Folha duplicada no lote'
       if (!issue) seen.add(pairKey)
-      const needsReview = !issue && (item.multiple > 0 || item.uncertain > 0 || item.markersFound < 4)
+      const needsReview = !issue && (!item.qrFound || item.multiple > 0 || item.uncertain > 0 || item.markersFound < 4)
       return { index, item, assessment: itemAssessment, student: itemStudent, classroom: itemClass, existingSubmission, issue, pairKey, needsReview, valid: !issue }
     })
   }, [batch, data])
@@ -917,12 +917,13 @@ export function CorrectionPage({ data, setData, notify }) {
     const finalVersion = getAnswerKeyVersionForStudent(finalAssessment, finalStudent)
     const finalKey = finalVersion?.answerKey || getAnswerKeyForClass(finalAssessment, finalStudent.classId)
     const graded = regradeAnswers(result.answers, finalKey)
-    const needsReview = graded.multiple > 0 || graded.uncertain > 0 || result.markersFound < 4
+    const needsReview = !result.qrFound || graded.multiple > 0 || graded.uncertain > 0 || result.markersFound < 4
     const submission = {
       id: uid('submission'), assessmentId: finalAssessment.id, studentId: finalStudent.id, classId: finalStudent.classId,
       status: needsReview ? 'Revisar' : 'Corrigido', ...graded,
-      answerKeySnapshot: finalKey, answerKeyVersionId: finalVersion?.id, answerKeyVersionLabel: finalVersion?.label, confidence: result.confidence, markersFound: result.markersFound, markerLayout: result.markerLayout,
+      answerKeySnapshot: finalKey, answerKeyVersionId: finalVersion?.id, answerKeyVersionLabel: finalVersion?.label, sheetFormat: result.sheetFormat, confidence: result.confidence, markersFound: result.markersFound, markerLayout: result.markerLayout,
       reviewReasons: [
+        ...(!result.qrFound ? ['QR não reconhecido; identificação e formato requerem conferência'] : []),
         ...(result.markersFound < 4 ? ['Marcadores incompletos'] : []),
         ...(graded.multiple > 0 ? ['Marcações múltiplas'] : []),
         ...(graded.uncertain > 0 ? ['Marcações incertas'] : []),
@@ -961,7 +962,9 @@ export function CorrectionPage({ data, setData, notify }) {
         confidence: item.confidence,
         markersFound: item.markersFound,
         markerLayout: item.markerLayout,
+        sheetFormat: item.sheetFormat,
         reviewReasons: [
+          ...(!item.qrFound ? ['QR não reconhecido; identificação e formato requerem conferência'] : []),
           ...(item.markersFound < 4 ? ['Marcadores incompletos'] : []),
           ...(graded.multiple > 0 ? ['Marcações múltiplas'] : []),
           ...(graded.uncertain > 0 ? ['Marcações incertas'] : []),
@@ -993,7 +996,7 @@ export function CorrectionPage({ data, setData, notify }) {
 
   const visibleAnswers = result?.answers.filter((answer) => filter === 'all' || answer.status === filter) || []
   const resultReady = Boolean(result && detectedStudent && resultAssessment && resultClassCompatible && !resultAssessmentClosed)
-  const resultNeedsReview = Boolean(result && (result.multiple > 0 || result.uncertain > 0 || result.markersFound < 4))
+  const resultNeedsReview = Boolean(result && (!result.qrFound || result.multiple > 0 || result.uncertain > 0 || result.markersFound < 4))
   const resultNoticeCount = result ? [
     !detectedStudent,
     !result.qrFound,

@@ -1,4 +1,6 @@
-import { ANSWER_GRID_MARKERS, analyzeMarks, bubbleCenter, CURRENT_MARKER_LAYOUT, detectSheetMarkers, getAnswerSheetLayout, LEGACY_MARKERS, MARKERS, SHEET } from '../src/lib/omr.js'
+import assert from 'node:assert/strict'
+import { FIXED_SHEET_LAYOUT, getSheetFormat } from '../src/lib/sheetFormat.js'
+import { analyzeMarks, analyzePrintedSheet, requireCurrentQr, bubbleCenter, CURRENT_MARKER_LAYOUT, detectSheetMarkers, MARKERS, SHEET } from '../src/lib/omr.js'
 import { CANCELLED_ANSWER, createRandomAnswerKey, getAnswerKeyForStudent, getAnswerKeyVersionForStudent } from '../src/lib/assessment.js'
 import { parseQrPayload, qrPayload } from '../src/lib/utils.js'
 
@@ -90,7 +92,7 @@ function validateCompleteLayout(questionCount, optionCount, background, template
     bottomRight: { x: 960, y: 1291 },
   }
   const image = makeImage(1020, 1360, background)
-  const layout = getAnswerSheetLayout(questionCount)
+  const layout = FIXED_SHEET_LAYOUT
   const horizontalScale = Math.hypot(corners.topRight.x - corners.topLeft.x, corners.topRight.y - corners.topLeft.y) / (templateMarkers.topRight.x - templateMarkers.topLeft.x)
   const verticalScale = Math.hypot(corners.bottomLeft.x - corners.topLeft.x, corners.bottomLeft.y - corners.topLeft.y) / (templateMarkers.bottomLeft.y - templateMarkers.topLeft.y)
   const scale = Math.min(horizontalScale, verticalScale)
@@ -111,25 +113,6 @@ function validateCompleteLayout(questionCount, optionCount, background, template
     throw new Error(`Leitura completa falhou no formato ${layout.id} com ${questionCount} questões: ${JSON.stringify(result)}`)
   }
 }
-
-const photographedSheet = makeImage(600, 850)
-const expectedCorners = {
-  topLeft: [65, 55],
-  topRight: [535, 65],
-  bottomLeft: [55, 745],
-  bottomRight: [545, 760],
-}
-Object.values(expectedCorners).forEach(([x, y]) => drawMarker(photographedSheet, x, y, 0.6))
-drawMarker(photographedSheet, 155, 205, 0.6) // Padrão semelhante dentro do QR não pode confundir os cantos.
-
-const detected = detectSheetMarkers(photographedSheet)
-if (!detected) throw new Error('Os quatro marcadores não foram encontrados.')
-if (detected.markerLayout !== 'page-v1') throw new Error(`A folha antiga foi confundida com ${detected.markerLayout}.`)
-Object.entries(expectedCorners).forEach(([key, [x, y]]) => {
-  if (Math.hypot(detected.corners[key].x - x, detected.corners[key].y - y) > 12) {
-    throw new Error(`Marcador ${key} encontrado fora da posição esperada.`)
-  }
-})
 
 const photographedAnswerGrid = makeImage(1020, 1360)
 const expectedGridCorners = {
@@ -166,9 +149,9 @@ if (exceptionalKeyResult.correct !== 1 || exceptionalKeyResult.cancelled !== 1 |
   throw new Error(`Anulação ou cancelamento calculado incorretamente: ${JSON.stringify(exceptionalKeyResult)}`)
 }
 
-const expectedLayouts = [[10, 1, 20], [20, 1, 20], [21, 2, 20], [40, 2, 20], [41, 3, 20], [60, 3, 20], [61, 3, 30], [90, 3, 30]]
+const expectedLayouts = [1, 10, 20, 21, 40, 41, 60, 61, 90].map((count) => [count, 3, 30])
 expectedLayouts.forEach(([questionCount, columns, rowsPerColumn]) => {
-  const layout = getAnswerSheetLayout(questionCount)
+  const layout = FIXED_SHEET_LAYOUT
   if (layout.columns !== columns || layout.rowsPerColumn !== rowsPerColumn) {
     throw new Error(`Formato inesperado para ${questionCount} questões: ${JSON.stringify(layout)}`)
   }
@@ -178,15 +161,14 @@ expectedLayouts.forEach(([questionCount, columns, rowsPerColumn]) => {
   }
 })
 
-if (ANSWER_GRID_MARKERS.topLeft.y < 300 || ANSWER_GRID_MARKERS.bottomLeft.y > 1040
-  || ANSWER_GRID_MARKERS.topLeft.x < 30 || ANSWER_GRID_MARKERS.topRight.x > SHEET.width - 30) {
+if (MARKERS.topLeft.y < 300 || MARKERS.bottomLeft.y > 1040
+  || MARKERS.topLeft.x < 30 || MARKERS.topRight.x > SHEET.width - 30) {
   throw new Error('Os novos marcadores não ficaram protegidos ao redor do quadro de respostas.')
 }
 
 ;[[10, 4], [20, 5], [21, 4], [40, 5], [41, 4], [60, 5], [61, 4], [90, 5]].forEach(([questionCount, optionCount]) => {
   validateCompleteLayout(questionCount, optionCount)
 })
-validateCompleteLayout(40, 5, undefined, LEGACY_MARKERS)
 
 // Uma foto com balanço de branco azulado não pode transformar todas as
 // alternativas em marcações, como ocorria com folhas reais de 10 questões.
@@ -200,6 +182,51 @@ const ninetyQuestionResult = analyzeMarks(ninetyQuestionSheet, { questionCount: 
 if (ninetyQuestionResult.correct !== 1 || ninetyQuestionResult.blank !== 89) {
   throw new Error(`Formato de 90 questões não foi reconhecido: ${JSON.stringify(ninetyQuestionResult)}`)
 }
+
+// A repeated black answer must not be learned as paper/background.
+for (const questionCount of [1, 2, 10, 20, 21, 40, 41, 60, 61, 90]) {
+  const image = makeImage(SHEET.width, SHEET.height)
+  for (let q = 0; q < questionCount; q += 1) fillBubble(image, q, 0, [25, 25, 25], questionCount)
+  const result = analyzeMarks(image, { questionCount, optionCount: 5 }, Array(questionCount).fill('A'))
+  if (result.correct !== questionCount) throw new Error(`Respostas repetidas perdidas em ${questionCount} questões.`)
+}
+
+// New single-page format: fixed coordinates independent of question count.
+for (const questionCount of [1, 10, 20, 21, 30, 31, 40, 41, 60, 61, 90]) {
+  for (const optionCount of [4, 5]) {
+    const format = getSheetFormat(questionCount, optionCount)
+    const payload = qrPayload('student-new', 'assessment-new', format)
+    assert.deepEqual(parseQrPayload(payload)?.sheetFormat, format)
+    assert.equal(parseQrPayload(payload + 'X'), null)
+    const image = makeImage(SHEET.width, SHEET.height)
+    const key = Array.from({ length: questionCount }, (_, q) => 'ABCDE'[q % optionCount])
+    for (let q = 0; q < questionCount; q += 1) {
+      for (let option = 0; option < optionCount; option += 1) {
+        const center = { x: 137 + Math.floor(q / 30) * 219 + option * 29, y: 420 + q % 30 * 19.5 }
+        drawBubbleOutline(image, center, 7)
+        if (option === q % optionCount) fillProjectedBubble(image, center, 5.5, q % 2 ? [25, 25, 25] : [25, 35, 145])
+      }
+    }
+    const assessment = { questionCount, optionCount }
+    const result = analyzePrintedSheet(image, assessment, key, MARKERS, {}, MARKERS, format)
+    assert.equal(result.correct, questionCount, `Página única de ${questionCount} questões / ${optionCount} alternativas`)
+    assert.equal(result.answerSheetFormat, FIXED_SHEET_LAYOUT.id)
+    assert.equal(result.answers.at(-1).question, questionCount)
+    assert.throws(() => analyzePrintedSheet(image, { ...assessment, questionCount: questionCount + 1 }, key, MARKERS, {}, MARKERS, format), /estrutura impressa/)
+  }
+}
+assert.throws(() => getSheetFormat(91, 5), /inválido/)
+assert.throws(() => qrPayload('s', 'a', { format: 'unknown', questionCount: 90, optionCount: 5 }), /inválidos/)
+assert.equal(parseQrPayload(qrPayload(null, 'a', getSheetFormat(90, 5))).studentId, null)
+
+// Unsupported or unidentified sheets must never fall back to another grid.
+for (const oldQr of ['LUMA|1|student-old|assessment-old|ZQSVZL', 'LUMA|2|student-old|assessment-old|1031XAU']) {
+  assert.equal(parseQrPayload(oldQr), null)
+  assert.throws(() => requireCurrentQr(oldQr), /Folha antiga não compatível/)
+}
+assert.throws(() => requireCurrentQr(null), /QR atual não reconhecido/)
+assert.throws(() => requireCurrentQr('invalid'), /QR atual não reconhecido/)
+assert.throws(() => analyzePrintedSheet(makeImage(SHEET.width, SHEET.height), { questionCount: 10, optionCount: 5 }, Array(10).fill('A'), MARKERS, {}, MARKERS, null), /estrutura impressa/)
 
 const versionedAssessment = {
   id: 'assessment-versioned', questionCount: 2, answerKey: ['A', 'A'],
@@ -228,13 +255,12 @@ if (randomKey.length !== 10 || randomKey.some((answer) => !['A', 'B', 'C', 'D'].
   throw new Error(`Gabarito aleatório inválido ou desbalanceado: ${JSON.stringify(randomKey)}`)
 }
 
-const identifiedQr = parseQrPayload(qrPayload('student-1', 'assessment-1'))
-const blankQr = parseQrPayload(qrPayload(null, 'assessment-1'))
-const legacyQr = parseQrPayload(qrPayload('student-old', 'assessment-old', 1))
-if (identifiedQr?.studentId !== 'student-1' || identifiedQr.assessmentId !== 'assessment-1'
-  || identifiedQr.version !== 2 || blankQr?.studentId !== null || blankQr.assessmentId !== 'assessment-1'
-  || legacyQr?.studentId !== 'student-old' || legacyQr.assessmentId !== 'assessment-old' || legacyQr.version !== 1) {
-  throw new Error('Os QR Codes de folhas identificadas e avulsas não foram interpretados corretamente.')
-}
+const currentFormat = getSheetFormat(90, 5)
+const identifiedQr = requireCurrentQr(qrPayload('student-1', 'assessment-1', currentFormat))
+const blankQr = requireCurrentQr(qrPayload(null, 'assessment-1', currentFormat))
+assert.equal(identifiedQr.studentId, 'student-1')
+assert.equal(identifiedQr.version, 3)
+assert.equal(blankQr.studentId, null)
+assert.deepEqual(blankQr.sheetFormat, currentFormat)
 
 console.log('OMR validado: marcadores, formatos, perspectiva, QR, múltiplos gabaritos, anulações e cancelamentos.')

@@ -15,6 +15,7 @@
     "make": "npm run build && electron-forge make",
     "preview": "vite preview",
     "test:seges": "node scripts/test-seges.mjs",
+    "test:results": "node scripts/test-results.mjs",
     "test:omr": "node scripts/test-omr.mjs",
     "test:assessment": "node scripts/test-assessment.mjs",
     "test:network": "node scripts/test-network-analysis.mjs",

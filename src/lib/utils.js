@@ -1,3 +1,4 @@
+import { validateSheetFormat } from './sheetFormat.js'
 export function cn(...values) {
   return values.filter(Boolean).join(' ')
 }
@@ -64,18 +65,19 @@ export function crc32(text) {
   return ((crc ^ -1) >>> 0).toString(36).toUpperCase()
 }
 
-export function qrPayload(studentId, assessmentId, version = 2) {
-  const body = `LUMA|${version}|${studentId ?? ''}|${assessmentId}`
+export function qrPayload(studentId, assessmentId, sheetFormat) {
+  if (!validateSheetFormat(sheetFormat)) throw new Error('Metadados da folha inválidos.')
+  const { format, questionCount, optionCount } = sheetFormat
+  const body = `LUMA|3|${studentId ?? ''}|${assessmentId}|${format}|${questionCount}|${optionCount}`
   return `${body}|${crc32(body)}`
 }
 
 export function parseQrPayload(payload) {
   const parts = String(payload || '').split('|')
-  const version = Number(parts[1])
-  if (parts.length !== 5 || parts[0] !== 'LUMA' || ![1, 2].includes(version) || !parts[3]) return null
-  const body = parts.slice(0, 4).join('|')
-  if (crc32(body) !== parts[4]) return null
-  return { studentId: parts[2] || null, assessmentId: parts[3], version }
+  if (parts.length !== 8 || parts[0] !== 'LUMA' || parts[1] !== '3' || !parts[3] || crc32(parts.slice(0, 7).join('|')) !== parts[7]) return null
+  const sheetFormat = { format: parts[4], questionCount: Number(parts[5]), optionCount: Number(parts[6]) }
+  if (!validateSheetFormat(sheetFormat)) return null
+  return { studentId: parts[2] || null, assessmentId: parts[3], version: 3, sheetFormat }
 }
 
 export function downloadBlob(blob, filename) {

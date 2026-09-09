@@ -1,63 +1,22 @@
 import jsQR from 'jsqr'
-import { CANCELLED_ANSWER } from './assessment.js'
+import { FIXED_SHEET_LAYOUT, validateSheetFormat } from './sheetFormat.js'
+import { CANCELLED_ANSWER, summarizeAnswers } from './assessment.js'
 import { parseQrPayload } from './utils.js'
 
 export const SHEET = { width: 794, height: 1123 }
-export const LEGACY_MARKERS = {
-  topLeft: { x: 43, y: 43 },
-  topRight: { x: 751, y: 43 },
-  bottomLeft: { x: 43, y: 1080 },
-  bottomRight: { x: 751, y: 1080 },
-}
-export const ANSWER_GRID_MARKERS = {
+export const MARKERS = {
   topLeft: { x: 50, y: 363 },
   topRight: { x: 744, y: 363 },
   bottomLeft: { x: 50, y: 1013 },
   bottomRight: { x: 744, y: 1013 },
 }
-export const CURRENT_MARKER_LAYOUT = 'answer-grid-v2'
-export const MARKER_LAYOUTS = {
-  'page-v1': LEGACY_MARKERS,
-  [CURRENT_MARKER_LAYOUT]: ANSWER_GRID_MARKERS,
-}
-export const MARKERS = ANSWER_GRID_MARKERS
+export const CURRENT_MARKER_LAYOUT = 'answer-grid'
 
-export function getMarkerLayout(layoutId = CURRENT_MARKER_LAYOUT) {
-  return MARKER_LAYOUTS[layoutId] || MARKERS
+export function bubbleCenter(questionIndex, optionIndex) {
+  return layoutBubbleCenter(questionIndex, optionIndex, FIXED_SHEET_LAYOUT)
 }
 
-export function getAnswerSheetLayout(questionCount) {
-  const count = Math.max(1, Math.min(90, Number(questionCount) || 1))
-  if (count <= 20) {
-    return {
-      id: '1-20', label: '1–20', columns: 1, rowsPerColumn: 20,
-      panelWidth: 643, columnStep: 0, numberX: 170, optionX: 300, optionStep: 55,
-      bubbleY: 425, rowStep: 29.4, bubbleRadius: 9, optionFontSize: 7.5,
-    }
-  }
-  if (count <= 40) {
-    return {
-      id: '21-40', label: '21–40', columns: 2, rowsPerColumn: 20,
-      panelWidth: 327, columnStep: 382, numberX: 95, optionX: 164, optionStep: 43,
-      bubbleY: 425, rowStep: 29.4, bubbleRadius: 9, optionFontSize: 7.5,
-    }
-  }
-  if (count <= 60) {
-    return {
-      id: '41-60', label: '41–60', columns: 3, rowsPerColumn: 20,
-      panelWidth: 205, columnStep: 219, numberX: 91, optionX: 137, optionStep: 29,
-      bubbleY: 425, rowStep: 29.4, bubbleRadius: 7, optionFontSize: 6.5,
-    }
-  }
-  return {
-    id: '61-90', label: '61–90', columns: 3, rowsPerColumn: 30,
-    panelWidth: 205, columnStep: 219, numberX: 91, optionX: 137, optionStep: 29,
-    bubbleY: 420, rowStep: 19.5, bubbleRadius: 6.2, optionFontSize: 6,
-  }
-}
-
-export function bubbleCenter(questionIndex, optionIndex, questionCount = 40) {
-  const layout = getAnswerSheetLayout(questionCount)
+export function layoutBubbleCenter(questionIndex, optionIndex, layout) {
   const column = Math.floor(questionIndex / layout.rowsPerColumn)
   const row = questionIndex % layout.rowsPerColumn
   return {
@@ -194,43 +153,13 @@ export function detectSheetMarkers(imageData) {
       for (let third = second + 1; third < distinct.length - 1; third += 1) {
         for (let fourth = third + 1; fourth < distinct.length; fourth += 1) {
           const corners = orderMarkerSet([distinct[first], distinct[second], distinct[third], distinct[fourth]])
-          Object.entries(MARKER_LAYOUTS).forEach(([markerLayout, templateMarkers]) => {
-            const score = markerGeometryScore(corners, imageData, templateMarkers)
-            if (Number.isFinite(score) && (!best || score > best.score)) best = { corners, score, markerLayout, templateMarkers }
-          })
+          const score = markerGeometryScore(corners, imageData, MARKERS)
+          if (Number.isFinite(score) && (!best || score > best.score)) best = { corners, score, markerLayout: CURRENT_MARKER_LAYOUT }
         }
       }
     }
   }
   return best
-}
-
-function findCornerMarker(imageData, corner, templateMarkers) {
-  const { width, height, data } = imageData
-  const expectedX = width * (templateMarkers[corner].x / SHEET.width)
-  const expectedY = height * (templateMarkers[corner].y / SHEET.height)
-  const radius = Math.min(width, height) * 0.05
-  const startX = Math.max(0, Math.floor(expectedX - radius))
-  const endX = Math.min(width, Math.ceil(expectedX + radius))
-  const startY = Math.max(0, Math.floor(expectedY - radius))
-  const endY = Math.min(height, Math.ceil(expectedY + radius))
-  const step = Math.max(2, Math.floor(Math.min(width, height) / 500))
-  const points = []
-  for (let y = startY; y < endY; y += step) {
-    for (let x = startX; x < endX; x += step) {
-      const offset = (y * width + x) * 4
-      if (luminance(data, offset) < 0.14) points.push({ x, y })
-    }
-  }
-  if (points.length < 12) return null
-
-  const nearby = points.filter((point) => Math.hypot(point.x - expectedX, point.y - expectedY) < radius)
-  if (nearby.length <= 8) return null
-  const source = nearby
-  return {
-    x: source.reduce((sum, point) => sum + point.x, 0) / source.length,
-    y: source.reduce((sum, point) => sum + point.y, 0) / source.length,
-  }
 }
 
 function project(point, corners, templateMarkers = MARKERS) {
@@ -321,15 +250,12 @@ function percentile(values, ratio) {
 }
 
 export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS, settings = {}, templateMarkers = MARKERS) {
-  const layout = getAnswerSheetLayout(assessment.questionCount)
+  const layout = FIXED_SHEET_LAYOUT
   const templateWidth = templateMarkers.topRight.x - templateMarkers.topLeft.x
   const templateHeight = templateMarkers.bottomLeft.y - templateMarkers.topLeft.y
   const horizontalScale = Math.hypot(corners.topRight.x - corners.topLeft.x, corners.topRight.y - corners.topLeft.y) / templateWidth
   const verticalScale = Math.hypot(corners.bottomLeft.x - corners.topLeft.x, corners.bottomLeft.y - corners.topLeft.y) / templateHeight
   const sheetScale = Math.min(horizontalScale, verticalScale)
-  // A folha antiga usava sempre bolhas de raio 9. Nos formatos de 3 colunas as
-  // bolhas são menores; manter o raio antigo faz a amostra alcançar contornos,
-  // letras e linhas vizinhas. A leitura deve acompanhar a geometria impressa.
   const sampleRadius = Math.max(1.8, layout.bubbleRadius * 0.56 * sheetScale)
   const colorSampleRadius = Math.max(2.4, layout.bubbleRadius * 0.76 * sheetScale)
   const markThreshold = Number(settings.markThreshold ?? 0.38)
@@ -350,7 +276,7 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
 
   const measured = Array.from({ length: assessment.questionCount }, (_, question) => (
     Array.from({ length: assessment.optionCount }, (_, option) => {
-      const center = project(bubbleCenter(question, option, assessment.questionCount), corners, templateMarkers)
+      const center = project(layoutBubbleCenter(question, option, layout), corners, templateMarkers)
       return {
         option,
         value: sampleDarkness(imageData, center, sampleRadius),
@@ -371,7 +297,9 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
       const nearbyColors = []
       for (let index = Math.max(columnStart, question - 6); index < Math.min(columnEnd, question + 7); index += 1) {
         if (measured[index]?.[score.option]) {
-          nearby.push(measured[index][score.option].value)
+          // Estimate paper from the lighter options in each nearby row.
+          // Repeated answers (or a one-question sheet) must not become background.
+          nearby.push(percentile(measured[index].map((item) => item.value), 0.25))
           nearbyColors.push(measured[index][score.option].color)
         }
       }
@@ -460,7 +388,32 @@ function readQrFromSheet(context, imageData, corners, templateMarkers) {
   const maxY = Math.min(imageData.height, Math.ceil(Math.max(...qrArea.map((point) => point.y)) + 8))
   if (maxX - minX < 40 || maxY - minY < 40) return null
   const cropped = context.getImageData(minX, minY, maxX - minX, maxY - minY)
-  return jsQR(cropped.data, cropped.width, cropped.height, { inversionAttempts: 'attemptBoth' })
+  const decoded = jsQR(cropped.data, cropped.width, cropped.height, { inversionAttempts: 'attemptBoth' })
+  if (decoded && parseQrPayload(decoded.data)) return decoded
+  // Retry small QRs at a larger scale.
+  const enlarged = document.createElement('canvas')
+  enlarged.width = cropped.width * 2
+  enlarged.height = cropped.height * 2
+  const enlargedContext = enlarged.getContext('2d', { willReadFrequently: true })
+  enlargedContext.drawImage(context.canvas, minX, minY, cropped.width, cropped.height, 0, 0, enlarged.width, enlarged.height)
+  const pixels = enlargedContext.getImageData(0, 0, enlarged.width, enlarged.height)
+  return jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: 'attemptBoth' }) || decoded
+}
+
+export function analyzePrintedSheet(imageData, assessment, answerKey, corners, settings, templateMarkers, sheetFormat) {
+  if (!validateSheetFormat(sheetFormat) || sheetFormat.questionCount !== assessment.questionCount || sheetFormat.optionCount !== assessment.optionCount) {
+    throw new Error('A estrutura impressa não corresponde ao simulado. Confira a quantidade de questões e alternativas.')
+  }
+  return analyzeMarks(imageData, assessment, answerKey, corners, settings, templateMarkers)
+}
+
+export function requireCurrentQr(payload) {
+  const identity = parseQrPayload(payload)
+  if (identity) return identity
+  if (/^LUMA\|[12]\|/.test(payload || '')) {
+    throw new Error('Folha antiga não compatível. Gere uma nova folha de respostas no formato atual de página única, com até 90 questões.')
+  }
+  throw new Error('QR atual não reconhecido ou inválido. Use uma folha gerada no formato atual e digitalize novamente com o QR completo e nítido.')
 }
 
 export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}, settings = {}, resolveContext) {
@@ -468,31 +421,31 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
   let qr = jsQR(data.data, data.width, data.height, { inversionAttempts: 'attemptBoth' })
   let qrIdentity = qr ? parseQrPayload(qr.data) : null
   const detectedMarkers = detectSheetMarkers(data)
-  const markerLayout = qrIdentity ? (qrIdentity.version === 1 ? 'page-v1' : CURRENT_MARKER_LAYOUT) : detectedMarkers?.markerLayout || CURRENT_MARKER_LAYOUT
-  const templateMarkers = getMarkerLayout(markerLayout)
-  const corners = detectedMarkers?.corners || Object.fromEntries(Object.keys(templateMarkers).map((corner) => [corner, findCornerMarker(data, corner, templateMarkers)]))
-  const markersFound = detectedMarkers ? 4 : Object.values(corners).filter(Boolean).length
-  if (markersFound < 4) {
-    Object.entries(templateMarkers).forEach(([corner, marker]) => {
-      corners[corner] ||= { x: data.width * (marker.x / SHEET.width), y: data.height * (marker.y / SHEET.height) }
-    })
-  }
-
-  if (!qr && detectedMarkers) {
-    qr = readQrFromSheet(context, data, corners, templateMarkers)
+  const corners = detectedMarkers?.corners || Object.fromEntries(Object.entries(MARKERS).map(([key, point]) => [key, { x: data.width * point.x / SHEET.width, y: data.height * point.y / SHEET.height }]))
+  const markersFound = detectedMarkers ? 4 : 0
+  if (!qrIdentity && detectedMarkers) {
+    qr = readQrFromSheet(context, data, corners, MARKERS) || qr
     qrIdentity = qr ? parseQrPayload(qr.data) : null
   }
-  const identity = qrIdentity
-    ? { ...qrIdentity, studentId: qrIdentity.studentId || fallbackIdentity.studentId || null }
-    : fallbackIdentity
+  qrIdentity = requireCurrentQr(qr?.data)
+  const identity = { ...qrIdentity, studentId: qrIdentity.studentId || fallbackIdentity.studentId || null }
   const resolved = resolveContext?.(identity) || {}
   const activeAssessment = resolved.assessment || assessment
   const activeAnswerKey = resolved.answerKey || activeAssessment.answerKey
 
-  const marks = analyzeMarks(data, activeAssessment, activeAnswerKey, corners, settings, templateMarkers)
+  if (qrIdentity && qrIdentity.assessmentId !== activeAssessment.id) throw new Error('O simulado identificado pelo QR não foi encontrado.')
+
+  const sheetFormat = qrIdentity?.sheetFormat || null
+  let marks = analyzePrintedSheet(data, activeAssessment, activeAnswerKey, corners, settings, MARKERS, sheetFormat)
+  // Estimated coordinates are only a review aid, never evidence of blank answers.
+  if (!detectedMarkers) {
+    const answers = marks.answers.map((answer) => ({ ...answer, selected: [], status: 'uncertain' }))
+    marks = { ...marks, answers, ...summarizeAnswers(answers) }
+  }
 
   return {
     identity,
+    sheetFormat,
     assessmentId: activeAssessment.id,
     classId: resolved.classId || null,
     qrFound: Boolean(qrIdentity),
@@ -500,8 +453,8 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
     rawQr: qr?.data || null,
     markersFound,
     markerCorners: detectedMarkers ? Object.fromEntries(Object.entries(corners).map(([key, point]) => [key, { x: Math.round(point.x), y: Math.round(point.y) }])) : null,
-    markerLayout,
-    alignmentMode: detectedMarkers ? (markerLayout === CURRENT_MARKER_LAYOUT ? 'answer-grid-markers' : 'legacy-page-markers') : markersFound === 4 ? 'expected-markers' : 'estimated',
+    markerLayout: CURRENT_MARKER_LAYOUT,
+    alignmentMode: detectedMarkers ? 'answer-grid-markers' : 'estimated',
     ...marks,
     previewUrl: canvas.toDataURL('image/jpeg', 0.82),
     confidence: Math.max(48, Math.min(99, Math.round(55 + markersFound * 7 + (qrIdentity ? 15 : 0) - marks.uncertain * 1.5))),

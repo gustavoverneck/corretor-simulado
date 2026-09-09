@@ -6,7 +6,8 @@ import { FullAssessmentEditor } from '../components/FullAssessmentEditor'
 import { AssessmentPaper, AssessmentPackets } from '../components/AssessmentPaper'
 import { CANCELLED_ANSWER, applyAssessmentRevision, closeAssessment, createRandomAnswerKey, getAssessmentStatusLabel, getAnswerKeyForClass, getAnswerKeyVersionForStudent, getAnswerKeyVersions, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, reopenAssessment, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS, uniqueQuestionAreas } from '../lib/knowledgeAreas'
-import { CURRENT_MARKER_LAYOUT, getAnswerSheetLayout } from '../lib/omr'
+import { FIXED_SHEET_LAYOUT } from '../lib/sheetFormat'
+import { CURRENT_MARKER_LAYOUT } from '../lib/omr'
 import { buildSegesResultRows, calculateAssessmentResult, formatSegesGrade, SEGES_RESULT_STATUS, segesResultsFilename, serializeSegesResultsCsv, indexAssessmentSubmissions } from '../lib/segesResults'
 import { average, cn, downloadBlob, formatDate, initials, uid } from '../lib/utils'
 import { assessmentToLatex, createPrintableVersions, createStudentPrintableVersions, emptyQuestion, resizeQuestions } from '../lib/fullAssessment'
@@ -672,7 +673,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
         || first.name.localeCompare(second.name, 'pt-BR', { sensitivity: 'base' })
       ))
   }, [data.students, selectedClasses])
-  const answerSheetLayout = getAnswerSheetLayout(questionCount)
+  const answerSheetLayout = FIXED_SHEET_LAYOUT
   const activeAnswerKeyVersion = answerKeyVersions.find((version) => version.id === activeAnswerKeyVersionId) || answerKeyVersions[0]
   const answerKey = activeAnswerKeyVersion?.answerKey || []
   const assessmentPreviewClassroom = data.classes.find((classroom) => classroom.id === (selectedActiveStudents[0]?.classId || selectedClasses[0])) || { id: 'preview-class', name: 'Turma' }
@@ -1442,7 +1443,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
                 </div>
                 <div className="bulk-area-control"><Field label="Aplicar uma área a todas"><input list="assessment-question-areas" value={bulkArea} onChange={(event) => setBulkArea(event.target.value)} placeholder="Digite ou selecione" /></Field><Button type="button" variant="secondary" icon={Layers3} onClick={applyAreaToAll}>Aplicar</Button></div>
               </div>
-              <div className="answer-sheet-format-note"><Badge tone="blue">Formato {answerSheetLayout.label}</Badge><span>O formato físico usa {answerSheetLayout.columns} {answerSheetLayout.columns === 1 ? 'coluna' : 'colunas'} e marcadores protegidos ao redor das respostas; somente {questionCount} questão{questionCount !== 1 ? 'ões serão exibidas' : ' será exibida'}.</span></div>
+              <div className="answer-sheet-format-note"><Badge tone="blue">Formato {answerSheetLayout.label}</Badge><span>Uma única página A4, com três colunas fixas e bolhas do mesmo tamanho para 1 a 90 questões. Somente as {questionCount} questões do simulado serão impressas.</span></div>
 
               {creationMode === 'full' && <>
                 <div className="full-version-distribution">

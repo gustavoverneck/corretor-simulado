@@ -87,7 +87,7 @@ A geometria da folha é fixa e compartilhada pelo gerador e pelo leitor:
 5. marcas fracas ou muito próximas viram **incertas** e entram na revisão;
 6. respostas confirmadas são comparadas ao gabarito salvo.
 
-O QR Code não contém nome, matrícula nem nota: somente identificadores internos e um checksum contra erros de leitura.
+O QR Code não contém nome, matrícula nem nota: identificadores internos, metadados do formato e um checksum contra erros de leitura.
 
 ## Banco de dados local e backup
 
@@ -112,3 +112,15 @@ src/
   data.js                     base demonstrativa
   styles.css                  interface responsiva e estilos de impressão
 ```
+
+### Formato único de folha de respostas
+
+Impressão e leitura usam exclusivamente uma página A4 para 1–90 questões: três colunas de até 30 questões, posições fixas e bolhas de raio 7 na escala da folha (aproximadamente 3,7 mm de diâmetro impresso). Somente as questões ativas são desenhadas. A geometria é compartilhada em `src/lib/sheetFormat.js`.
+
+O QR v3 registra o modelo `fixed-90-v3`, as quantidades de questões e alternativas, aluno, simulado e checksum. Ele é vetorial, com margem branca de quatro módulos e geração síncrona antes da impressão. Folhas avulsas também precisam deste QR; o aluno pode ser vinculado manualmente.
+
+Os formatos antigos e os QR v1/v2 não são mais aceitos. Gere novas folhas pelo sistema atual. Sem QR válido ou com estrutura diferente do simulado cadastrado, a leitura é interrompida; não há tentativa de recuperar grades antigas. Correções já salvas não são apagadas por essa mudança.
+
+Sem os quatro marcadores validados, as questões ficam incertas e seguem para revisão. O fundo é estimado pelas alternativas mais claras das linhas próximas, evitando perder respostas pretas repetidas ou de folhas curtas.
+
+Preencha toda a bolha com caneta azul ou preta, sem rasuras. Digitalize a folha completa com nitidez, sem sombras ou cortes. Os testes automatizados usam imagens sintéticas; fotos e digitalizações reais ainda precisam de conferência, especialmente com rotação acentuada, dobras ou baixa resolução.
