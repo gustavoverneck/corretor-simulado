@@ -17,6 +17,7 @@
     "test:seges": "node scripts/test-seges.mjs",
     "test:results": "node scripts/test-results.mjs",
     "test:omr": "node scripts/test-omr.mjs",
+    "test:sheet-scan": "node scripts/test-sheet-scan.mjs",
     "test:assessment": "node scripts/test-assessment.mjs",
     "test:network": "node scripts/test-network-analysis.mjs",
     "test:results-report": "node scripts/test-results-report.mjs",
@@ -41,6 +42,7 @@
     "@electron-forge/maker-deb": "^7.11.2",
     "@electron-forge/maker-squirrel": "^7.11.2",
     "@electron-forge/maker-zip": "^7.11.2",
+    "@napi-rs/canvas": "^1.0.3",
     "@vitejs/plugin-react": "^5.0.4",
     "electron": "^43.4.0",
     "vite": "^7.1.9"

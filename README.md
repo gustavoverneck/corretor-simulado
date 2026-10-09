@@ -119,13 +119,15 @@ src/
   styles.css                  interface responsiva e estilos de impressão
 ```
 
-### Formato único de folha de respostas
+### Formatos da folha de respostas
 
-Impressão e leitura usam exclusivamente uma página A4 para 1–90 questões: três colunas de até 30 questões, posições fixas e bolhas de raio 7 na escala da folha (aproximadamente 3,7 mm de diâmetro impresso). Somente as questões ativas são desenhadas. A geometria é compartilhada em `src/lib/sheetFormat.js`.
+As novas folhas usam uma página A4, com duas colunas equilibradas até 40 questões e três colunas de 41 a 90. O número de linhas é o teto da divisão pela quantidade de colunas: 45 questões ocupam 15 linhas por coluna; 60 ocupam 20. As bolhas têm raio 9 nas duas colunas e raio 7 nas três. Impressão e leitura compartilham a geometria em `src/lib/sheetFormat.js`.
 
-O QR v3 registra o modelo `fixed-90-v3`, as quantidades de questões e alternativas, aluno, simulado e checksum. Ele é vetorial, com margem branca de quatro módulos e geração síncrona antes da impressão. Folhas avulsas também precisam deste QR; o aluno pode ser vinculado manualmente.
+O QR v4 registra o modelo `balanced-v4`, as quantidades de questões e alternativas, aluno, simulado e checksum. Ele é vetorial, com margem branca de quatro módulos e tamanho de aproximadamente 41 mm. A leitura tenta a imagem completa, recortes e retificação de perspectiva. Os elementos do QR são excluídos da detecção dos quatro marcadores OMR. Folhas avulsas também possuem QR; o aluno pode ser vinculado manualmente.
 
-Os formatos antigos e os QR v1/v2 não são mais aceitos. Gere novas folhas pelo sistema atual. Sem QR válido ou com estrutura diferente do simulado cadastrado, a leitura é interrompida; não há tentativa de recuperar grades antigas. Correções já salvas não são apagadas por essa mudança.
+Folhas já impressas com QR v2 ou QR v3 (`fixed-90-v3`) continuam sendo lidas em suas coordenadas originais. O QR v1 é identificado, mas sua leitura é interrompida porque foi usado por grades diferentes sem registrar qual delas foi impressa; nesse caso é preciso gerar outra folha. Sem QR válido ou com quantidades registradas diferentes das do simulado, a leitura é interrompida. Correções já salvas são preservadas.
+
+`npm run test:sheet-scan` renderiza o componente real de impressão e valida o QR vetorial, a identificação, a leitura e as posições das respostas em diferentes quantidades e escalas, além das grades v2/v3 e de um marcador ausente.
 
 Sem os quatro marcadores validados, as questões ficam incertas e seguem para revisão. O fundo é estimado pelas alternativas mais claras das linhas próximas, evitando perder respostas pretas repetidas ou de folhas curtas.
 

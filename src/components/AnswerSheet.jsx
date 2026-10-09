@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import QRCode from 'qrcode'
 import { layoutBubbleCenter, MARKERS, SHEET } from '../lib/omr'
-import { FIXED_SHEET_LAYOUT, getSheetFormat } from '../lib/sheetFormat'
+import { getSheetLayout, getSheetFormat } from '../lib/sheetFormat'
 import { qrPayload } from '../lib/utils'
 
 const options = ['A', 'B', 'C', 'D', 'E']
@@ -15,7 +15,7 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
   const schoolLocation = [school.address, school.city && school.state ? `${school.city} – ${school.state}.` : school.city || school.state]
     .filter(Boolean)
     .join(', ')
-  const layout = FIXED_SHEET_LAYOUT
+  const layout = getSheetLayout(sheetFormat)
 
   const qr = useMemo(() => {
     const { modules } = QRCode.create(payload, { errorCorrectionLevel: 'M' })
@@ -52,12 +52,11 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
       <text x="94" y="130" fontFamily="Arial, sans-serif" fontSize="9" fontWeight="700" fill="#48685e" letterSpacing=".9">SISTEMA DE AVALIAÇÕES</text>
       <text x="692" y="130" textAnchor="end" fontFamily="Arial, sans-serif" fontSize="9" fontWeight="700" fill="#48685e" letterSpacing=".9">FOLHA DE RESPOSTAS</text>
 
-      <svg x="65" y="148" width="122" height="122" viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges">
+      <svg x="50" y="139" width="156" height="156" viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges">
         <rect width={qr.size} height={qr.size} fill="white" />
         <path d={qr.path} fill="#111" />
       </svg>
-      <rect x="65" y="148" width="122" height="122" fill="none" stroke="#202a26" strokeWidth="1" />
-      <text x="126" y="284" textAnchor="middle" fontFamily="Arial" fontSize="8" fill="#5e6864">IDENTIFICAÇÃO DIGITAL</text>
+      <text x="128" y="305" textAnchor="middle" fontFamily="Arial" fontSize="8" fill="#5e6864">IDENTIFICAÇÃO DIGITAL</text>
 
       <text x="216" y="162" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">ALUNO(A)</text>
       {!isBlank && <text x="216" y="184" fontFamily="Arial" fontSize="17" fontWeight="700" fill="#17221e">{student.name.toUpperCase()}</text>}
@@ -83,7 +82,7 @@ export function AnswerSheet({ student, assessment, classroom, school, hideRegist
 
       {Array.from({ length: layout.columns }, (_, column) => (
         <g key={column}>
-          <rect x={65 + column * layout.columnStep} y="378" width={layout.panelWidth} height="620" rx="8" fill="none" stroke="#d5dcd8" />
+          <rect x={65 + column * layout.columnStep} y="378" width={layout.panelWidth} height={layout.panelHeight || 620} rx="8" fill="none" stroke="#d5dcd8" />
           <rect x={65 + column * layout.columnStep} y="378" width={layout.panelWidth} height="32" rx="8" fill="#edf2ef" />
           <text x={layout.numberX + column * layout.columnStep} y="399" textAnchor="middle" fontFamily="Arial" fontSize={layout.columns === 3 ? 7.5 : 9} fontWeight="700" fill="#55615c">QUESTÃO</text>
           {options.slice(0, assessment.optionCount).map((option, index) => (
