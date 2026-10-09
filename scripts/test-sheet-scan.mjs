@@ -96,4 +96,37 @@ for (const version of [2, 3]) {
   assert.equal(result.answerSheetFormat,layout.id)
   assert.equal(readSheetQr(context.getImageData(0,0,794,1123))?.data,payload)
 }
-console.log('Impressão e leitura integradas: QR vetorial, formatos novos/v2/v3, escalas, posições e ausência de marcador validados.')
+// Test the printed outline and letter too: treating their pixels as ink would
+// turn every empty sheet into a marked one after widening the sampling area.
+for (const questionCount of [40, 60, 90]) {
+  const assessment = { id: 'partial-assessment', title: 'Teste de leitura', code: 'OMR', questionCount, optionCount: 4, answerKey: Array(questionCount).fill('D') }
+  const layout = getSheetLayout(getSheetFormat(questionCount, 4))
+  const svg = renderToStaticMarkup(React.createElement(AnswerSheet, { student, assessment, school }))
+  const row = 12
+  const radius = layout.bubbleRadius
+  const scenarios = [
+    { label: 'empty', marks: [], status: 'blank', selected: [] },
+    { label: 'off-centre', marks: [{ option: 3, offset: .65, radius: .42 }], status: 'correct', selected: ['D'] },
+    { label: 'weak edge', marks: [{ option: 3, offset: .78, radius: .24 }], status: 'uncertain', selected: ['D'] },
+    { label: 'dust', marks: [{ option: 3, offset: .65, radius: .08 }], status: 'blank', selected: [] },
+    { label: 'clear and weak', marks: [{ option: 0, offset: 0, radius: .8 }, { option: 3, offset: .78, radius: .24 }], status: 'uncertain', selected: ['A', 'D'] },
+    { label: 'two clear', marks: [{ option: 0, offset: 0, radius: .8 }, { option: 3, offset: 0, radius: .8 }], status: 'multiple', selected: ['A', 'D'] },
+  ]
+  for (const scenario of scenarios) {
+    const { context, canvas } = await rasterize(svg)
+    for (const mark of scenario.marks) {
+      const point = layoutBubbleCenter(row, mark.option, layout)
+      context.fillStyle = '#191919'
+      context.beginPath()
+      context.arc(point.x, point.y + mark.offset * radius, radius * mark.radius, 0, Math.PI * 2)
+      context.fill()
+    }
+    const result = analyzeSheetImage(context.getImageData(0, 0, canvas.width, canvas.height), assessment)
+    const answer = result.answers[row]
+    assert.equal(answer.status, scenario.status, `${questionCount}: ${scenario.label}`)
+    assert.deepEqual(answer.selected, scenario.selected, `${questionCount}: ${scenario.label}`)
+    assert.equal(result.answers.filter((item) => item.question !== row + 1 && item.status !== 'blank').length, 0, 'As outras questões devem continuar em branco')
+  }
+}
+
+console.log('Impressão e leitura integradas: QR vetorial, formatos novos/v2/v3, escalas, marcas parciais, duplas, sujeira, posições e ausência de marcador validados.')

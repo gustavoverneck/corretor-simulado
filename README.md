@@ -131,4 +131,6 @@ Folhas já impressas com QR v2 ou QR v3 (`fixed-90-v3`) continuam sendo lidas em
 
 Sem os quatro marcadores validados, as questões ficam incertas e seguem para revisão. O fundo é estimado pelas alternativas mais claras das linhas próximas, evitando perder respostas pretas repetidas ou de folhas curtas.
 
+A leitura mede o centro e uma faixa interna mais ampla de cada bolha, evitando a letra central e o contorno impresso. Essa segunda medida recupera preenchimentos parciais ou deslocados. Evidências fracas seguem para revisão; uma marca forte acompanhada de outra fraca também exige conferência. `npm run test:omr-scan-quality` verifica uma grade gerada artificialmente em diferentes escalas, contraste, compressão JPEG e pequena rotação. Os testes publicados não incluem documentos enviados por usuários.
+
 Preencha toda a bolha com caneta azul ou preta, sem rasuras. Digitalize a folha completa com nitidez, sem sombras ou cortes. Os testes automatizados usam imagens sintéticas; fotos e digitalizações reais ainda precisam de conferência, especialmente com rotação acentuada, dobras ou baixa resolução.

@@ -18,6 +18,7 @@
     "test:results": "node scripts/test-results.mjs",
     "test:omr": "node scripts/test-omr.mjs",
     "test:sheet-scan": "node scripts/test-sheet-scan.mjs",
+    "test:omr-scan-quality": "node scripts/test-omr-scan-quality.mjs",
     "test:assessment": "node scripts/test-assessment.mjs",
     "test:network": "node scripts/test-network-analysis.mjs",
     "test:results-report": "node scripts/test-results-report.mjs",

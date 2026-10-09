@@ -206,7 +206,7 @@ function project(point, corners, templateMarkers = MARKERS) {
   }
 }
 
-function sampleDarkness(imageData, center, radius) {
+function sampleDarkness(imageData, center, radius, innerRadius = 0) {
   const { width, height, data } = imageData
   let dark = 0
   let total = 0
@@ -215,7 +215,7 @@ function sampleDarkness(imageData, center, radius) {
     for (let x = Math.floor(center.x - safeRadius); x <= center.x + safeRadius; x += 1) {
       if (x < 0 || y < 0 || x >= width || y >= height) continue
       const distance = Math.hypot(x - center.x, y - center.y)
-      if (distance > safeRadius) continue
+      if (distance > safeRadius || distance < innerRadius) continue
       const value = luminance(data, (y * width + x) * 4)
       dark += 1 - value
       total += 1
@@ -266,6 +266,10 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   const verticalScale = Math.hypot(corners.bottomLeft.x - corners.topLeft.x, corners.bottomLeft.y - corners.topLeft.y) / templateHeight
   const sheetScale = Math.min(horizontalScale, verticalScale)
   const sampleRadius = Math.max(1.8, layout.bubbleRadius * 0.56 * sheetScale)
+  // A second pass covers the interior away from the printed letter, while
+  // staying inside the outline. It catches partial/off-centre pencil strokes.
+  const interiorRadius = layout.bubbleRadius * 0.82 * sheetScale
+  const letterRadius = layout.bubbleRadius * 0.38 * sheetScale
   const colorSampleRadius = Math.max(2.4, layout.bubbleRadius * 0.76 * sheetScale)
   const markThreshold = Number(settings.markThreshold ?? 0.38)
   const ambiguityThreshold = Number(settings.ambiguityThreshold ?? 0.22)
@@ -275,6 +279,8 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   const colorContrastThreshold = Math.max(0.018, colorThreshold * 0.38)
   const possibleColorThreshold = colorThreshold * 0.78
   const possibleColorContrastThreshold = colorContrastThreshold * 0.72
+  const interiorThreshold = Math.max(0.12, Math.min(0.22, markThreshold * 0.4))
+  const possibleInteriorThreshold = Math.max(0.05, Math.min(0.085, ambiguityThreshold * 0.25))
   const answers = []
   let correct = 0
   let wrong = 0
@@ -289,6 +295,7 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
       return {
         option,
         value: sampleDarkness(imageData, center, sampleRadius),
+        interior: sampleDarkness(imageData, center, interiorRadius, letterRadius),
         color: sampleColorInk(imageData, center, colorSampleRadius),
         center,
       }
@@ -300,24 +307,32 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
     const columnStart = Math.floor(question / layout.rowsPerColumn) * layout.rowsPerColumn
     const columnEnd = Math.min(assessment.questionCount, columnStart + layout.rowsPerColumn)
     const rowBaseline = percentile(scores.map((score) => score.value), 0.25)
-    const rowColorBaseline = percentile(scores.map((score) => score.color), 0.25)
+    // Black ink lowers the blue channel response. Use the median so it cannot
+    // make the remaining blue-tinted paper look like a second weak answer.
+    const rowColorBaseline = percentile(scores.map((score) => score.color), 0.5)
+    const rowInteriorBaseline = percentile(scores.map((score) => score.interior), 0.25)
     scores.forEach((score) => {
       const nearby = []
       const nearbyColors = []
+      const nearbyInterior = []
       for (let index = Math.max(columnStart, question - 6); index < Math.min(columnEnd, question + 7); index += 1) {
         if (measured[index]?.[score.option]) {
           // Estimate paper from the lighter options in each nearby row.
           // Repeated answers (or a one-question sheet) must not become background.
           nearby.push(percentile(measured[index].map((item) => item.value), 0.25))
           nearbyColors.push(measured[index][score.option].color)
+          nearbyInterior.push(percentile(measured[index].map((item) => item.interior), 0.25))
         }
       }
       score.localBaseline = percentile(nearby, 0.25)
       score.localColorBaseline = percentile(nearbyColors, 0.25)
+      score.localInteriorBaseline = percentile(nearbyInterior, 0.25)
       score.rowContrast = score.value - rowBaseline
       score.localContrast = score.value - score.localBaseline
       score.rowColorContrast = score.color - rowColorBaseline
       score.localColorContrast = score.color - score.localColorBaseline
+      score.rowInteriorContrast = score.interior - rowInteriorBaseline
+      score.localInteriorContrast = score.interior - score.localInteriorBaseline
     })
     // Para cor, o fundo correto é a própria linha: todas as alternativas estão
     // sob a mesma luz. Comparar com outras questões deixava sombras verticais e
@@ -329,27 +344,35 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
       || (score.rowContrast >= contrastThreshold && score.localContrast >= contrastThreshold)
       || (score.value >= markThreshold && score.rowContrast >= contrastThreshold && score.localContrast >= possibleContrastThreshold)
       || (allOptionsRaised && score.value >= markThreshold && score.localContrast >= 0.085)
+      || (score.rowInteriorContrast >= interiorThreshold && score.localInteriorContrast >= interiorThreshold)
     ))
     const possible = scores.filter((score) => (
       hasBlueInk(score, possibleColorThreshold, possibleColorContrastThreshold)
       || (score.rowContrast >= possibleContrastThreshold && score.localContrast >= 0.07)
+      || (score.rowInteriorContrast >= possibleInteriorThreshold && score.localInteriorContrast >= possibleInteriorThreshold)
     ))
+    const candidates = scores.filter((score) => strong.includes(score) || possible.includes(score))
     let status = 'blank'
     let selected = []
     const annulled = answerKey[question] === null
     const isCancelled = answerKey[question] === CANCELLED_ANSWER
     if (isCancelled) {
-      selected = (strong.length ? strong : possible).map((item) => String.fromCharCode(65 + item.option))
+      selected = candidates.map((item) => String.fromCharCode(65 + item.option))
       status = 'cancelled'
       cancelled += 1
     } else if (annulled) {
-      selected = (strong.length ? strong : possible).map((item) => String.fromCharCode(65 + item.option))
+      selected = candidates.map((item) => String.fromCharCode(65 + item.option))
       status = 'correct'
       correct += 1
     } else if (strong.length > 1) {
       status = 'multiple'
       selected = strong.map((item) => String.fromCharCode(65 + item.option))
       multiple += 1
+    } else if (strong.length === 1 && candidates.length > 1) {
+      // A clear mark must not hide a second, weaker one. Send both to review.
+      selected = candidates.map((item) => String.fromCharCode(65 + item.option))
+      status = 'uncertain'
+      uncertain += 1
     } else if (strong.length === 1) {
       selected = [String.fromCharCode(65 + strong[0].option)]
       status = selected[0] === answerKey[question] ? 'correct' : 'wrong'
@@ -376,6 +399,8 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
       })),
       scores: scores.map((item) => Number(item.value.toFixed(3))),
       colorScores: scores.map((item) => Number(item.color.toFixed(3))),
+      interiorScores: scores.map((item) => Number(item.interior.toFixed(3))),
+      interiorContrastScores: scores.map((item) => Number(Math.min(item.rowInteriorContrast, item.localInteriorContrast).toFixed(3))),
       contrastScores: scores.map((item) => Number(Math.max(item.rowContrast, item.localContrast).toFixed(3))),
       colorContrastScores: scores.map((item) => Number(item.rowColorContrast.toFixed(3))),
     })
