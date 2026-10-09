@@ -67,6 +67,12 @@ Em **Simulados → Detalhes**, a relação de alunos mostra a nota geral na esca
 
 O CSV usa UTF-8, separador ponto e vírgula e uma casa decimal. Questões canceladas não entram no total de questões válidas. Correções pendentes de revisão, alunos sem correção e registros sem respostas detalhadas permanecem identificados no arquivo, mas sem nota, evitando que sejam lançados automaticamente. Para exportar várias áreas, gere um arquivo separado para cada recorte.
 
+## Relatório de resultados
+
+Em **Resultados → Gerar relatório**, escolha PDF A4, PDF em apresentação 16:9 ou PowerPoint editável (`.pptx`). O documento reúne os simulados selecionados e respeita os filtros de turma, área e faixa de desempenho. É possível visualizar o PDF antes de baixar e selecionar comparativos por turma, série/ano, área, simulado e questões, incluindo perfis individuais das turmas.
+
+O relatório inclui resumo executivo, distribuição de desempenho, sugestões de acompanhamento e critérios de cálculo. As médias usam os percentuais de cada correção; áreas e questões usam acertos sobre respostas válidas. A geração ocorre localmente, com textos e gráficos vetoriais, e distingue participações de estudantes únicos.
+
 ## Correção de PDF em lote
 
 Na Central de correção, o campo de envio aceita imagens individuais ou um PDF com até 100 páginas e 100 MB. Cada página deve conter uma folha completa. O processamento ocorre localmente, identifica aluno, turma e simulado pelo QR Code e apresenta uma conferência do lote antes de salvar. Páginas sem identificação podem ser vinculadas manualmente; leituras ambíguas e páginas sem os quatro marcadores seguem para a fila de revisão.

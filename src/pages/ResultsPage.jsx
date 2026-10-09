@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   AlertTriangle, ArrowUpRight, Award, BarChart3, BookOpenCheck, Download,
-  Lightbulb, MousePointerClick, RotateCcw, Search, SlidersHorizontal, Target,
-  TrendingDown, TrendingUp, UsersRound, Network, X,
+  Lightbulb, MousePointerClick, RotateCcw, SlidersHorizontal, Target,
+  TrendingDown, TrendingUp, UsersRound, Network, FileText, Search, X,
 } from 'lucide-react'
 import { Badge, Button, StatCard } from '../components/ui'
 import { average, cn, downloadBlob, initials, normalize } from '../lib/utils'
-import { getQuestionAreas, uniqueQuestionAreas } from '../lib/knowledgeAreas'
-import { calculateSubmissionMetrics, calculateAreaResults, calculateQuestionResults } from '../lib/resultsMetrics'
+import { uniqueQuestionAreas } from '../lib/knowledgeAreas'
 import { isAssessmentClosed } from '../lib/assessment'
+import { MultiFilter } from '../components/MultiFilter'
+import { ResultsReportModal } from '../components/ResultsReportModal'
+import { calculateSubmissionMetrics, calculateAreaResults, calculateQuestionResults, resolveSelection } from '../lib/results'
 
 const areaColors = ['#47776a', '#a47245', '#6b6682', '#52718a', '#a65f5a', '#748b5f', '#8b6d48', '#5d7180']
 const performanceBands = [
@@ -33,24 +35,6 @@ function toggleChartSelection(selected, value, allValues) {
   if (!selected.includes(value)) return [...selected, value]
   const next = selected.filter((item) => item !== value)
   return next.length ? next : allValues
-}
-
-function MultiFilter({ label, options, selected, onChange, allLabel }) {
-  const menuRef = useRef(null)
-  useEffect(() => {
-    const close = (event) => {
-      if (!menuRef.current?.contains(event.target)) menuRef.current?.removeAttribute('open')
-    }
-    document.addEventListener('pointerdown', close)
-    return () => document.removeEventListener('pointerdown', close)
-  }, [])
-  const allSelected = selected.length === options.length
-  function toggle(value) {
-    const next = selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]
-    onChange(next.length ? next : options.map((option) => option.value))
-  }
-  const summary = allSelected ? allLabel : selected.length === 1 ? options.find((option) => option.value === selected[0])?.label : `${selected.length} selecionados`
-  return <div className="results-multi-field"><span>{label}</span><details ref={menuRef} name="results-filters" onKeyDown={(event) => { if (event.key === 'Escape') { menuRef.current.removeAttribute('open'); menuRef.current.querySelector('summary').focus() } }}><summary aria-label={label}>{summary}</summary><div><button type="button" className={allSelected ? 'active' : ''} onClick={() => onChange(options.map((option) => option.value))}>Selecionar todos</button>{options.map((option) => <label key={option.value}><input type="checkbox" checked={selected.includes(option.value)} onChange={() => toggle(option.value)} /><span>{option.label}</span></label>)}</div></details></div>
 }
 
 function ClassChartLegend({ classes }) {
@@ -194,32 +178,37 @@ export function StudentQuestionCorrelation({ assessment, submissions, students, 
 
 export function ResultsPage({ data, notify }) {
   const correctedAssessments = data.assessments.filter((assessment) => data.submissions.some((submission) => submission.assessmentId === assessment.id))
-  const [selectedAssessmentIds, setSelectedAssessmentIds] = useState(() => correctedAssessments[0] ? [correctedAssessments[0].id] : [])
-  const [selectedClassIds, setSelectedClassIds] = useState(() => correctedAssessments[0]?.classIds || [])
-  const [selectedAreas, setSelectedAreas] = useState(() => uniqueQuestionAreas(correctedAssessments[0]))
+  const [assessmentIds, setAssessmentIds] = useState(() => correctedAssessments[0] ? [correctedAssessments[0].id] : [])
+  const [classIds, setSelectedClassIds] = useState(() => correctedAssessments[0]?.classIds || [])
+  const [areaNames, setSelectedAreas] = useState(() => uniqueQuestionAreas(correctedAssessments[0]))
   const [selectedBandIds, setSelectedBandIds] = useState(() => performanceBands.map((item) => item.id))
   const [selectedQuestion, setSelectedQuestion] = useState(null)
   const [distributionChartMode, setDistributionChartMode] = useState('general')
   const [questionChartMode, setQuestionChartMode] = useState('general')
   const [studentSearch, setStudentSearch] = useState('')
-  const assessments = correctedAssessments.filter((item) => selectedAssessmentIds.includes(item.id))
-  const assessmentClosed = assessments.length > 0 && assessments.every(isAssessmentClosed)
-  const assessmentClasses = data.classes.filter((item) => assessments.some((assessment) => assessment.classIds.includes(item.id)))
-  const areas = [...new Set(assessments.flatMap(uniqueQuestionAreas))]
+  const [reportOpen, setReportOpen] = useState(false)
+  const selectedAssessmentIds = resolveSelection(assessmentIds, correctedAssessments.map((item) => item.id), correctedAssessments.slice(0, 1).map((item) => item.id))
+  const selectedAssessments = correctedAssessments.filter((item) => selectedAssessmentIds.includes(item.id))
+  const multipleAssessments = selectedAssessments.length > 1
+  const assessmentClosed = selectedAssessments.length > 0 && selectedAssessments.every(isAssessmentClosed)
+  const assessmentClassIds = [...new Set(selectedAssessments.flatMap((item) => item.classIds))]
+  const assessmentClasses = assessmentClassIds.map((id) => data.classes.find((item) => item.id === id)).filter(Boolean)
+  const areas = [...new Set(selectedAssessments.flatMap(uniqueQuestionAreas))]
+  const selectedClassIds = resolveSelection(classIds, assessmentClasses.map((item) => item.id))
+  const selectedAreas = resolveSelection(areaNames, areas)
   const allBandIds = performanceBands.map((item) => item.id)
 
-  const resultRows = useMemo(() => data.submissions
+  const resultRows = data.submissions
     .filter((submission) => selectedAssessmentIds.includes(submission.assessmentId))
     .map((submission) => {
-      const assessment = data.assessments.find((item) => item.id === submission.assessmentId)
-      if (!assessment) return null
       const student = data.students.find((item) => item.id === submission.studentId)
       const rowClassId = student?.classId || submission.classId
       const classroom = data.classes.find((item) => item.id === rowClassId)
-      const metrics = calculateSubmissionMetrics(submission, assessment, selectedAreas)
-      return metrics ? { ...submission, ...metrics, assessment, student, classroom, classId: rowClassId } : null
+      const rowAssessment = selectedAssessments.find((item) => item.id === submission.assessmentId)
+      const metrics = calculateSubmissionMetrics(submission, rowAssessment, selectedAreas)
+      return metrics ? { ...submission, ...metrics, student, classroom, assessment: rowAssessment, classId: rowClassId } : null
     })
-    .filter(Boolean), [selectedAreas, selectedAssessmentIds, data.assessments, data.classes, data.students, data.submissions])
+    .filter(Boolean)
 
   const classScopedRows = resultRows.filter((item) => selectedClassIds.includes(item.classId))
   const filteredRows = classScopedRows.filter((item) => matchesSelectedBands(item.score, selectedBandIds))
@@ -230,18 +219,18 @@ export function ResultsPage({ data, notify }) {
     .filter(({ item }) => !studentSearchQuery || normalize(`${item.student?.name} ${item.student?.registration}`).includes(studentSearchQuery))
   const avg = average(studentRows.map((item) => item.score))
   const detailedSubmissions = filteredRows.filter((item) => Array.isArray(item.answers))
-  const areaResults = calculateAreaResults(assessments, filteredRows).map((item, index) => ({ ...item, color: areaColors[index % areaColors.length] }))
+  const areaResults = calculateAreaResults(selectedAssessments, filteredRows).map((item, index) => ({ ...item, color: areaColors[index % areaColors.length] }))
   const selectedAreaResults = areaResults.filter((item) => selectedAreas.includes(item.area))
   const weakestArea = [...selectedAreaResults].filter((item) => item.attempts > 0).sort((first, second) => first.score - second.score)[0]
-  const questionResults = calculateQuestionResults(assessments, filteredRows, selectedAreas)
-  const selectedQuestionResult = questionResults.find((item) => item.id === selectedQuestion)
+  const questionResults = calculateQuestionResults(selectedAssessments, filteredRows, selectedAreas)
+  const selectedQuestionResult = questionResults.find((item) => item.key === selectedQuestion)
   const chartClasses = assessmentClasses
     .map((classroom, index) => ({ classroom, color: classroom.color || areaColors[index % areaColors.length] }))
     .filter(({ classroom }) => selectedClassIds.includes(classroom.id))
   const classQuestionResults = chartClasses.map(({ classroom, color }) => ({
     classroom,
     color,
-    results: new Map(calculateQuestionResults(assessments, filteredRows.filter((item) => item.classId === classroom.id), selectedAreas).map((item) => [item.id, item])),
+    results: new Map(calculateQuestionResults(selectedAssessments, filteredRows.filter((item) => item.classId === classroom.id), selectedAreas).map((item) => [item.key, item])),
   }))
 
   const classResults = assessmentClasses.map((classroom) => {
@@ -260,15 +249,15 @@ export function ResultsPage({ data, notify }) {
   }))
   const maxDistribution = Math.max(1, ...distribution.map((item) => item.count))
   const maxClassDistribution = Math.max(1, ...distribution.flatMap((item) => item.classes.map((classResult) => classResult.count)))
-  const expectedSubmissions = assessments.reduce((total, assessment) => total + data.students.filter((student) => assessment.classIds.includes(student.classId)
+  const eligibleStudents = selectedAssessments.reduce((sum, assessment) => sum + data.students.filter((student) => assessment.classIds.includes(student.classId)
     && student.status === 'Ativo' && selectedClassIds.includes(student.classId)).length, 0)
   const selectedClassNames = assessmentClasses.filter((item) => selectedClassIds.includes(item.id)).map((item) => item.name)
   const selectedBandLabels = performanceBands.filter((item) => selectedBandIds.includes(item.id)).map((item) => `${item.name} (${item.label})`)
   const hasFilters = selectedClassIds.length !== assessmentClasses.length || selectedAreas.length !== areas.length || selectedBandIds.length !== performanceBands.length
 
-  function changeAssessments(nextIds) {
-    setSelectedAssessmentIds(nextIds)
-    const nextAssessments = correctedAssessments.filter((item) => nextIds.includes(item.id))
+  function changeAssessments(nextAssessmentIds) {
+    setAssessmentIds(nextAssessmentIds)
+    const nextAssessments = correctedAssessments.filter((item) => nextAssessmentIds.includes(item.id))
     setSelectedClassIds([...new Set(nextAssessments.flatMap((item) => item.classIds))])
     setSelectedAreas([...new Set(nextAssessments.flatMap(uniqueQuestionAreas))])
     setSelectedBandIds(allBandIds)
@@ -282,11 +271,11 @@ export function ResultsPage({ data, notify }) {
 
   function toggleClass(classId) {
     const allClassIds = assessmentClasses.map((item) => item.id)
-    setSelectedClassIds((current) => toggleChartSelection(current, classId, allClassIds))
+    setSelectedClassIds(toggleChartSelection(selectedClassIds, classId, allClassIds))
   }
 
   function toggleArea(areaName) {
-    setSelectedAreas((current) => toggleChartSelection(current, areaName, areas))
+    setSelectedAreas(toggleChartSelection(selectedAreas, areaName, areas))
     setSelectedQuestion(null)
   }
 
@@ -303,7 +292,7 @@ export function ResultsPage({ data, notify }) {
 
   function exportResults() {
     const filterRows = [
-      ['Simulados', assessments.map((item) => item.title).join(', ')],
+      ['Simulados', selectedAssessments.map((item) => item.title).join(', ')],
       ['Turma', selectedClassIds.length === assessmentClasses.length ? 'Todas' : selectedClassNames.join(', ')],
       ['Área / componente', selectedAreas.length === areas.length ? 'Todas' : selectedAreas.join(', ')],
       ['Faixa de desempenho', selectedBandIds.length === performanceBands.length ? 'Todas' : selectedBandLabels.join(', ')],
@@ -319,29 +308,42 @@ export function ResultsPage({ data, notify }) {
       [], ['ANÁLISE POR ÁREA'], areaHeader, ...areaRows,
       [], ['ANÁLISE POR QUESTÃO'], questionHeader, ...questionRows,
     ].map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n')
-    downloadBlob(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }), `resultados-${assessments.length === 1 ? assessments[0].code : 'multiplos-simulados'}.csv`)
+    downloadBlob(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }), `resultados-${selectedAssessments.map((item) => item.code).join('-')}.csv`)
     notify('Relatório exportado', `${studentRows.length} resultado${studentRows.length !== 1 ? 's' : ''} do recorte atual foram incluídos.`)
   }
 
-  if (!assessments.length) return <div className="panel no-results"><BarChart3 size={32} /><h3>Ainda não há resultados</h3><p>Corrija ao menos uma folha para visualizar esta área.</p></div>
+  if (!selectedAssessments.length) return <div className="panel no-results"><BarChart3 size={32} /><h3>Ainda não há resultados</h3><p>Corrija ao menos uma folha para visualizar esta área.</p></div>
 
   return (
     <div className="page-stack results-page">
       <section className="results-filter-panel">
-        <header><div><span><SlidersHorizontal size={17} /></span><div><strong>Explorar resultados</strong><small>Combine os filtros ou clique diretamente nos gráficos.</small></div></div><Button variant="secondary" icon={Download} onClick={exportResults}>Exportar recorte</Button></header>
+        <header><div><span><SlidersHorizontal size={17} /></span><div><strong>Explorar resultados</strong><small>Combine os filtros ou clique diretamente nos gráficos.</small></div></div><div className="results-report-actions"><Button variant="secondary" icon={Download} onClick={exportResults}>Exportar recorte</Button><Button icon={FileText} disabled={!studentRows.length} onClick={() => setReportOpen(true)}>Gerar relatório</Button></div></header>
         <div className="results-filter-grid">
-          <MultiFilter label="SIMULADOS" options={correctedAssessments.map((item) => ({ value: item.id, label: item.title }))} selected={assessments.map((item) => item.id)} onChange={changeAssessments} allLabel="Todos os simulados" />
+          <MultiFilter label="SIMULADOS" options={correctedAssessments.map((item) => ({ value: item.id, label: item.title }))} selected={selectedAssessmentIds} onChange={changeAssessments} allLabel="Todos os simulados" />
           <MultiFilter label="TURMAS" options={assessmentClasses.map((item) => ({ value: item.id, label: `${item.name} · ${item.shift}` }))} selected={selectedClassIds} onChange={setSelectedClassIds} allLabel="Todas as turmas" />
           <MultiFilter label="ÁREAS / COMPONENTES" options={areas.map((item) => ({ value: item, label: item }))} selected={selectedAreas} onChange={changeAreas} allLabel="Todas as áreas" />
           <MultiFilter label="FAIXAS" options={performanceBands.map((item) => ({ value: item.id, label: `${item.name} · ${item.label}` }))} selected={selectedBandIds} onChange={setSelectedBandIds} allLabel="Todas as faixas" />
           <Button variant="ghost" icon={RotateCcw} disabled={!hasFilters} onClick={resetFilters}>Limpar filtros</Button>
         </div>
-        <div className="results-filter-summary"><Badge tone={hasFilters ? 'blue' : 'neutral'}>{studentRows.length} resultado{studentRows.length !== 1 ? 's' : ''}</Badge><span>{assessments.length} simulado(s) · {selectedClassIds.length === assessmentClasses.length ? 'Todas as turmas' : selectedClassNames.join(', ')} · {selectedAreas.length === areas.length ? 'Todas as áreas' : selectedAreas.join(', ')} · {selectedBandIds.length === performanceBands.length ? 'Todas as faixas' : selectedBandLabels.join(', ')}</span></div>
+        <div className="results-filter-summary"><Badge tone={hasFilters ? 'blue' : 'neutral'}>{studentRows.length} resultado{studentRows.length !== 1 ? 's' : ''}</Badge><span>{selectedAssessments.length} simulado{multipleAssessments ? 's' : ''} · {selectedClassIds.length === assessmentClasses.length ? 'Todas as turmas' : selectedClassNames.join(', ')} · {selectedAreas.length === areas.length ? 'Todas as áreas' : selectedAreas.join(', ')} · {selectedBandIds.length === performanceBands.length ? 'Todas as faixas' : selectedBandLabels.join(', ')}</span></div>
       </section>
 
+      <ResultsReportModal open={reportOpen} onClose={() => setReportOpen(false)} notify={notify} source={{
+        school: data.school,
+        assessments: selectedAssessments,
+        rows: filteredRows,
+        selectedAreas,
+        filters: [
+          ['Simulados', selectedAssessments.map((item) => item.title).join(', ')],
+          ['Turmas', selectedClassNames.join(', ')],
+          ['Áreas / componentes', selectedAreas.join(', ')],
+          ['Faixas de desempenho', selectedBandLabels.join(', ')],
+        ],
+      }} />
+
       <div className="stats-grid">
-        <StatCard label="Média do recorte" value={`${avg}%`} note={selectedAreas.length === areas.length ? 'média por correção' : `em ${selectedAreas.length} área${selectedAreas.length !== 1 ? 's' : ''}`} icon={Target} tone="green" />
-        <StatCard label="Correções no recorte" value={`${studentRows.length}`} note={selectedBandIds.length === performanceBands.length ? `de ${expectedSubmissions} correções esperadas` : `de ${classScopedRows.length} correções no recorte`} icon={UsersRound} tone="blue" />
+        <StatCard label="Média do recorte" value={`${avg}%`} note={selectedAreas.length === areas.length ? 'de aproveitamento' : `em ${selectedAreas.length} área${selectedAreas.length !== 1 ? 's' : ''}`} icon={Target} tone="green" />
+        <StatCard label="Participação" value={`${studentRows.length}`} note={selectedBandIds.length === performanceBands.length ? `de ${eligibleStudents} ${multipleAssessments ? 'participações possíveis' : 'alunos elegíveis'}` : `de ${classScopedRows.length} correções no recorte`} icon={UsersRound} tone="blue" />
         <StatCard label="Maior resultado" value={`${studentRows[0]?.score || 0}%`} note={studentRows[0]?.student?.name?.split(' ')[0] || '—'} icon={Award} tone="ochre" />
         <StatCard label={assessmentClosed ? 'Com ressalva' : 'Para revisão'} value={studentRows.filter((item) => item.status === 'Revisar').length} note={assessmentClosed ? 'registradas no encerramento' : 'folhas com revisão pendente'} icon={AlertTriangle} tone="purple" />
       </div>
@@ -357,18 +359,18 @@ export function ResultsPage({ data, notify }) {
       </section>
 
       <div className="results-grid">
-        <section className="panel class-comparison"><header className="panel-header"><div><h3>Comparativo por turma</h3><p>Clique para isolar uma turma; continue clicando para combinar outras</p></div></header><div className="horizontal-chart">{classResults.map((item) => <button type="button" className={cn(selectedClassIds.includes(item.classroom.id) && selectedClassIds.length < assessmentClasses.length && 'selected')} aria-pressed={selectedClassIds.includes(item.classroom.id) && selectedClassIds.length < assessmentClasses.length} key={item.classroom.id} onClick={() => toggleClass(item.classroom.id)}><span><strong>{item.classroom.name}</strong><small>{item.count} correções</small></span><span><i style={{ width: `${item.avg}%`, background: item.classroom.color }} /><em>{item.avg}%</em></span></button>)}</div></section>
+        <section className="panel class-comparison"><header className="panel-header"><div><h3>Comparativo por turma</h3><p>Clique para isolar uma turma; continue clicando para combinar outras</p></div></header><div className="horizontal-chart">{classResults.map((item) => <button type="button" className={cn(selectedClassIds.includes(item.classroom.id) && selectedClassIds.length < assessmentClasses.length && 'selected')} aria-pressed={selectedClassIds.includes(item.classroom.id) && selectedClassIds.length < assessmentClasses.length} key={item.classroom.id} onClick={() => toggleClass(item.classroom.id)}><span><strong>{item.classroom.name}</strong><small>{item.count} {multipleAssessments ? 'correções' : 'participantes'}</small></span><span><i style={{ width: `${item.avg}%`, background: item.classroom.color }} /><em>{item.avg}%</em></span></button>)}</div></section>
         <section className="panel distribution-panel">
           <header className="panel-header"><div><h3>Distribuição de desempenho</h3><p>Clique para isolar uma faixa; continue clicando para combinar outras</p></div><div className="chart-view-toggle" role="group" aria-label="Visualização da distribuição"><button type="button" className={distributionChartMode === 'general' ? 'active' : ''} aria-pressed={distributionChartMode === 'general'} onClick={() => setDistributionChartMode('general')}>Geral</button><button type="button" className={distributionChartMode === 'class' ? 'active' : ''} aria-pressed={distributionChartMode === 'class'} onClick={() => setDistributionChartMode('class')}>Por turma</button></div></header>
           {distributionChartMode === 'class' && <ClassChartLegend classes={chartClasses} />}
-          <div className={cn('distribution-chart', distributionChartMode === 'class' && 'by-class')}>{distribution.map((item) => <button type="button" className={cn(selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length && 'selected')} aria-pressed={selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length} style={distributionChartMode === 'class' ? { minWidth: `${Math.max(92, chartClasses.length * 24 + 16)}px` } : undefined} key={item.id} onClick={() => toggleBand(item.id)}><span className={cn('distribution-bar', distributionChartMode === 'class' && 'grouped')}>{distributionChartMode === 'general' ? <i style={{ height: item.count ? `${Math.max(7, item.count / maxDistribution * 100)}%` : 0, background: item.color }}><span>{item.count}</span></i> : item.classes.map((classResult) => <i key={classResult.classroom.id} title={`${classResult.classroom.name}: ${classResult.count} correção(ões)`} style={{ height: classResult.count ? `${Math.max(7, classResult.count / maxClassDistribution * 100)}%` : 0, background: classResult.color }}><span>{classResult.count}</span></i>)}</span><span className="distribution-label"><small>{item.label}</small><strong>{item.name}</strong></span></button>)}</div>
+          <div className={cn('distribution-chart', distributionChartMode === 'class' && 'by-class')}>{distribution.map((item) => <button type="button" className={cn(selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length && 'selected')} aria-pressed={selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length} style={distributionChartMode === 'class' ? { minWidth: `${Math.max(92, chartClasses.length * 24 + 16)}px` } : undefined} key={item.id} onClick={() => toggleBand(item.id)}><span className={cn('distribution-bar', distributionChartMode === 'class' && 'grouped')}>{distributionChartMode === 'general' ? <i style={{ height: item.count ? `${Math.max(7, item.count / maxDistribution * 100)}%` : 0, background: item.color }}><span>{item.count}</span></i> : item.classes.map((classResult) => <i key={classResult.classroom.id} title={`${classResult.classroom.name}: ${classResult.count} aluno${classResult.count !== 1 ? 's' : ''}`} style={{ height: classResult.count ? `${Math.max(7, classResult.count / maxClassDistribution * 100)}%` : 0, background: classResult.color }}><span>{classResult.count}</span></i>)}</span><span className="distribution-label"><small>{item.label}</small><strong>{item.name}</strong></span></button>)}</div>
         </section>
       </div>
 
       <section className="panel question-performance-panel">
-        <header className="panel-header"><div><h3>Desempenho por questão</h3><p>{selectedAreas.length === areas.length ? 'Questões dos simulados selecionados' : `Questões de ${selectedAreas.join(', ')}`} · clique em uma coluna para ver os detalhes</p></div><div className="chart-panel-actions"><div className="chart-view-toggle" role="group" aria-label="Visualização do desempenho por questão"><button type="button" className={questionChartMode === 'general' ? 'active' : ''} aria-pressed={questionChartMode === 'general'} onClick={() => setQuestionChartMode('general')}>Geral</button><button type="button" className={questionChartMode === 'class' ? 'active' : ''} aria-pressed={questionChartMode === 'class'} onClick={() => setQuestionChartMode('class')}>Por turma</button></div><Badge tone="neutral">{questionResults.length} questões</Badge></div></header>
+        <header className="panel-header"><div><h3>Desempenho por questão</h3><p>{selectedAreas.length === areas.length ? 'Todas as questões dos simulados selecionados' : `Questões de ${selectedAreas.join(', ')}`} · clique em uma coluna para ver os detalhes</p></div><div className="chart-panel-actions"><div className="chart-view-toggle" role="group" aria-label="Visualização do desempenho por questão"><button type="button" className={questionChartMode === 'general' ? 'active' : ''} aria-pressed={questionChartMode === 'general'} onClick={() => setQuestionChartMode('general')}>Geral</button><button type="button" className={questionChartMode === 'class' ? 'active' : ''} aria-pressed={questionChartMode === 'class'} onClick={() => setQuestionChartMode('class')}>Por turma</button></div><Badge tone="neutral">{questionResults.length} questões</Badge></div></header>
         {questionChartMode === 'class' && <ClassChartLegend classes={chartClasses} />}
-        {detailedSubmissions.length ? <><div className="question-chart-scroll"><div className={cn('question-chart', questionChartMode === 'class' && 'by-class')} style={{ minWidth: `${Math.max(520, questionResults.length * (questionChartMode === 'class' ? Math.max(44, chartClasses.length * 30 + 8) : 36))}px` }}>{questionResults.map((item) => <button type="button" className={cn(selectedQuestion === item.id && 'selected')} style={questionChartMode === 'class' ? { width: `${Math.max(44, chartClasses.length * 30 + 8)}px`, minWidth: `${Math.max(44, chartClasses.length * 30 + 8)}px` } : undefined} key={item.id} title={`${item.assessmentTitle} · Questão ${item.number}: ${item.score}% de acertos${item.cancelled ? ` · ${item.cancelled} cancelada(s)` : ''}`} onClick={() => setSelectedQuestion(selectedQuestion === item.id ? null : item.id)}><span className={cn(questionChartMode === 'class' && 'grouped')}>{questionChartMode === 'general' ? <><i style={{ height: `${item.score}%`, background: item.score < 40 ? '#b9675f' : item.score < 60 ? '#c69558' : item.score < 80 ? '#7b9b72' : '#3f7968' }} /><em>{item.score}%</em></> : classQuestionResults.map((classResult) => { const result = classResult.results.get(item.id); return <i key={classResult.classroom.id} title={`${classResult.classroom.name}: ${result?.attempts ? `${result.score}% de acertos` : 'sem respostas'}`} style={{ height: result?.attempts ? `${result.score}%` : 0, background: classResult.color }}><em>{result?.attempts ? `${result.score}%` : '—'}</em></i> })}</span><small>{assessments.length > 1 && `${item.assessmentCode || item.assessmentTitle} · `}Q{item.number}</small></button>)}</div></div>{selectedQuestionResult && <div className="question-selection-detail"><span><strong>{selectedQuestionResult.assessmentTitle} · Questão {selectedQuestionResult.number}</strong><small>{selectedQuestionResult.area}</small></span><div><b>{selectedQuestionResult.score}%</b><small>aproveitamento geral</small></div><div><b>{selectedQuestionResult.correct}</b><small>acertos</small></div><div><b>{selectedQuestionResult.wrong}</b><small>erros</small></div><div><b>{selectedQuestionResult.blank}</b><small>brancos</small></div><div><b>{selectedQuestionResult.cancelled}</b><small>canceladas</small></div><div><b>{selectedQuestionResult.review}</b><small>revisar</small></div></div>}</> : <div className="area-analysis-empty"><BarChart3 size={24} /><div><strong>Sem respostas detalhadas</strong><p>Não há dados por questão disponíveis para o recorte selecionado.</p></div></div>}
+        {detailedSubmissions.length ? <><div className="question-chart-scroll"><div className={cn('question-chart', questionChartMode === 'class' && 'by-class', multipleAssessments && 'multiple-assessments')} style={{ minWidth: `${Math.max(520, questionResults.length * (questionChartMode === 'class' ? Math.max(44, chartClasses.length * 30 + 8) : 36))}px` }}>{questionResults.map((item) => <button type="button" className={cn(selectedQuestion === item.key && 'selected')} style={questionChartMode === 'class' ? { width: `${Math.max(44, chartClasses.length * 30 + 8)}px`, minWidth: `${Math.max(44, chartClasses.length * 30 + 8)}px` } : undefined} key={item.key} title={`${item.assessmentTitle} · Questão ${item.number}: ${item.score}% de acertos${item.cancelled ? ` · ${item.cancelled} cancelada(s)` : ''}`} onClick={() => setSelectedQuestion(selectedQuestion === item.key ? null : item.key)}><span className={cn(questionChartMode === 'class' && 'grouped')}>{questionChartMode === 'general' ? <><i style={{ height: `${item.score}%`, background: item.score < 40 ? '#b9675f' : item.score < 60 ? '#c69558' : item.score < 80 ? '#7b9b72' : '#3f7968' }} /><em>{item.score}%</em></> : classQuestionResults.map((classResult) => { const result = classResult.results.get(item.key); return <i key={classResult.classroom.id} title={`${classResult.classroom.name}: ${result?.attempts ? `${result.score}% de acertos` : 'sem respostas'}`} style={{ height: result?.attempts ? `${result.score}%` : 0, background: classResult.color }}><em>{result?.attempts ? `${result.score}%` : '—'}</em></i> })}</span><small title={item.assessmentTitle}>{multipleAssessments && <span className="question-assessment-code">{item.assessmentCode || item.assessmentTitle}</span>}Q{item.number}</small></button>)}</div></div>{selectedQuestionResult && <div className="question-selection-detail"><span><strong>{multipleAssessments && <>{selectedQuestionResult.assessmentTitle} · </>}Questão {selectedQuestionResult.number}</strong><small>{selectedQuestionResult.area}</small></span><div><b>{selectedQuestionResult.score}%</b><small>aproveitamento geral</small></div><div><b>{selectedQuestionResult.correct}</b><small>acertos</small></div><div><b>{selectedQuestionResult.wrong}</b><small>erros</small></div><div><b>{selectedQuestionResult.blank}</b><small>brancos</small></div><div><b>{selectedQuestionResult.cancelled}</b><small>canceladas</small></div><div><b>{selectedQuestionResult.review}</b><small>revisar</small></div></div>}</> : <div className="area-analysis-empty"><BarChart3 size={24} /><div><strong>Sem respostas detalhadas</strong><p>Não há dados por questão disponíveis para o recorte selecionado.</p></div></div>}
       </section>
 
       <section className="pedagogical-insight">

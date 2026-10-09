@@ -19,14 +19,18 @@
     "test:omr": "node scripts/test-omr.mjs",
     "test:assessment": "node scripts/test-assessment.mjs",
     "test:network": "node scripts/test-network-analysis.mjs",
-    "test:full-assessment": "node scripts/test-full-assessment.mjs"
+    "test:results-report": "node scripts/test-results-report.mjs",
+    "test:full-assessment": "node scripts/test-full-assessment.mjs",
+    "test:results-filters": "node scripts/test-results-filters.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
+    "jspdf": "^4.2.1",
     "jsqr": "^1.4.0",
     "katex": "^0.18.4",
     "lucide-react": "^0.468.0",
     "pdfjs-dist": "^6.2.108",
+    "pptxgenjs": "^4.0.1",
     "qrcode": "^1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { FIXED_SHEET_LAYOUT, getSheetFormat } from '../src/lib/sheetFormat.js'
 import { analyzeMarks, analyzePrintedSheet, requireCurrentQr, bubbleCenter, CURRENT_MARKER_LAYOUT, detectSheetMarkers, MARKERS, SHEET } from '../src/lib/omr.js'
-import { CANCELLED_ANSWER, createRandomAnswerKey, getAnswerKeyForStudent, getAnswerKeyVersionForStudent } from '../src/lib/assessment.js'
+import { CANCELLED_ANSWER, createRandomAnswerKey, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, regradeAnswers } from '../src/lib/assessment.js'
 import { parseQrPayload, qrPayload } from '../src/lib/utils.js'
 
 function makeImage(width, height, background = [255, 255, 255]) {
@@ -109,6 +109,19 @@ function validateCompleteLayout(questionCount, optionCount, background, template
   }
 
   const result = analyzeMarks(image, { questionCount, optionCount }, answerKey, corners, {}, templateMarkers)
+  result.answers.forEach((answer, question) => {
+    answer.optionPositions.forEach((point, option) => {
+      const expected = projectTemplatePoint(bubbleCenter(question, option, questionCount), corners, templateMarkers)
+      if (Math.hypot(point.x - expected.x, point.y - expected.y) > 0.01 || point.radius <= layout.bubbleRadius * scale) {
+        throw new Error(`Posição da marcação visual incorreta na questão ${question + 1}, alternativa ${option}.`)
+      }
+    })
+  })
+  const changed = result.answers.map((answer, index) => index === 0 ? { ...answer, selected: [answer.expected === 'A' ? 'B' : 'A'] } : answer)
+  const regraded = regradeAnswers(changed, answerKey)
+  if (regraded.answers[0].status !== 'wrong' || regraded.answers[0].optionPositions !== result.answers[0].optionPositions) {
+    throw new Error('A revisão manual deve atualizar o resultado e preservar as posições das marcações.')
+  }
   if (result.answerSheetFormat !== layout.id || result.correct !== questionCount || result.wrong || result.blank || result.multiple || result.uncertain) {
     throw new Error(`Leitura completa falhou no formato ${layout.id} com ${questionCount} questões: ${JSON.stringify(result)}`)
   }

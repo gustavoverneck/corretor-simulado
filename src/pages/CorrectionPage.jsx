@@ -6,6 +6,7 @@ import {
   ArrowUp, ArrowDown, ArrowUpDown,
 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
+import { CorrectedSheetPreview } from '../components/CorrectedSheetPreview'
 import { analyzeAnswerSheet } from '../lib/omr'
 import { CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAreas'
@@ -1082,7 +1083,7 @@ export function CorrectionPage({ data, setData, notify }) {
         </header>
 
         <div className="scan-photo-workspace">
-          <aside className="image-preview-panel panel scan-photo-panel"><header><div><h3>Folha enviada</h3><p>Use a imagem como referência durante a conferência.</p></div><Badge tone={result.markersFound === 4 ? 'green' : 'ochre'}>{result.markersFound === 4 ? 'Enquadrada' : 'Enquadramento estimado'}</Badge></header><div className="scan-image"><img src={result.previewUrl} alt="Folha digitalizada" /><i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" /></div></aside>
+          <aside className="image-preview-panel panel scan-photo-panel"><header><div><h3>Folha enviada</h3><p>Use a imagem como referência durante a conferência.</p></div><Badge tone={result.markersFound === 4 ? 'green' : 'ochre'}>{result.markersFound === 4 ? 'Enquadrada' : 'Enquadramento estimado'}</Badge></header><div className="scan-image"><CorrectedSheetPreview result={result} /></div></aside>
 
           <aside className="scan-review-sidebar">
             <section className={cn('scan-verdict', !resultReady ? 'is-pending' : resultNeedsReview ? 'needs-review' : 'is-ready')}>
@@ -1140,7 +1141,7 @@ export function CorrectionPage({ data, setData, notify }) {
           {batchPreview.item.answers && <ResultBreakdown result={batchPreview.item} />}
 
           <div className="batch-page-review-grid">
-            <div className="batch-preview-image"><img src={batchPreview.item.previewUrl} alt={batch?.sourceType === 'images' ? batchPreview.item.pageFilename : `Página ${batchPreview.item.pageNumber} do PDF`} /></div>
+            <div className="batch-preview-image"><CorrectedSheetPreview key={batchPreview.index} result={batchPreview.item} label={batch?.sourceType === 'images' ? batchPreview.item.pageFilename : `Página ${batchPreview.item.pageNumber} do PDF`} /></div>
             {batchPreview.item.answers && batchPreview.assessment && <div className="answer-review-panel panel">
               <header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>Você pode ajustar a alternativa antes de fechar.</p></div><Badge tone={batchPreview.needsReview ? 'ochre' : 'green'}>{batchPreview.item.answers.length} questões</Badge></header>
               <div className="answer-filters"><button className={batchFilter === 'all' ? 'active' : ''} onClick={() => setBatchFilter('all')}>Todas <span>{batchPreview.item.answers.length}</span></button><button className={batchFilter === 'correct' ? 'active' : ''} onClick={() => setBatchFilter('correct')}>Acertos <span>{batchPreview.item.correct}</span></button><button className={batchFilter === 'wrong' ? 'active' : ''} onClick={() => setBatchFilter('wrong')}>Erros <span>{batchPreview.item.wrong}</span></button><button className={batchFilter === 'blank' ? 'active' : ''} onClick={() => setBatchFilter('blank')}>Brancos <span>{batchPreview.item.blank}</span></button><button className={batchFilter === 'multiple' ? 'active' : ''} onClick={() => setBatchFilter('multiple')}>Múltiplas <span>{batchPreview.item.multiple}</span></button><button className={batchFilter === 'uncertain' ? 'active' : ''} onClick={() => setBatchFilter('uncertain')}>Incertas <span>{batchPreview.item.uncertain}</span></button><button className={batchFilter === 'cancelled' ? 'active' : ''} onClick={() => setBatchFilter('cancelled')}>Canceladas <span>{batchPreview.item.cancelled || 0}</span></button></div>

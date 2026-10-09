@@ -360,6 +360,11 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
       annulled,
       cancelled: isCancelled,
       status,
+      optionPositions: scores.map((item) => ({
+        x: item.center.x,
+        y: item.center.y,
+        radius: layout.bubbleRadius * sheetScale * 1.3,
+      })),
       scores: scores.map((item) => Number(item.value.toFixed(3))),
       colorScores: scores.map((item) => Number(item.color.toFixed(3))),
       contrastScores: scores.map((item) => Number(Math.max(item.rowContrast, item.localContrast).toFixed(3))),
@@ -456,6 +461,8 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
     markerLayout: CURRENT_MARKER_LAYOUT,
     alignmentMode: detectedMarkers ? 'answer-grid-markers' : 'estimated',
     ...marks,
+    previewWidth: data.width,
+    previewHeight: data.height,
     previewUrl: canvas.toDataURL('image/jpeg', 0.82),
     confidence: Math.max(48, Math.min(99, Math.round(55 + markersFound * 7 + (qrIdentity ? 15 : 0) - marks.uncertain * 1.5))),
   }
