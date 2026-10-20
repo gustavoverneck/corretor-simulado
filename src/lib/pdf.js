@@ -3,6 +3,8 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 GlobalWorkerOptions.workerSrc = pdfWorker
 
+export { getDocument }
+
 function canvasToFile(canvas, filename) {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {

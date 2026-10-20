@@ -21,6 +21,10 @@ export const mappingSources = {
 }
 
 export async function readSegesFile(file) {
+  if (/\.pdf$/i.test(file.name)) {
+    const [{ readSegesPdf }, { getDocument }] = await Promise.all([import('./segesPdf.js'), import('./pdf.js')])
+    return readSegesPdf(file, getDocument)
+  }
   if (/\.csv$/i.test(file.name)) {
     const matrix = parseCsv(await file.text())
     const [headerRow = [], ...dataRows] = matrix.filter((row) => row.some((cell) => String(cell).trim()))
@@ -140,7 +144,7 @@ export function resolveSegesValue(row, mapping, key, options = {}) {
 }
 
 export function isSegesStatusEligible(status) {
-  return ['sem status', 'em transferencia'].includes(normalize(status))
+  return ['sem status', 'em transferencia', 'matriculado'].includes(normalize(status))
 }
 
 export function isSegesAuxiliaryRow(row) {

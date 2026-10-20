@@ -15,14 +15,14 @@ export function SegesImportPage({ data, setData, setPage, notify }) {
 
   async function selectFile(file) {
     if (!file) return
-    if (!/\.(xlsx|csv)$/i.test(file.name)) {
-      notify('Formato não reconhecido', 'Envie um relatório CSV ou XLSX. Arquivos XLS antigos devem ser salvos como XLSX.', 'warning')
+    if (!/\.(xlsx|csv|pdf)$/i.test(file.name)) {
+      notify('Formato não reconhecido', 'Envie um relatório CSV, XLSX ou PDF de alunos por turma. Arquivos XLS antigos devem ser salvos como XLSX.', 'warning')
       return
     }
     setLoading(true); setSummary(null)
     try {
       const parsed = await readSegesFile(file)
-      if (!parsed.rows.length) throw new Error('A primeira planilha não contém registros.')
+      if (!parsed.rows.length) throw new Error('O relatório não contém registros.')
       setFileInfo({ ...parsed, name: file.name, size: file.size })
       setMapping(autoMapHeaders(parsed.headers))
       setManualShift('')
@@ -70,12 +70,12 @@ export function SegesImportPage({ data, setData, setPage, notify }) {
     <div className="page-stack seges-page">
       <div className="seges-intro">
         <div className="seges-logo"><Database size={25} /><span>ES</span></div>
-        <div><div className="eyebrow">IMPORTAÇÃO LOCAL</div><h2>Relatório de alunos do SEGES</h2><p>Importe a planilha que você exportou do Sistema Estadual de Gestão Escolar. O Sistema de Avaliações organiza matrículas e cria as turmas automaticamente.</p></div>
+        <div><div className="eyebrow">IMPORTAÇÃO LOCAL</div><h2>Relatório de alunos do SEGES</h2><p>Importe a planilha ou o PDF de alunos por turma exportado do Sistema Estadual de Gestão Escolar. O Sistema de Avaliações organiza matrículas e cria as turmas automaticamente.</p></div>
         <Badge tone="blue"><ShieldCheck size={14} /> Sem conexão externa</Badge>
       </div>
 
       <div className="import-stepper">
-        <div className={cn('active', fileInfo && 'done')}><span>{fileInfo ? <CheckCircle2 /> : '1'}</span><p><strong>Enviar arquivo</strong><small>CSV ou Excel</small></p></div><i />
+        <div className={cn('active', fileInfo && 'done')}><span>{fileInfo ? <CheckCircle2 /> : '1'}</span><p><strong>Enviar arquivo</strong><small>CSV, Excel ou PDF</small></p></div><i />
         <div className={cn(fileInfo && 'active', summary && 'done')}><span>{summary ? <CheckCircle2 /> : '2'}</span><p><strong>Conferir dados</strong><small>Colunas e prévia</small></p></div><i />
         <div className={cn(summary && 'active')}><span>3</span><p><strong>Concluir</strong><small>Resumo da atualização</small></p></div>
       </div>
@@ -83,17 +83,17 @@ export function SegesImportPage({ data, setData, setPage, notify }) {
       {!fileInfo ? (
         <div className="import-layout">
           <section className="panel import-upload-card">
-            <div className="card-heading"><span><FileSpreadsheet size={22} /></span><div><h3>Selecione o relatório exportado</h3><p>A primeira linha deve conter os nomes das colunas.</p></div></div>
+            <div className="card-heading"><span><FileSpreadsheet size={22} /></span><div><h3>Selecione o relatório exportado</h3><p>Planilhas com cabeçalhos ou PDF com texto selecionável de alunos por turma.</p></div></div>
             <div className={cn('import-drop-zone', dragging && 'dragging', loading && 'loading')} onDragOver={(event) => { event.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files[0]) }}>
-              {loading ? <><RefreshCw className="spin" size={30} /><h3>Lendo a planilha...</h3></> : <><span><UploadCloud size={29} /></span><h3>Arraste o arquivo do SEGES aqui</h3><p>ou escolha no seu computador</p><Button variant="secondary" onClick={() => inputRef.current?.click()}>Selecionar arquivo</Button><small>.CSV ou .XLSX · máximo 20 MB</small></>}
-              <input ref={inputRef} hidden type="file" accept=".csv,.xlsx" onChange={(event) => selectFile(event.target.files[0])} />
+              {loading ? <><RefreshCw className="spin" size={30} /><h3>Lendo o relatório...</h3></> : <><span><UploadCloud size={29} /></span><h3>Arraste o arquivo do SEGES aqui</h3><p>ou escolha no seu computador</p><Button variant="secondary" onClick={() => inputRef.current?.click()}>Selecionar arquivo</Button><small>.CSV, .XLSX ou .PDF · máximo 20 MB</small></>}
+              <input ref={inputRef} hidden type="file" accept=".csv,.xlsx,.pdf" onChange={(event) => selectFile(event.target.files[0])} />
             </div>
             <div className="template-download"><FileSpreadsheet size={18} /><p><strong>Quer conferir o formato antes?</strong><small>Baixe um arquivo modelo com as colunas reconhecidas.</small></p><button onClick={downloadTemplate}><Download size={16} /> Baixar modelo</button></div>
           </section>
 
           <aside className="panel seges-howto">
             <h3>Como obter o arquivo</h3>
-            <ol><li><span>1</span><p>Acesse o <strong>SEGES</strong> com seu acesso institucional.</p></li><li><span>2</span><p>Abra a área de <strong>Relatórios</strong> e gere a relação nominal de alunos.</p></li><li><span>3</span><p>Filtre o <strong>ano letivo, escola e situação da matrícula</strong>.</p></li><li><span>4</span><p>Exporte em <strong>Excel ou CSV</strong> e envie ao lado.</p></li></ol>
+            <ol><li><span>1</span><p>Acesse o <strong>SEGES</strong> com seu acesso institucional.</p></li><li><span>2</span><p>Abra a área de <strong>Relatórios</strong> e gere a relação nominal de alunos.</p></li><li><span>3</span><p>Filtre o <strong>ano letivo, escola e situação da matrícula</strong>.</p></li><li><span>4</span><p>Exporte em <strong>Excel, CSV ou PDF de alunos por turma</strong> e envie ao lado.</p></li></ol>
             <div className="howto-note"><Info size={17} /><p>O formato com Número, Nome do aluno, Status, Nome da turma e Data da captura é reconhecido. Turno, escola e INEP podem vir das configurações.</p></div>
           </aside>
         </div>
@@ -109,7 +109,7 @@ export function SegesImportPage({ data, setData, setPage, notify }) {
             })}
           </div>
           <div className="data-preview"><h3>Prévia dos registros <span>primeiras 5 linhas</span></h3><div className="table-wrap"><table><thead><tr><th>MATRÍCULA</th><th>NOME</th><th>TURMA</th><th>SÉRIE</th><th>TURNO</th><th>SITUAÇÃO</th><th>IMPORTAÇÃO</th></tr></thead><tbody>{fileInfo.rows.slice(0, 5).map((row, index) => { const status = resolveSegesValue(row, mapping, 'status', resolverOptions); const eligible = isSegesRowEligible(row, mapping, resolverOptions); return <tr key={index}><td>{resolveSegesValue(row, mapping, 'registration', resolverOptions) || '—'}</td><td><strong>{resolveSegesValue(row, mapping, 'name', resolverOptions) || '—'}</strong></td><td>{resolveSegesValue(row, mapping, 'className', resolverOptions) || '—'}</td><td>{resolveSegesValue(row, mapping, 'grade', resolverOptions) || '—'}</td><td>{resolveSegesValue(row, mapping, 'shift', resolverOptions) || '—'}</td><td>{status || '—'}</td><td><Badge tone={eligible ? 'green' : 'neutral'}>{eligible ? 'Incluir' : 'Ignorar'}</Badge></td></tr> })}</tbody></table></div></div>
-          <footer className="mapping-footer"><div><ShieldCheck size={18} /><p><strong>Filtro automático do SEGES</strong>Somente “Sem status” e “Em transferência” são incluídos; transferidos são ignorados. Sem matrícula, o app cria um número interno.</p></div><Button variant="ghost" onClick={clearFile}>Trocar arquivo</Button><Button icon={ArrowRight} onClick={confirmImport}>Importar {importableRows.length} aluno{importableRows.length !== 1 ? 's' : ''}</Button></footer>
+          <footer className="mapping-footer"><div><ShieldCheck size={18} /><p><strong>Filtro automático do SEGES</strong>“Matriculado”, “Sem status” e “Em transferência” são incluídos como ativos; “Novato” no PDF vira “Matriculado”. Transferidos são ignorados. Sem matrícula, o app cria um número interno.</p></div><Button variant="ghost" onClick={clearFile}>Trocar arquivo</Button><Button icon={ArrowRight} onClick={confirmImport}>Importar {importableRows.length} aluno{importableRows.length !== 1 ? 's' : ''}</Button></footer>
         </section>
       ) : (
         <section className="panel import-success">

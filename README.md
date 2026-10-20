@@ -50,10 +50,14 @@ O caminho operacional adotado é o relatório nominal exportado pelo usuário in
 
 1. gerar no SEGES a relação de alunos da escola para o ano letivo atual;
 2. gerar a relação com `Número`, `Nome do aluno`, `Status`, `Nome da turma` e `Data e hora da captura`;
-3. exportar em CSV ou XLSX;
+3. exportar em CSV, XLSX ou PDF com texto selecionável do **Relatório de Alunos por Turma**;
 4. abrir **Importar SEGES**, enviar o arquivo, definir o turno, conferir o mapeamento e concluir.
 
-Nome, turma e status são os campos obrigatórios; o número sequencial do relatório não é tratado como matrícula. A série pode ser obtida do primeiro dígito da turma (`1`, `2` ou `3`), o turno pode ser definido manualmente e escola/INEP podem usar os dados cadastrados em **Configurações → Escola**. Somente alunos com status `Sem status` ou `Em transferência` são incluídos; registros `Transferido` e linhas auxiliares são ignorados. Turmas inexistentes são criadas e, sem matrícula externa, os alunos são conciliados por nome e turma.
+Nome, turma e status são os campos obrigatórios; o número sequencial do relatório não é tratado como matrícula. A série pode ser obtida do primeiro dígito da turma (`1`, `2` ou `3`), o turno pode ser definido manualmente e escola/INEP podem usar os dados cadastrados em **Configurações → Escola**. Alunos com status `Matriculado`, `Sem status` ou `Em transferência` são incluídos como `Ativo`; registros `Transferido` e linhas auxiliares são ignorados. Turmas inexistentes são criadas e, sem matrícula externa, os alunos são conciliados por nome e turma.
+
+No PDF, o ID do aluno é usado como matrícula, os nomes quebrados em várias linhas são reunidos e a turma é mantida nas páginas de continuação. `Novato` é convertido em `Matriculado`, mantendo a situação original na coluna `Situação no PDF`. Registros idênticos repetidos no relatório são removidos. Telefones, documentos e datas de nascimento não são importados. PDFs digitalizados sem texto precisam ser convertidos por OCR antes do envio. Defina o turno na conferência antes de concluir.
+
+Para extrair CSVs localmente: `node scripts/extract-seges-pdf.mjs out/alunos "caminho/relatório.pdf"`. Arquivos com “matutino” ou “vespertino” no nome recebem o turno correspondente; nos demais casos, defina o turno ao importar o CSV.
 
 Documentos da SEDU confirmam que o SEGES concentra dados de alunos, turmas e escolas e disponibiliza relatórios. Uma especificação oficial também descreve o consumo de um relatório de alunos do SEGES e relaciona campos como matrícula, nome, tipo de ensino, série, turno e escola.
 
