@@ -642,6 +642,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const [assessmentLifecycleId, setAssessmentLifecycleId] = useState(null)
   const [printAssessmentId, setPrintAssessmentId] = useState(initialPrintAssessment?.id || null)
   const [printClassIds, setPrintClassIds] = useState(initialPrintAssessment?.classIds || [])
+  const [zipExportProgress, setZipExportProgress] = useState(null)
   const [blankPrintVersionId, setBlankPrintVersionId] = useState('')
   const [baseQuestionCount, setQuestionCount] = useState(40)
   const [questionCountInput, setQuestionCountInput] = useState('40')
@@ -848,7 +849,6 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   function closePrint() {
     setPrintAssessmentId(null)
     setPrintClassIds([])
-    setHidePrintRegistration(false)
     setPrintDocumentMode('answer-sheet')
     setPrintPreviewIndex(0)
     setPrintPreviewZoom(PRINT_PREVIEW_DEFAULT_ZOOM)
@@ -924,6 +924,28 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
     document.body.dataset.sheetPrintMode = mode
     window.print()
     window.setTimeout(() => delete document.body.dataset.sheetPrintMode, 0)
+  }
+
+  async function downloadAllClassesZip() {
+    if (!printAssessment || zipExportProgress) return
+    setZipExportProgress({ completed: 0, total: 0, classroom: '' })
+    try {
+      const { exportAssessmentClassesZip } = await import('../lib/assessmentExport')
+      const result = await exportAssessmentClassesZip({
+        assessment: printAssessment,
+        classes: data.classes,
+        students: data.students,
+        school: data.school,
+        includePaper: printDocumentMode === 'assessment',
+        onProgress: setZipExportProgress,
+      })
+      downloadBlob(result.blob, result.filename)
+      notify('ZIP gerado', `${result.classCount} PDFs, um por turma, com ${result.studentCount} alunos. Turmas sem alunos ativos não geram arquivo.`)
+    } catch (error) {
+      notify('Não foi possível gerar o ZIP', error.message || 'Tente novamente.', 'warning')
+    } finally {
+      setZipExportProgress(null)
+    }
   }
 
   function exportLatex() {
@@ -1604,6 +1626,10 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
               <div className="print-sheet-options">
                 <h4>Documento para impressão</h4>
                 {printAssessment.contentMode === 'full' && <div className="print-document-mode"><button type="button" className={printDocumentMode === 'assessment' ? 'active' : ''} onClick={() => changePrintDocumentMode('assessment')}><FileText size={16} />Folha + prova</button><button type="button" className={printDocumentMode === 'answer-sheet' ? 'active' : ''} onClick={() => changePrintDocumentMode('answer-sheet')}><ClipboardList size={16} />Somente folhas</button></div>}
+              </div>
+              <div className="print-zip-export">
+                <Button variant="secondary" size="sm" icon={Download} disabled={Boolean(zipExportProgress) || !data.students.some((student) => printAssessment.classIds.includes(student.classId) && student.status === 'Ativo')} onClick={downloadAllClassesZip}>{zipExportProgress ? 'Gerando ZIP…' : 'Baixar todas as turmas (.zip)'}</Button>
+                <p aria-live="polite">{zipExportProgress ? `${zipExportProgress.completed} de ${zipExportProgress.total} alunos${zipExportProgress.classroom ? ` · ${zipExportProgress.classroom}` : ''}` : 'Um PDF por turma, com os alunos ativos em ordem alfabética. Inclui todas as turmas deste simulado.'}</p>
               </div>
               <div className="blank-sheet-note"><UserPlus size={17} /><p><strong>Aluno fora da lista?</strong>Use “Salvar folha sem aluno”. Nome e turma poderão ser preenchidos à mão, e o cadastro será feito durante a correção.</p></div>
               {blankPrintVersions.length > 1 && <Field label="Versão da folha sem aluno"><select value={blankPrintVersion.id} onChange={(event) => setBlankPrintVersionId(event.target.value)}>{blankPrintVersions.map((version) => <option key={version.id} value={version.id}>{version.label} · {version.questionCount ?? version.answerKey.length} questões</option>)}</select></Field>}

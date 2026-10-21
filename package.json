@@ -25,7 +25,8 @@
     "test:results-report": "node scripts/test-results-report.mjs",
     "test:full-assessment": "node scripts/test-full-assessment.mjs",
     "test:results-filters": "node scripts/test-results-filters.mjs",
-    "test:version-structure": "node scripts/test-version-structure.mjs"
+    "test:version-structure": "node scripts/test-version-structure.mjs",
+    "test:assessment-export": "node scripts/test-assessment-export.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
@@ -38,7 +39,9 @@
     "qrcode": "^1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "read-excel-file": "^9.3.5"
+    "read-excel-file": "^9.3.5",
+    "fflate": "^0.8.3",
+    "html2canvas": "^1.4.1"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.11.2",
