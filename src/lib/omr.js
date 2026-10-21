@@ -2,6 +2,7 @@ import jsQR from 'jsqr'
 import { getSheetLayout, getSheetFormat, getLegacySheetLayout, validateSheetFormat } from './sheetFormat.js'
 import { CANCELLED_ANSWER, summarizeAnswers } from './assessment.js'
 import { parseQrPayload } from './utils.js'
+import { resolveOmrSettings } from './omrSettings.js'
 
 export const SHEET = { width: 794, height: 1123 }
 export const MARKERS = {
@@ -271,8 +272,7 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   const interiorRadius = layout.bubbleRadius * 0.82 * sheetScale
   const letterRadius = layout.bubbleRadius * 0.38 * sheetScale
   const colorSampleRadius = Math.max(2.4, layout.bubbleRadius * 0.76 * sheetScale)
-  const markThreshold = Number(settings.markThreshold ?? 0.38)
-  const ambiguityThreshold = Number(settings.ambiguityThreshold ?? 0.22)
+  const { markThreshold, ambiguityThreshold } = resolveOmrSettings(settings)
   const contrastThreshold = Math.max(0.06, Math.min(0.13, markThreshold * 0.22))
   const possibleContrastThreshold = Math.min(contrastThreshold * 0.92, Math.max(0.045, ambiguityThreshold * 0.34))
   const colorThreshold = Number(settings.colorThreshold ?? 0.065)
@@ -549,4 +549,14 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
   const { data, canvas } = await imageDataFromFile(file)
   const result = analyzeSheetImage(data, assessment, fallbackIdentity, settings, resolveContext)
   return { ...result, previewUrl: canvas.toDataURL('image/jpeg', 0.82) }
+}
+
+export async function prepareOmrCalibration(file) {
+  const { data, canvas } = await imageDataFromFile(file)
+  const qr = readSheetQr(data)
+  const identity = requireCurrentQr(qr?.data)
+  if (!validateSheetFormat(identity.sheetFormat)) throw new Error('Para testar os ajustes, use uma folha com QR Code no formato atual (v3 ou v4).')
+  const markers = detectSheetMarkers(data, qr?.location)
+  if (!markers) throw new Error('Os quatro marcadores precisam estar completos e nítidos para testar a leitura.')
+  return { pixels: data, corners: markers.corners, format: identity.sheetFormat, preview: canvas.toDataURL('image/jpeg', 0.9), name: file.name }
 }

@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict'
+import { createCanvas } from '@napi-rs/canvas'
+import { DEFAULT_OMR_SETTINGS, resolveOmrSettings } from '../src/lib/omrSettings.js'
+import { createOmrExamples, analyzeOmrCalibration, calibrationStatus } from '../src/lib/omrCalibration.js'
+
+assert.deepEqual(resolveOmrSettings(), DEFAULT_OMR_SETTINGS)
+assert.equal(resolveOmrSettings({ markThreshold: NaN }).markThreshold, 0.38)
+assert.equal(resolveOmrSettings({ ambiguityThreshold: 0.22 }).ambiguityThreshold, 0.22, 'Preservar ajustes antigos')
+assert.equal(resolveOmrSettings({ markThreshold: 5 }).markThreshold, 0.6)
+assert.equal(resolveOmrSettings({ ambiguityThreshold: -1 }).ambiguityThreshold, 0.1)
+const examples = createOmrExamples(createCanvas)
+const photoProfile = analyzeOmrCalibration(examples, DEFAULT_OMR_SETTINGS)
+assert.deepEqual(photoProfile.counts, { marked: 3, uncertain: 2, multiple: 1, blank: 2 })
+assert.equal(calibrationStatus(photoProfile.answers[0]), 'marked')
+assert.equal(calibrationStatus(photoProfile.answers[2]), 'uncertain', 'Manter marca fraca para revisão')
+assert.deepEqual(photoProfile.answers[3].selected, ['A', 'E'])
+assert.equal(calibrationStatus(photoProfile.answers[3]), 'multiple')
+assert.deepEqual(photoProfile.answers[4].selected, ['A', 'C'], 'Não ocultar a segunda marca fraca')
+assert.equal(calibrationStatus(photoProfile.answers[4]), 'uncertain')
+assert.equal(calibrationStatus(photoProfile.answers[6]), 'blank')
+assert.equal(calibrationStatus(photoProfile.answers[7]), 'blank', 'Filtrar sombra sem tinta')
+const cautious = analyzeOmrCalibration(examples, { markThreshold: 0.38, ambiguityThreshold: 0.22 })
+assert.equal(calibrationStatus(cautious.answers[7]), 'uncertain')
+assert.equal(cautious.counts.uncertain, 3)
+const stricter = analyzeOmrCalibration(examples, { markThreshold: 0.6, ambiguityThreshold: 0.25 })
+assert.equal(calibrationStatus(stricter.answers[1]), 'uncertain', 'Rigor maior muda a leitura de uma marca clara')
+const higherZone = analyzeOmrCalibration(examples, { markThreshold: 0.38, ambiguityThreshold: 0.35 })
+assert.equal(calibrationStatus(higherZone.answers[2]), 'blank', 'Limiar alto pode deixar marca fraca em branco')
+assert.equal(calibrationStatus(higherZone.answers[4]), 'marked')
+assert.equal(calibrationStatus(higherZone.answers[3]), 'multiple', 'Marcas duplas nítidas permanecem múltiplas')
+console.log('Configuração e prévia validadas com o leitor real: rigor, zona, marcas claras, parciais, duplas, sombras e conservação dos ajustes antigos.')

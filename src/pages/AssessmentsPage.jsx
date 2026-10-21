@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff, Download, FileSpreadsheet, LockKeyhole, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown, FileCode2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
+import { Upload, Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff, Download, FileSpreadsheet, LockKeyhole, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown, FileCode2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { AnswerSheet, PrintableSheets } from '../components/AnswerSheet'
 import { FullAssessmentEditor } from '../components/FullAssessmentEditor'
@@ -631,6 +631,8 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [createOpen, setCreateOpen] = useState(false)
+  const [importingAssessments, setImportingAssessments] = useState(false)
+  const importAssessmentsInput = useRef(null)
   const [editingAssessmentId, setEditingAssessmentId] = useState(null)
   const [editingStructureSignature, setEditingStructureSignature] = useState(null)
   const [editingAnswerGenerationSignature, setEditingAnswerGenerationSignature] = useState(null)
@@ -783,6 +785,22 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
     resetAssessmentEditor()
     setPendingAssessmentRevision(null)
     setCreateOpen(true)
+  }
+
+  async function importAssessments(file) {
+    if (!file || importingAssessments) return
+    setImportingAssessments(true)
+    try {
+      const payload = JSON.parse(await file.text())
+      const { importAssessmentPackage } = await import('../lib/assessmentImport')
+      const result = importAssessmentPackage(data, payload)
+      setData((current) => importAssessmentPackage(current, payload).state)
+      notify('Importação concluída', `${result.added} simulado(s) adicionado(s)${result.skipped ? ` · ${result.skipped} já existente(s), sem duplicação` : ''}. Os demais cadastros foram preservados.`)
+    } catch (error) {
+      notify('Não foi possível importar os simulados', error.message || 'Confira o arquivo JSON.', 'warning')
+    } finally {
+      setImportingAssessments(false)
+    }
   }
 
   function closeAssessmentEditor() {
@@ -1432,7 +1450,11 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
           <label className="search-input"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar simulado" /></label>
           <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos os status</option><option>Pronto para aplicar</option><option>Correção em andamento</option><option value="closed">Encerrados</option></select>
         </div>
-        <Button icon={Plus} onClick={openNewAssessmentEditor}>Novo simulado</Button>
+        <div className="assessment-create-actions">
+          <input ref={importAssessmentsInput} type="file" accept=".json,application/json" hidden aria-label="Arquivo de simulados para importar" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; importAssessments(file) }} />
+          <Button variant="secondary" icon={Upload} disabled={importingAssessments} onClick={() => importAssessmentsInput.current?.click()}>{importingAssessments ? 'Importando…' : 'Importar simulados'}</Button>
+          <Button icon={Plus} onClick={openNewAssessmentEditor}>Novo simulado</Button>
+        </div>
       </div>
 
       <div className="assessment-summary">

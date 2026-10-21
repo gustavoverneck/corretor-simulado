@@ -27,7 +27,10 @@
     "test:results-filters": "node scripts/test-results-filters.mjs",
     "test:version-structure": "node scripts/test-version-structure.mjs",
     "test:assessment-export": "node scripts/test-assessment-export.mjs",
-    "test:pdf-pages": "node scripts/test-pdf-pages.mjs"
+    "test:pdf-pages": "node scripts/test-pdf-pages.mjs",
+    "test:assessment-import": "node scripts/test-assessment-import.mjs",
+    "test:omr-settings": "node scripts/test-omr-settings.mjs",
+    "test:omr-settings-ui": "node scripts/test-omr-settings-ui.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",

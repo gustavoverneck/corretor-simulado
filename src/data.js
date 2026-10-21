@@ -1,3 +1,5 @@
+import { DEFAULT_OMR_SETTINGS } from './lib/omrSettings.js'
+
 export const initialClasses = [
   { id: 'class-9a', name: '9º A', grade: '9º ano', shift: 'Matutino', year: 2026, color: '#4d7c6f' },
   { id: 'class-9b', name: '9º B', grade: '9º ano', shift: 'Matutino', year: 2026, color: '#748b5f' },
@@ -146,7 +148,7 @@ export function createInitialState() {
     assessments: initialAssessments,
     submissions: makeSubmissions(students),
     settings: {
-      omr: { markThreshold: 0.38, ambiguityThreshold: 0.22 },
+      omr: { ...DEFAULT_OMR_SETTINGS },
     },
     importHistory: [
       {
