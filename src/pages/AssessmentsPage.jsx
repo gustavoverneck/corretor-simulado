@@ -618,7 +618,6 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const [assessmentLifecycleId, setAssessmentLifecycleId] = useState(null)
   const [printAssessmentId, setPrintAssessmentId] = useState(initialPrintAssessment?.id || null)
   const [printClassIds, setPrintClassIds] = useState(initialPrintAssessment?.classIds || [])
-  const [hidePrintRegistration, setHidePrintRegistration] = useState(false)
   const [questionCount, setQuestionCount] = useState(40)
   const [questionCountInput, setQuestionCountInput] = useState('40')
   const [optionCount, setOptionCount] = useState(4)
@@ -1522,11 +1521,10 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
               <h3>Turmas incluídas</h3><p>Selecione quem receberá esta versão.</p>
               {printAssessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); const count = data.students.filter((student) => student.classId === classId && student.status === 'Ativo').length; const checked = printClassIds.includes(classId); return <label key={classId} className="print-class-option"><input type="checkbox" checked={checked} onChange={() => togglePrintClass(classId)} /><span><strong>{classroom?.name}</strong><small>{count} alunos · {classroom?.shift}</small></span></label> })}
               <div className="print-sheet-options">
-                <h4>Dados visíveis</h4>
+                <h4>Documento para impressão</h4>
                 {printAssessment.contentMode === 'full' && <div className="print-document-mode"><button type="button" className={printDocumentMode === 'assessment' ? 'active' : ''} onClick={() => changePrintDocumentMode('assessment')}><FileText size={16} />Folha + prova</button><button type="button" className={printDocumentMode === 'answer-sheet' ? 'active' : ''} onClick={() => changePrintDocumentMode('answer-sheet')}><ClipboardList size={16} />Somente folhas</button></div>}
-                <label className="print-privacy-option"><input type="checkbox" checked={hidePrintRegistration} onChange={(event) => setHidePrintRegistration(event.target.checked)} /><span><strong>Ocultar matrícula</strong><small>O número de controle não aparecerá na folha.</small></span></label>
               </div>
-              <div className="blank-sheet-note"><UserPlus size={17} /><p><strong>Aluno fora da lista?</strong>Use “Salvar folha sem aluno”. Nome, matrícula e turma poderão ser preenchidos à mão, e o cadastro será feito durante a correção.</p></div>
+              <div className="blank-sheet-note"><UserPlus size={17} /><p><strong>Aluno fora da lista?</strong>Use “Salvar folha sem aluno”. Nome e turma poderão ser preenchidos à mão, e o cadastro será feito durante a correção.</p></div>
               <div className="print-tip"><Printer size={18} /><p><strong>Configuração recomendada</strong>Papel A4, escala 100%, margens “nenhuma” e orientação retrato. Os quatro marcadores ficam protegidos ao redor do quadro de respostas.</p></div>
             </aside>
             <div className="sheet-preview-area">
@@ -1560,7 +1558,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
                     <div className="print-preview-document" style={{ zoom: printPreviewZoom }} key={`${activePrintPreview.student.id}-${activePrintPreview.type}`}>
                       {activePrintPreview.type === 'assessment'
                         ? <AssessmentPaper student={activePrintPreview.student} assessment={printAssessment} classroom={activePrintPreviewClassroom} school={data.school} />
-                        : <AnswerSheet student={activePrintPreview.student} assessment={printAssessment} classroom={activePrintPreviewClassroom} school={data.school} hideRegistration={hidePrintRegistration} />}
+                        : <AnswerSheet student={activePrintPreview.student} assessment={printAssessment} classroom={activePrintPreviewClassroom} school={data.school} />}
                     </div>
                   </div>
                 </div>
@@ -1568,8 +1566,8 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
               </div>}
               {!printStudents.length && <div className="no-print-students"><UsersRound size={30} /><strong>Nenhuma turma selecionada</strong></div>}
             </div>
-            <div className="all-print-sheets student-print-sheets"><PrintableSheets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} /></div>
-            <div className="all-print-sheets assessment-print-packets"><AssessmentPackets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} hideRegistration={hidePrintRegistration} /></div>
+            <div className="all-print-sheets student-print-sheets"><PrintableSheets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} /></div>
+            <div className="all-print-sheets assessment-print-packets"><AssessmentPackets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} /></div>
             <div className="all-print-sheets blank-print-sheet"><PrintableSheets students={[null]} assessment={printAssessment} classes={data.classes} school={data.school} /></div>
           </div>
         )}
