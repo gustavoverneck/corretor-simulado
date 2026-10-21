@@ -3,11 +3,13 @@ import QRCode from 'qrcode'
 import { layoutBubbleCenter, MARKERS, SHEET } from '../lib/omr'
 import { getSheetLayout, getSheetFormat } from '../lib/sheetFormat'
 import { qrPayload } from '../lib/utils'
+import { getAssessmentForStudent } from '../lib/assessment'
 
 const options = ['A', 'B', 'C', 'D', 'E']
 const governmentLogo = `${import.meta.env.BASE_URL}assets/brasao-governo-es-horizontal.png`
 
 export function AnswerSheet({ student, assessment, classroom, school }) {
+  assessment = getAssessmentForStudent(assessment, student)
   const isBlank = !student
   const sheetFormat = getSheetFormat(assessment.questionCount, assessment.optionCount)
   const markers = MARKERS

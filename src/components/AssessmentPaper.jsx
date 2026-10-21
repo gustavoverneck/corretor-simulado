@@ -1,7 +1,7 @@
 import { Fragment } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { getAnswerKeyVersionForStudent } from '../lib/assessment'
+import { getAnswerKeyVersionForStudent, getAssessmentForVersion } from '../lib/assessment'
 import { formatImageSource, getPrintableQuestions } from '../lib/fullAssessment'
 import { AnswerSheet } from './AnswerSheet'
 
@@ -19,6 +19,7 @@ function QuestionFigure({ question, index }) {
 
 export function AssessmentPaper({ student, assessment, classroom, school }) {
   const version = getAnswerKeyVersionForStudent(assessment, student)
+  assessment = getAssessmentForVersion(assessment, version)
   const questions = getPrintableQuestions(assessment, version)
 
   return <section className="assessment-paper"><header><div><strong>{school.name}</strong><span>{assessment.subjects.join(' · ')}</span></div><em>{assessment.code}</em></header><h1>{assessment.title}</h1><div className="assessment-paper-student"><span><b>Aluno:</b> {student.name}</span><span><b>Turma:</b> {classroom?.name}</span><span><b>Versão:</b> {version?.label || 'A'}</span></div><ol>{questions.map((question, index) => <li key={`${question.id}-${index}`}><div className="paper-statement"><LatexText value={question.statement} /></div><QuestionFigure question={question} index={index} /><ol type="A">{question.alternatives.map((alternative, optionIndex) => <li key={optionIndex}><LatexText value={alternative} /></li>)}</ol></li>)}</ol><footer>{assessment.title} · {student.name} · {version?.label || 'Versão A'}</footer></section>

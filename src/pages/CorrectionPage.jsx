@@ -8,7 +8,7 @@ import {
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { CorrectedSheetPreview } from '../components/CorrectedSheetPreview'
 import { analyzeAnswerSheet } from '../lib/omr'
-import { CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
+import { withVersionQuestionAreas, getAssessmentForStudent, getAssessmentForVersion, getAssessmentForSubmission, CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAreas'
 import { cn, formatDateTime, nextStudentRegistration, normalize, uid } from '../lib/utils'
 
@@ -100,7 +100,8 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
   const classVersions = getAnswerKeyVersionsForClass(assessment, classId)
   const selectedVersion = classVersions.find((version) => version.id === versionId) || classVersions[0]
   const answerKey = selectedVersion?.answerKey || getAnswerKeyForClass(assessment, classId)
-  const questionAreas = getQuestionAreas(assessment)
+  const versionAssessment = getAssessmentForVersion(assessment, selectedVersion)
+  const questionAreas = getQuestionAreas(versionAssessment)
   const areaSummary = [...questionAreas.reduce((summary, area) => summary.set(area, (summary.get(area) || 0) + 1), new Map()).entries()]
   const isCustom = hasCustomAnswerKey(assessment, classId)
   const classStudents = data.students.filter((student) => student.classId === classId && student.status === 'Ativo').length
@@ -163,11 +164,11 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
       notify('Simulado encerrado', 'Reabra o simulado antes de salvar alterações no gabarito.', 'warning')
       return
     }
-    if (draft.length !== assessment.questionCount || draft.some((answer) => answer === '' || answer === undefined)) {
+    if (draft.length !== versionAssessment.questionCount || draft.some((answer) => answer === '' || answer === undefined)) {
       notify('Gabarito incompleto', 'Cada questão precisa ter uma resposta correta, estar anulada ou cancelada.', 'warning')
       return
     }
-    if (areaDraft.length !== assessment.questionCount || areaDraft.some((area) => !area.trim())) {
+    if (areaDraft.length !== versionAssessment.questionCount || areaDraft.some((area) => !area.trim())) {
       notify('Área não definida', 'Informe a área ou componente de todas as questões.', 'warning')
       return
     }
@@ -189,7 +190,11 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
       const currentAssessment = current.assessments.find((item) => item.id === assessment.id)
       if (!currentAssessment) return current
       const updatedVersion = updateAnswerKeyVersionForClass(currentAssessment, classId, selectedVersion?.id, draft, current.students, () => savedVersionId)
-      const nextAssessment = { ...updatedVersion.assessment, questionAreas: normalizedAreas }
+      const nextAssessment = selectedVersion ? {
+        ...updatedVersion.assessment,
+        answerKeyVersions: updatedVersion.assessment.answerKeyVersions.map((version) => version.id === updatedVersion.versionId
+          ? withVersionQuestionAreas(version, normalizedAreas) : version),
+      } : { ...updatedVersion.assessment, questionAreas: normalizedAreas }
       return {
         ...current,
         assessments: current.assessments.map((item) => item.id === assessment.id ? nextAssessment : item),
@@ -224,7 +229,7 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
 
       <section className="panel answer-key-workspace">
         <header className="answer-key-header">
-          <div><div className="eyebrow">GABARITO CADASTRADO</div><h2>{assessment.title}</h2><p>{assessment.subjects.join(' · ')} · {assessment.questionCount} questões · alternativas A–{String.fromCharCode(64 + assessment.optionCount)}</p></div>
+          <div><div className="eyebrow">GABARITO CADASTRADO</div><h2>{assessment.title}</h2><p>{versionAssessment.subjects.join(' · ')} · {versionAssessment.questionCount} questões · alternativas A–{String.fromCharCode(64 + assessment.optionCount)}</p></div>
           {!editing && !assessmentClosed && <Button icon={PencilLine} onClick={() => startEditing()}>Editar gabarito</Button>}
           {!editing && assessmentClosed && <Badge tone="neutral"><LockKeyhole size={12} /> Encerrado · somente leitura</Badge>}
         </header>
@@ -270,7 +275,7 @@ function ReviewQueue({ data, setData, notify }) {
   const pending = getPendingReviewSubmissions(data.submissions, data.assessments)
   const selected = data.submissions.find((item) => item.id === selectedId)
   const student = data.students.find((item) => item.id === selected?.studentId)
-  const assessment = data.assessments.find((item) => item.id === selected?.assessmentId)
+  const assessment = getAssessmentForSubmission(data.assessments.find((item) => item.id === selected?.assessmentId), selected)
   const classroom = data.classes.find((item) => item.id === student?.classId)
   const answerKey = getAnswerKeyForStudent(assessment, student)
 
@@ -345,7 +350,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
   const responseToDeleteAssessment = data.assessments.find((item) => item.id === responseToDelete?.assessmentId)
   const selectedStudent = data.students.find((item) => item.id === selected?.studentId)
   const selectedClass = data.classes.find((item) => item.id === selectedStudent?.classId)
-  const selectedAssessment = data.assessments.find((item) => item.id === selected?.assessmentId)
+  const selectedAssessment = getAssessmentForSubmission(data.assessments.find((item) => item.id === selected?.assessmentId), selected)
   const selectedAssessmentClosed = isAssessmentClosed(selectedAssessment)
   const selectedAnswerKey = selected?.answerKeySnapshot || getAnswerKeyForStudent(selectedAssessment, selectedStudent)
   const selectedQuestionAreas = getQuestionAreas(selectedAssessment)
@@ -552,15 +557,16 @@ export function CorrectionPage({ data, setData, notify }) {
   const classroom = data.classes.find((item) => item.id === classId)
   const answerKey = getAnswerKeyForClass(assessment, classId)
   const eligibleStudents = data.students.filter((student) => student.classId === classId && student.status === 'Ativo')
-  const resultAssessment = data.assessments.find((item) => item.id === result?.assessmentId) || assessment
-  const resultAssessmentClosed = isAssessmentClosed(resultAssessment)
+  const baseResultAssessment = data.assessments.find((item) => item.id === result?.assessmentId) || assessment
   const detectedStudentId = result?.identity?.studentId || studentId
   const detectedStudent = data.students.find((item) => item.id === detectedStudentId)
+  const resultAssessment = getAssessmentForStudent(baseResultAssessment, detectedStudent)
+  const resultAssessmentClosed = isAssessmentClosed(resultAssessment)
   const resultClassId = result?.classId || detectedStudent?.classId || classId
   const resultClassroom = data.classes.find((item) => item.id === resultClassId)
   const resultAnswerKeyVersion = detectedStudent ? getAnswerKeyVersionForStudent(resultAssessment, detectedStudent) : null
   const resultAnswerKey = detectedStudent ? getAnswerKeyForStudent(resultAssessment, detectedStudent) : getAnswerKeyForClass(resultAssessment, resultClassId)
-  const resultQuestionAreas = getQuestionAreas(resultAssessment)
+  const resultQuestionAreas = getQuestionAreas(getAssessmentForStudent(resultAssessment, detectedStudent))
   const resultEligibleStudents = data.students.filter((student) => resultAssessment?.classIds.includes(student.classId) && student.status === 'Ativo')
   const resultClassCompatible = Boolean(detectedStudent && resultAssessment?.classIds.includes(detectedStudent.classId))
   const existingResultSubmission = detectedStudent && resultAssessment
@@ -586,7 +592,7 @@ export function CorrectionPage({ data, setData, notify }) {
       if (!issue && seen.has(pairKey)) issue = 'Folha duplicada no lote'
       if (!issue) seen.add(pairKey)
       const needsReview = !issue && (!item.qrFound || item.multiple > 0 || item.uncertain > 0 || item.markersFound < 4)
-      return { index, item, assessment: itemAssessment, student: itemStudent, classroom: itemClass, existingSubmission, issue, pairKey, needsReview, valid: !issue }
+      return { index, item, assessment: getAssessmentForStudent(itemAssessment, itemStudent), student: itemStudent, classroom: itemClass, existingSubmission, issue, pairKey, needsReview, valid: !issue }
     })
   }, [batch, data])
   const batchSaveable = batchRows.filter((row) => row.valid)
@@ -604,7 +610,7 @@ export function CorrectionPage({ data, setData, notify }) {
     uncertain: summary.uncertain + (row.item.uncertain || 0),
     cancelled: summary.cancelled + (row.item.cancelled || 0),
   }), { total: 0, gradedTotal: 0, correct: 0, wrong: 0, blank: 0, multiple: 0, uncertain: 0, cancelled: 0 })
-  const batchPreviewAreas = getQuestionAreas(batchPreview?.assessment)
+  const batchPreviewAreas = getQuestionAreas(getAssessmentForStudent(batchPreview?.assessment, batchPreview?.student))
   const visibleBatchAnswers = batchPreview?.item.answers?.filter((answer) => batchFilter === 'all' || answer.status === batchFilter) || []
   const batchPreviewEligibleStudents = data.students.filter((student) => batchPreview?.assessment?.classIds.includes(student.classId) && student.status === 'Ativo')
   const newStudentAssessment = data.assessments.find((item) => item.id === newStudentContext?.assessmentId)
@@ -637,10 +643,12 @@ export function CorrectionPage({ data, setData, notify }) {
     const recognizedAssessment = data.assessments.find((item) => item.id === identity?.assessmentId) || assessment
     const recognizedStudent = data.students.find((item) => item.id === identity?.studentId)
     const recognizedClassId = recognizedStudent?.classId || classId
+    const blankVersion = !recognizedStudent && getAnswerKeyVersionsForClass(recognizedAssessment, recognizedClassId)
+      .find((version) => (version.questionCount ?? version.answerKey.length) === identity?.sheetFormat?.questionCount)
     return {
-      assessment: recognizedAssessment,
+      assessment: blankVersion ? getAssessmentForVersion(recognizedAssessment, blankVersion) : getAssessmentForStudent(recognizedAssessment, recognizedStudent || { classId: recognizedClassId }),
       classId: recognizedClassId,
-      answerKey: recognizedStudent ? getAnswerKeyForStudent(recognizedAssessment, recognizedStudent) : getAnswerKeyForClass(recognizedAssessment, recognizedClassId),
+      answerKey: blankVersion?.answerKey || (recognizedStudent ? getAnswerKeyForStudent(recognizedAssessment, recognizedStudent) : getAnswerKeyForClass(recognizedAssessment, recognizedClassId)),
     }
   }
 
@@ -775,7 +783,7 @@ export function CorrectionPage({ data, setData, notify }) {
       notify('Arquivo muito grande', 'Use uma imagem de até 15 MB.', 'warning')
       return
     }
-    if (answerKey.length !== assessment.questionCount) {
+    if (!answerKey.length) {
       notify('Gabarito incompleto', `Confira o gabarito de ${classroom?.name} antes de corrigir.`, 'warning')
       return
     }

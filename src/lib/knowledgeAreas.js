@@ -34,5 +34,8 @@ export function getQuestionAreas(assessment) {
 }
 
 export function uniqueQuestionAreas(assessment) {
-  return [...new Set(getQuestionAreas(assessment))]
+  return [...new Set([
+    ...getQuestionAreas(assessment),
+    ...(assessment?.answerKeyVersions || []).flatMap((version) => version.questionAreas || []),
+  ])]
 }

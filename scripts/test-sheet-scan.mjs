@@ -10,6 +10,7 @@ import QRCode from 'qrcode'
 import { analyzeSheetImage, layoutBubbleCenter, MARKERS, readSheetQr } from '../src/lib/omr.js'
 import { getSheetFormat, getSheetLayout, FIXED_SHEET_LAYOUT, getLegacySheetLayout } from '../src/lib/sheetFormat.js'
 import { crc32, qrPayload } from '../src/lib/utils.js'
+import { getAssessmentForStudent } from '../src/lib/assessment.js'
 
 // Render the actual print component, including its vector QR and bubble text.
 let source = await readFile(new URL('../src/components/AnswerSheet.jsx', import.meta.url), 'utf8')
@@ -129,4 +130,25 @@ for (const questionCount of [40, 60, 90]) {
   }
 }
 
-console.log('Impressão e leitura integradas: QR vetorial, formatos novos/v2/v3, escalas, marcas parciais, duplas, sujeira, posições e ausência de marcador validados.')
+// The same assessment can print different QR formats and counts per class.
+const versionedAssessment = {
+  id: 'versioned-assessment', title: 'Multiple structures', code: 'MULTI', questionCount: 10, optionCount: 4,
+  classIds: ['a', 'b', 'c'], answerKey: Array(10).fill('A'),
+  answerKeyVersions: [10, 45, 90].map((questionCount, index) => ({ id: `v${index}`, label: `V${index}`, questionCount, answerKey: Array(questionCount).fill('A') })),
+  answerKeyVersionIdsByClass: { a: ['v0'], b: ['v1'], c: ['v2'] },
+}
+for (const [index, classId] of ['a', 'b', 'c'].entries()) {
+  const versionStudent = { ...student, id: `version-student-${index}`, classId }
+  const resolved = getAssessmentForStudent(versionedAssessment, versionStudent)
+  const svg = renderToStaticMarkup(React.createElement(AnswerSheet, { student: versionStudent, assessment: versionedAssessment, school }))
+  const { pixels } = await rasterize(svg)
+  const scanned = analyzeSheetImage(pixels, versionedAssessment, {}, {}, (identity) => {
+    assert.equal(identity.studentId, versionStudent.id)
+    return { assessment: resolved, answerKey: resolved.answerKey, classId }
+  })
+  assert.equal(scanned.answers.length, [10, 45, 90][index])
+  assert.equal(scanned.blank, resolved.questionCount)
+  assert.equal(scanned.identity.studentId, versionStudent.id)
+}
+
+console.log('Impressão e leitura integradas: QR vetorial, formatos novos/v2/v3, versões com contagens distintas, escalas, marcas parciais, duplas, sujeira, posições e ausência de marcador validados.')

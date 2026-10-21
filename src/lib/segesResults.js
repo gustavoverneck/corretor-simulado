@@ -1,3 +1,4 @@
+import { getAssessmentForSubmission } from './assessment.js'
 import { getQuestionAreas } from './knowledgeAreas.js'
 
 export const SEGES_RESULT_STATUS = {
@@ -28,6 +29,7 @@ export function indexAssessmentSubmissions(submissions, assessmentId) {
 
 export function calculateAssessmentResult(submission, assessment, scope = 'all', maxGrade = 10) {
   if (!submission || !assessment) return null
+  assessment = getAssessmentForSubmission(assessment, submission)
 
   let correct = 0
   let valid = 0

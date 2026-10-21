@@ -24,7 +24,8 @@
     "test:network": "node scripts/test-network-analysis.mjs",
     "test:results-report": "node scripts/test-results-report.mjs",
     "test:full-assessment": "node scripts/test-full-assessment.mjs",
-    "test:results-filters": "node scripts/test-results-filters.mjs"
+    "test:results-filters": "node scripts/test-results-filters.mjs",
+    "test:version-structure": "node scripts/test-version-structure.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",

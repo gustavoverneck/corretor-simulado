@@ -1,6 +1,18 @@
+import { getAssessmentForSubmission, getAssessmentForVersion, getAnswerKeyVersions } from './assessment.js'
 import { getQuestionAreas } from './knowledgeAreas.js'
 
+function resultConfigurations(assessment, submissions) {
+  const versions = getAnswerKeyVersions(assessment)
+  const distinctStructure = new Set(versions.map((version) => JSON.stringify(getQuestionAreas(getAssessmentForVersion(assessment, version))))).size > 1
+  if (!distinctStructure) return [{ assessment: getAssessmentForVersion(assessment, versions[0]), submissions }]
+  return versions.map((version) => ({
+    assessment: { ...getAssessmentForVersion(assessment, version), resultVersionId: version.id, title: `${assessment.title} · ${version.label}` },
+    submissions: submissions.filter((submission) => getAssessmentForSubmission(assessment, submission).answerKey === version.answerKey),
+  }))
+}
+
 export function calculateSubmissionMetrics(submission, assessment, selectedAreas = []) {
+  assessment = getAssessmentForSubmission(assessment, submission)
   const questionAreas = getQuestionAreas(assessment)
   const questionIndexes = questionAreas
     .map((questionArea, index) => !selectedAreas.length || selectedAreas.includes(questionArea) ? index : -1)
@@ -44,7 +56,7 @@ export function calculateSubmissionMetrics(submission, assessment, selectedAreas
 
 export function calculateAreaResults(assessments, submissions) {
   const summary = new Map()
-  assessments.forEach((assessment) => {
+  assessments.flatMap((assessment) => resultConfigurations(assessment, submissions.filter((submission) => submission.assessmentId === assessment.id))).forEach(({ assessment, submissions }) => {
     const questionAreas = getQuestionAreas(assessment)
     questionAreas.forEach((area) => {
       if (!summary.has(area)) summary.set(area, { area, questions: 0, attempts: 0, correct: 0, wrong: 0, blank: 0, cancelled: 0, review: 0 })
@@ -68,11 +80,11 @@ export function calculateAreaResults(assessments, submissions) {
 }
 
 export function calculateQuestionResults(assessments, submissions, selectedAreas = []) {
-  return assessments.flatMap((assessment) => {
+  return assessments.flatMap((assessment) => resultConfigurations(assessment, submissions.filter((submission) => submission.assessmentId === assessment.id))).flatMap(({ assessment, submissions }) => {
     const questionAreas = getQuestionAreas(assessment)
     return questionAreas.map((questionArea, index) => {
       if (selectedAreas.length && !selectedAreas.includes(questionArea)) return null
-      const result = { id: `${assessment.id}:${index}`, assessmentId: assessment.id, assessmentTitle: assessment.title, assessmentCode: assessment.code, index, number: index + 1, area: questionArea, attempts: 0, correct: 0, wrong: 0, blank: 0, cancelled: 0, review: 0, score: 0 }
+      const result = { id: `${assessment.id}:${assessment.resultVersionId ? `${assessment.resultVersionId}:` : ''}${index}`, assessmentId: assessment.id, assessmentTitle: assessment.title, assessmentCode: assessment.code, index, number: index + 1, area: questionArea, attempts: 0, correct: 0, wrong: 0, blank: 0, cancelled: 0, review: 0, score: 0 }
       submissions.filter((submission) => submission.assessmentId === assessment.id).forEach((submission) => {
         const answer = submission.answers?.[index]
         if (!answer) return

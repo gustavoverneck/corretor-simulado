@@ -51,7 +51,7 @@ export function applyAssessmentRevision(data, revisedAssessment, { regradeSubmis
     }
     const version = getAnswerKeyVersionForStudent(revisedAssessment, student)
     const answerKey = version?.answerKey || revisedAssessment.answerKey || []
-    const answers = Array.from({ length: revisedAssessment.questionCount }, (_, index) => submission.answers[index] || {
+    const answers = Array.from({ length: answerKey.length }, (_, index) => submission.answers[index] || {
       question: index + 1,
       selected: [],
       scores: [],
@@ -96,7 +96,7 @@ export function createRandomAnswerKey(questionCount, optionCount, random = Math.
 export function getAnswerKeyVersions(assessment) {
   if (!assessment) return []
   const versions = Array.isArray(assessment.answerKeyVersions)
-    ? assessment.answerKeyVersions.filter((version) => Array.isArray(version.answerKey) && version.answerKey.length === assessment.questionCount)
+    ? assessment.answerKeyVersions.filter((version) => Array.isArray(version.answerKey) && version.answerKey.length === (version.questionCount ?? assessment.questionCount))
     : []
   if (versions.length) return versions
   return [{ id: 'default', label: 'Gabarito padrão', answerKey: Array.isArray(assessment.answerKey) ? assessment.answerKey : [] }]
@@ -129,6 +129,38 @@ export function getAnswerKeyVersionForStudent(assessment, student) {
 
 export function getAnswerKeyForStudent(assessment, student) {
   return getAnswerKeyVersionForStudent(assessment, student)?.answerKey || getAnswerKeyForClass(assessment, student?.classId)
+}
+
+export function getAssessmentForVersion(assessment, version) {
+  if (!assessment || !version) return assessment
+  return {
+    ...assessment,
+    questionCount: version.questionCount ?? (version.answerKey?.length || assessment.questionCount),
+    questionAreas: version.questionAreas || assessment.questionAreas,
+    subjects: version.subjects || assessment.subjects,
+    answerKey: version.answerKey || assessment.answerKey,
+  }
+}
+
+export function getAssessmentForStudent(assessment, student) {
+  return getAssessmentForVersion(assessment, getAnswerKeyVersionForStudent(assessment, student))
+}
+
+export function getAssessmentForSubmission(assessment, submission) {
+  const versionId = submission?.answerKeyVersionId || assessment?.answerKeyVersionIdByStudent?.[submission?.studentId]
+  const version = getAnswerKeyVersions(assessment).find((item) => item.id === versionId)
+    || getAnswerKeyVersionForStudent(assessment, { id: submission?.studentId, classId: submission?.classId })
+  return getAssessmentForVersion(assessment, version)
+}
+
+export function withVersionQuestionAreas(version, questionAreas) {
+  return {
+    ...version,
+    questionAreas,
+    ...(version.questionOrder ? {
+      sourceQuestionAreas: version.questionOrder.map((_, sourceIndex) => questionAreas[version.questionOrder.indexOf(sourceIndex)]),
+    } : {}),
+  }
 }
 
 export function getAnswerKeyVersionsForClass(assessment, classId) {
