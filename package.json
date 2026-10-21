@@ -26,7 +26,8 @@
     "test:full-assessment": "node scripts/test-full-assessment.mjs",
     "test:results-filters": "node scripts/test-results-filters.mjs",
     "test:version-structure": "node scripts/test-version-structure.mjs",
-    "test:assessment-export": "node scripts/test-assessment-export.mjs"
+    "test:assessment-export": "node scripts/test-assessment-export.mjs",
+    "test:pdf-pages": "node scripts/test-pdf-pages.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",

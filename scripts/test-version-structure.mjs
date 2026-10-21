@@ -17,6 +17,7 @@ globalThis.editorDependencies = {
   ...assessmentHelpers, ...fullHelpers, ...areas, ...sheets, ...utils,
   CURRENT_MARKER_LAYOUT: 'corners-v1',
   useMemo: (callback) => callback(),
+  useEffect: () => {},
   useRef: (value) => ({ current: value }),
   useState(initial) {
     const index = cursor++

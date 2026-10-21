@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, writeFile, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
 import { unzipSync } from 'fflate'
 import { createCanvas } from '@napi-rs/canvas'
@@ -27,6 +28,7 @@ const send = (method, params = {}) => new Promise((resolve, reject) => {
   pending.set(id, { resolve, reject })
   socket.send(JSON.stringify({ id, method, params }))
 })
+const openPdf = (bytes) => getDocument({ data: bytes.slice(), standardFontDataUrl: fileURLToPath(new URL('../node_modules/pdfjs-dist/standard_fonts/', import.meta.url)).replaceAll('\\', '/') })
 try {
   let port
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -61,7 +63,7 @@ try {
     expression: `(async () => {
       try {
         await import('/corretor-simulado/src/styles.css');
-        const { exportAssessmentClassesZip, buildClassExportGroups, createClassArchive } = await import('/corretor-simulado/src/lib/assessmentExport.js');
+        const { exportAssessmentClassPdfs, exportAssessmentClassesZip, buildClassExportGroups, createClassArchive } = await import('/corretor-simulado/src/lib/assessmentExport.js');
         const { resizeQuestions } = await import('/corretor-simulado/src/lib/fullAssessment.js');
         const classes = [{ id: 'a', name: '1ª / A' }, { id: 'b', name: '1ª / A' }, { id: 'c', name: '3ª C' }, { id: 'empty', name: 'Vazia' }];
         const students = ['a', 'b', 'c'].map((classId, i) => ({ id: 'student-' + classId, classId, name: 'Aluno ' + i, status: 'Ativo' }));
@@ -73,18 +75,79 @@ try {
         const groups = buildClassExportGroups({ assessment, classes, students });
         if (groups.length !== 3 || groups[0].students[0].id !== 'student-a') throw new Error('Agrupamento incorreto');
         try { createClassArchive([], 'EMPTY'); throw new Error('Deveria rejeitar ZIP vazio'); } catch (error) { if (!error.message.includes('Nenhuma turma')) throw error; }
+        const start = performance.now();
         const zip = await exportAssessmentClassesZip({ assessment, classes, students, school, onProgress: value => progress.push(value.completed) });
+        const sheetMs = performance.now() - start;
         const sheetBytes = Array.from(new Uint8Array(await zip.blob.arrayBuffer()));
         const full = { ...assessment, id: 'full-export', contentMode: 'full', classIds: ['a', 'b'], questionCount: 12, answerKeyVersions: [12, 3].map((questionCount, i) => ({ id: 'v' + i, label: 'Versão ' + i, questionCount, answerKey: Array(questionCount).fill('A'), questions: resizeQuestions([], questionCount, 4).map((q, n) => ({ ...q, statement: i === 1 && n === 0 ? 'Leia o trecho e responda. '.repeat(250) : 'Questão ' + (n + 1) + ': Resolva $x^2 + 1$ e justifique sua escolha. '.repeat(5), alternatives: ['Primeira alternativa', 'Segunda alternativa', 'Terceira alternativa', 'Quarta alternativa'], correctIndex: 0 })) })) };
-        const fullZip = await exportAssessmentClassesZip({ assessment: full, classes, students: students.filter(s => s.id !== 'last'), school, includePaper: true });
+        const directFiles = [];
+        const events = [];
+        await exportAssessmentClassPdfs({ assessment, classes, students, school, onProgress: p => events.push('class:' + p.classIndex), onFile: f => { directFiles.push({ filename: f.filename, bytes: Array.from(f.bytes) }); events.push('file:' + f.classId); } });
+        if (events.indexOf('file:a') >= events.indexOf('class:2')) throw new Error('O primeiro PDF deve ser entregue antes de processar a segunda turma');
+        const singleFiles = [];
+        await exportAssessmentClassPdfs({ assessment, classes, students, school, classIds: ['b'], onFile: f => singleFiles.push(f.classId) });
+        if (singleFiles.join() !== 'b') throw new Error('Download individual incluiu outras turmas');
+        const abort = new AbortController();
+        let cancelledFiles = 0;
+        try {
+          await exportAssessmentClassPdfs({ assessment, classes, students, school, signal: abort.signal, onFile: () => { cancelledFiles++; abort.abort(); } });
+          throw new Error('Cancelamento ignorado');
+        } catch(error) { if (error.name !== 'AbortError') throw error; }
+        if (cancelledFiles !== 1 || document.querySelector('.assessment-export-root')) throw new Error('Cancelamento não liberou os recursos');
+        const nativeToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        let paperCaptures = 0;
+        HTMLCanvasElement.prototype.toDataURL = function(type, ...args) { if (type === 'image/jpeg') paperCaptures++; return nativeToDataURL.call(this, type, ...args); };
+        const fullZip = await exportAssessmentClassesZip({ assessment: full, classes, students, school, includePaper: true });
+        HTMLCanvasElement.prototype.toDataURL = nativeToDataURL;
+        if (paperCaptures !== 6) throw new Error('A prova deve ser renderizada uma vez por versão, sem repetir para cada aluno: ' + paperCaptures);
         if (document.querySelector('.assessment-export-root')) throw new Error('Exportação deixou elementos na página');
-        return { sheetBytes, fullBytes: Array.from(new Uint8Array(await fullZip.blob.arrayBuffer())), classCount: zip.classCount, studentCount: zip.studentCount, progress };
+        const react = await import('/corretor-simulado/node_modules/.vite/deps/react.js');
+        const client = await import('/corretor-simulado/node_modules/.vite/deps/react-dom_client.js');
+        const dom = await import('/corretor-simulado/node_modules/.vite/deps/react-dom.js');
+        const createElement = react.createElement || react.default.createElement;
+        const createRoot = client.createRoot || client.default.createRoot;
+        const flushSync = dom.flushSync || dom.default.flushSync;
+        const { AssessmentsPage } = await import('/corretor-simulado/src/pages/AssessmentsPage.jsx');
+        const originalUrl = location.href;
+        history.replaceState({}, '', '?print=' + full.id);
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+        const root = createRoot(container);
+        const previewStudents = Array.from({ length: 300 }, (_, i) => ({ id: 'preview-' + i, classId: i < 2 ? 'a' : 'b', name: 'Aluno ' + i, status: 'Ativo' }));
+        const pageData = { assessments: [{ ...full, date: '2026-10-21', createdAt: '2026-10-21', status: 'Pronto para aplicar' }], students: previewStudents, classes, school, submissions: [] };
+        flushSync(() => root.render(createElement(AssessmentsPage, { data: pageData, setData() {}, setPage() {}, notify() {} })));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        if (document.querySelectorAll('.print-preview-document .answer-sheet').length !== 1 || document.querySelector('.all-print-sheets')) throw new Error('A prévia de 300 alunos deve montar apenas a página selecionada');
+        const selector = document.querySelector('.print-preview-pagination select');
+        flushSync(() => { selector.value = '1'; selector.dispatchEvent(new Event('change', { bubbles: true })); });
+        if (document.querySelectorAll('.print-preview-document .assessment-paper').length !== 1 || document.querySelector('.all-print-sheets')) throw new Error('Trocar a prévia montou o lote inteiro');
+        flushSync(() => document.querySelectorAll('.print-class-option input')[1].click());
+        const nativePrint = window.print;
+        let printed = false;
+        window.print = () => {
+          if (document.querySelectorAll('.all-print-sheets .answer-sheet').length !== 2 || document.querySelectorAll('.all-print-sheets .assessment-paper').length !== 2 || document.querySelector('.student-print-sheets') || document.querySelector('.blank-print-sheet')) throw new Error('Impressão deve montar somente os alunos e o modo selecionados');
+          printed = true;
+          window.dispatchEvent(new Event('afterprint'));
+        };
+        [...document.querySelectorAll('.modal-footer button')].find(b => b.textContent.includes('Imprimir / salvar PDF')).click();
+        for (let attempt = 0; attempt < 100 && !printed; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        if (!printed || document.querySelector('.all-print-sheets')) throw new Error('Impressão não liberou o lote depois de fechar');
+        window.dispatchEvent(new Event('beforeprint'));
+        if (document.querySelectorAll('.all-print-sheets .answer-sheet').length !== 2) throw new Error('Atalho de impressão não preparou o lote');
+        window.dispatchEvent(new Event('afterprint'));
+        window.print = nativePrint;
+        flushSync(() => root.unmount());
+        container.remove();
+        history.replaceState({}, '', originalUrl);
+        return { sheetBytes, fullBytes: Array.from(new Uint8Array(await fullZip.blob.arrayBuffer())), classCount: zip.classCount, studentCount: zip.studentCount, progress, sheetMs, directFiles };
       } catch(error) { return { error: error.stack }; }
     })()`,
   })
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.text)
   const exported = result.result.value
   if (exported.error) throw new Error(exported.error)
+  console.log(`Folhas: ${Math.round(exported.sheetMs)} ms, ${exported.sheetBytes.length} bytes`)
   assert.equal(exported.classCount, 3)
   assert.equal(exported.studentCount, 4)
   assert.equal(exported.progress.at(-1), 4)
@@ -93,7 +156,7 @@ try {
   for (const [index, [filename, bytes]] of entries.entries()) {
     assert.ok(filename.endsWith('.pdf'))
     assert.ok(!/[\\/]/.test(filename))
-    const task = getDocument({ data: bytes.slice() })
+    const task = openPdf(bytes)
     const pdf = await task.promise
     assert.equal(pdf.numPages, index === 0 ? 2 : 1)
     const page = await pdf.getPage(1)
@@ -115,16 +178,25 @@ try {
   const fullEntries = Object.entries(unzipSync(Uint8Array.from(exported.fullBytes)))
   assert.equal(fullEntries.length, 2)
   for (const [index, [, bytes]] of fullEntries.entries()) {
-    const task = getDocument({ data: bytes.slice() })
+    const task = openPdf(bytes)
     const pdf = await task.promise
     assert.ok(pdf.numPages >= 3, 'Prova completa deve paginar e seguir a folha de respostas')
+    if (!index) {
+      assert.equal(pdf.numPages, 8, 'Duas provas personalizadas reutilizam a mesma versão')
+      const first = await (await pdf.getPage(2)).getTextContent()
+      const second = await (await pdf.getPage(6)).getTextContent()
+      assert.ok(first.items.some((item) => item.str.includes('Aluno 0')))
+      assert.ok(second.items.some((item) => item.str.includes('Zilda')))
+      assert.ok(!second.items.some((item) => item.str.includes('Aluno 0')), 'Cache da prova não pode reaproveitar o nome do primeiro aluno')
+    }
     if (!index) {
       await writeFile(join(directory, 'full.pdf'), bytes)
     }
     if (index === 1) await writeFile(join(directory, 'long.pdf'), bytes)
     await task.destroy()
   }
-  console.log('ZIP validado: PDFs separados por turma, ordenação, alunos ativos, nomes únicos, QR/OMR com 10/45/90 questões e provas completas paginadas.')
+  assert.equal(exported.directFiles.length, 3)
+  console.log('Exportação validada: PDFs separados entregues turma a turma, cancelamento, versões, QR/OMR, cache com nomes individuais e prévia de 300 alunos sem montar o lote.')
   console.log('Prévia para inspeção: ' + directory)
 } catch (error) {
   console.error(error)

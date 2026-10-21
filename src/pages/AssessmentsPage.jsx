@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff, Download, FileSpreadsheet, LockKeyhole, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown, FileCode2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { AnswerSheet, PrintableSheets } from '../components/AnswerSheet'
@@ -330,7 +331,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       maxGrade: parsedExportMaxGrade,
     })
     downloadBlob(
-      new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }),
+      new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8' }),
       segesResultsFilename(assessment, exportScope),
     )
     setExportOpen(false)
@@ -642,7 +643,8 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const [assessmentLifecycleId, setAssessmentLifecycleId] = useState(null)
   const [printAssessmentId, setPrintAssessmentId] = useState(initialPrintAssessment?.id || null)
   const [printClassIds, setPrintClassIds] = useState(initialPrintAssessment?.classIds || [])
-  const [zipExportProgress, setZipExportProgress] = useState(null)
+  const [exportProgress, setExportProgress] = useState(null)
+  const exportControllerRef = useRef(null)
   const [blankPrintVersionId, setBlankPrintVersionId] = useState('')
   const [baseQuestionCount, setQuestionCount] = useState(40)
   const [questionCountInput, setQuestionCountInput] = useState('40')
@@ -661,6 +663,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   const [versionAssignmentMode, setVersionAssignmentMode] = useState('shared')
   const [studentShuffleStrategy, setStudentShuffleStrategy] = useState('both')
   const [printDocumentMode, setPrintDocumentMode] = useState(initialPrintAssessment?.contentMode === 'full' ? 'assessment' : 'answer-sheet')
+  const [printRenderMode, setPrintRenderMode] = useState(null)
   const [printPreviewIndex, setPrintPreviewIndex] = useState(0)
   const [printPreviewZoom, setPrintPreviewZoom] = useState(PRINT_PREVIEW_DEFAULT_ZOOM)
   const [printPreviewDragging, setPrintPreviewDragging] = useState(false)
@@ -679,6 +682,25 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
     : 0
   const lifecycleAssessment = data.assessments.find((item) => item.id === assessmentLifecycleId)
   const printAssessment = data.assessments.find((item) => item.id === printAssessmentId)
+  useEffect(() => {
+    if (!printAssessment) return undefined
+    const beforePrint = () => {
+      const mode = document.body.dataset.sheetPrintMode || (printDocumentMode === 'assessment' ? 'assessment-packets' : 'students')
+      document.body.dataset.sheetPrintMode = mode
+      flushSync(() => setPrintRenderMode(mode))
+    }
+    const afterPrint = () => {
+      delete document.body.dataset.sheetPrintMode
+      setPrintRenderMode(null)
+    }
+    window.addEventListener('beforeprint', beforePrint)
+    window.addEventListener('afterprint', afterPrint)
+    return () => {
+      window.removeEventListener('beforeprint', beforePrint)
+      window.removeEventListener('afterprint', afterPrint)
+      delete document.body.dataset.sheetPrintMode
+    }
+  }, [printAssessment?.id, printDocumentMode])
   const blankPrintVersions = getAnswerKeyVersions(printAssessment)
   const blankPrintVersion = blankPrintVersions.find((version) => version.id === blankPrintVersionId) || blankPrintVersions[0]
   const blankPrintAssessment = getAssessmentForVersion(printAssessment, blankPrintVersion)
@@ -847,6 +869,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
   }
 
   function closePrint() {
+    setPrintRenderMode(null)
     setPrintAssessmentId(null)
     setPrintClassIds([])
     setPrintDocumentMode('answer-sheet')
@@ -920,31 +943,58 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
     window.requestAnimationFrame(() => printPreviewViewportRef.current?.scrollTo({ top: 0, left: 0 }))
   }
 
-  function printSheets(mode) {
+  async function printSheets(mode) {
+    if (printRenderMode) return
     document.body.dataset.sheetPrintMode = mode
-    window.print()
-    window.setTimeout(() => delete document.body.dataset.sheetPrintMode, 0)
+    flushSync(() => setPrintRenderMode(mode))
+    try {
+      await Promise.all([...document.querySelectorAll('.all-print-sheets img')].map((image) => image.decode()))
+      await document.fonts.ready
+      if (document.querySelector('.all-print-sheets')) window.print()
+    } catch (error) {
+      delete document.body.dataset.sheetPrintMode
+      setPrintRenderMode(null)
+      notify('Não foi possível preparar a impressão', error.message || 'Tente novamente.', 'warning')
+    }
   }
 
-  async function downloadAllClassesZip() {
-    if (!printAssessment || zipExportProgress) return
-    setZipExportProgress({ completed: 0, total: 0, classroom: '' })
+  async function downloadClassPdfs(format = 'pdfs', classIds = printAssessment?.classIds) {
+    if (!printAssessment || exportProgress) return
+    const controller = new AbortController()
+    exportControllerRef.current = controller
+    setExportProgress({ completed: 0, total: 0, classroom: '', format })
     try {
-      const { exportAssessmentClassesZip } = await import('../lib/assessmentExport')
-      const result = await exportAssessmentClassesZip({
+      const { exportAssessmentClassesZip, exportAssessmentClassPdfs } = await import('../lib/assessmentExport')
+      const options = {
         assessment: printAssessment,
         classes: data.classes,
         students: data.students,
         school: data.school,
+        classIds,
         includePaper: printDocumentMode === 'assessment',
-        onProgress: setZipExportProgress,
-      })
-      downloadBlob(result.blob, result.filename)
-      notify('ZIP gerado', `${result.classCount} PDFs, um por turma, com ${result.studentCount} alunos. Turmas sem alunos ativos não geram arquivo.`)
+        signal: controller.signal,
+        onProgress: (progress) => setExportProgress({ ...progress, format }),
+      }
+      if (format === 'zip') {
+        const result = await exportAssessmentClassesZip(options)
+        downloadBlob(result.blob, result.filename)
+        notify('ZIP gerado', `${result.classCount} PDFs, um por turma, com ${result.studentCount} alunos.`)
+      } else {
+        const result = await exportAssessmentClassPdfs({
+          ...options,
+          onFile: async (file) => {
+            downloadBlob(file.blob, file.filename)
+            await new Promise((resolve) => setTimeout(resolve, 100))
+          },
+        })
+        notify('PDFs gerados', `${result.classCount} turma(s), com ${result.studentCount} alunos.`)
+      }
     } catch (error) {
-      notify('Não foi possível gerar o ZIP', error.message || 'Tente novamente.', 'warning')
+      if (error.name === 'AbortError') notify('Exportação cancelada', 'Os arquivos já baixados continuam disponíveis.')
+      else notify('Não foi possível exportar', error.message || 'Tente novamente.', 'warning')
     } finally {
-      setZipExportProgress(null)
+      exportControllerRef.current = null
+      setExportProgress(null)
     }
   }
 
@@ -1622,14 +1672,16 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
           <div className="print-modal-layout">
             <aside className="print-options">
               <h3>Turmas incluídas</h3><p>Selecione quem receberá esta versão.</p>
-              {printAssessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); const count = data.students.filter((student) => student.classId === classId && student.status === 'Ativo').length; const checked = printClassIds.includes(classId); return <label key={classId} className="print-class-option"><input type="checkbox" checked={checked} onChange={() => togglePrintClass(classId)} /><span><strong>{classroom?.name}</strong><small>{count} alunos · {classroom?.shift}</small></span></label> })}
+              {printAssessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); const count = data.students.filter((student) => student.classId === classId && student.status === 'Ativo').length; const checked = printClassIds.includes(classId); return <div key={classId} className="print-class-row"><label className="print-class-option"><input type="checkbox" checked={checked} onChange={() => togglePrintClass(classId)} /><span><strong>{classroom?.name}</strong><small>{count} alunos · {classroom?.shift}</small></span></label><Button variant="ghost" size="sm" icon={Download} disabled={Boolean(exportProgress) || !count} onClick={() => downloadClassPdfs('pdfs', [classId])} aria-label={`Baixar PDF de ${classroom?.name}`}>PDF</Button></div> })}
               <div className="print-sheet-options">
                 <h4>Documento para impressão</h4>
                 {printAssessment.contentMode === 'full' && <div className="print-document-mode"><button type="button" className={printDocumentMode === 'assessment' ? 'active' : ''} onClick={() => changePrintDocumentMode('assessment')}><FileText size={16} />Folha + prova</button><button type="button" className={printDocumentMode === 'answer-sheet' ? 'active' : ''} onClick={() => changePrintDocumentMode('answer-sheet')}><ClipboardList size={16} />Somente folhas</button></div>}
               </div>
               <div className="print-zip-export">
-                <Button variant="secondary" size="sm" icon={Download} disabled={Boolean(zipExportProgress) || !data.students.some((student) => printAssessment.classIds.includes(student.classId) && student.status === 'Ativo')} onClick={downloadAllClassesZip}>{zipExportProgress ? 'Gerando ZIP…' : 'Baixar todas as turmas (.zip)'}</Button>
-                <p aria-live="polite">{zipExportProgress ? `${zipExportProgress.completed} de ${zipExportProgress.total} alunos${zipExportProgress.classroom ? ` · ${zipExportProgress.classroom}` : ''}` : 'Um PDF por turma, com os alunos ativos em ordem alfabética. Inclui todas as turmas deste simulado.'}</p>
+                <Button variant="secondary" size="sm" icon={Download} disabled={Boolean(exportProgress) || !data.students.some((student) => printAssessment.classIds.includes(student.classId) && student.status === 'Ativo')} onClick={() => downloadClassPdfs('pdfs')}>{exportProgress?.format === 'pdfs' ? 'Gerando PDFs…' : 'Baixar PDFs separados'}</Button>
+                <Button variant="ghost" size="sm" disabled={Boolean(exportProgress) || !data.students.some((student) => printAssessment.classIds.includes(student.classId) && student.status === 'Ativo')} onClick={() => downloadClassPdfs('zip')}>{exportProgress?.format === 'zip' ? 'Gerando ZIP…' : 'Baixar todas em ZIP'}</Button>
+                <p aria-live="polite">{exportProgress ? `${exportProgress.completed} de ${exportProgress.total} alunos${exportProgress.classroom ? ` · Turma ${exportProgress.classIndex} de ${exportProgress.classTotal}: ${exportProgress.classroom}` : ''}` : 'Um PDF por turma. Cada arquivo é baixado assim que fica pronto. Use PDF ao lado da turma para baixar apenas ela.'}</p>
+                {exportProgress && <Button variant="ghost" size="sm" onClick={() => exportControllerRef.current?.abort()}>Cancelar exportação</Button>}
               </div>
               <div className="blank-sheet-note"><UserPlus size={17} /><p><strong>Aluno fora da lista?</strong>Use “Salvar folha sem aluno”. Nome e turma poderão ser preenchidos à mão, e o cadastro será feito durante a correção.</p></div>
               {blankPrintVersions.length > 1 && <Field label="Versão da folha sem aluno"><select value={blankPrintVersion.id} onChange={(event) => setBlankPrintVersionId(event.target.value)}>{blankPrintVersions.map((version) => <option key={version.id} value={version.id}>{version.label} · {version.questionCount ?? version.answerKey.length} questões</option>)}</select></Field>}
@@ -1675,9 +1727,9 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
               </div>}
               {!printStudents.length && <div className="no-print-students"><UsersRound size={30} /><strong>Nenhuma turma selecionada</strong></div>}
             </div>
-            <div className="all-print-sheets student-print-sheets"><PrintableSheets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} /></div>
-            <div className="all-print-sheets assessment-print-packets"><AssessmentPackets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} /></div>
-            <div className="all-print-sheets blank-print-sheet"><PrintableSheets students={[null]} assessment={blankPrintAssessment} classes={data.classes} school={data.school} /></div>
+            {printRenderMode === 'students' && <div className="all-print-sheets student-print-sheets"><PrintableSheets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} /></div>}
+            {printRenderMode === 'assessment-packets' && <div className="all-print-sheets assessment-print-packets"><AssessmentPackets students={printStudents} assessment={printAssessment} classes={data.classes} school={data.school} /></div>}
+            {printRenderMode === 'blank' && <div className="all-print-sheets blank-print-sheet"><PrintableSheets students={[null]} assessment={blankPrintAssessment} classes={data.classes} school={data.school} /></div>}
           </div>
         )}
       </Modal>

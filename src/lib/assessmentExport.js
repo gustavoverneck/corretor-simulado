@@ -4,11 +4,13 @@ import { flushSync } from 'react-dom'
 import { zipSync } from 'fflate'
 import { AnswerSheet } from '../components/AnswerSheet.jsx'
 import { AssessmentPaper } from '../components/AssessmentPaper.jsx'
+import { getAnswerKeyVersionForStudent } from './assessment.js'
+import { drawAnswerSheetPdf } from './answerSheetPdf.js'
 
-const PAGE = { width: 794, height: 1123, scale: 3 }
+const PAGE = { width: 794, height: 1123, scale: 2 }
 
 function safeName(value) {
-  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'simulado'
 }
 
@@ -52,34 +54,38 @@ async function imageDataUrl(source) {
   })
 }
 
-async function renderSheetCanvas(svg, imageCache) {
-  const copy = svg.cloneNode(true)
-  for (const element of copy.querySelectorAll('image')) {
-    const source = element.getAttribute('href')
-    if (!imageCache.has(source)) imageCache.set(source, await imageDataUrl(source))
-    element.setAttribute('href', imageCache.get(source))
-  }
-  const serialized = new XMLSerializer().serializeToString(copy)
-  const url = URL.createObjectURL(new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' }))
-  try {
-    const canvas = document.createElement('canvas')
-    canvas.width = PAGE.width * PAGE.scale
-    canvas.height = PAGE.height * PAGE.scale
-    const context = canvas.getContext('2d')
-    context.fillStyle = '#ffffff'
-    context.fillRect(0, 0, canvas.width, canvas.height)
-    context.drawImage(await readImage(url), 0, 0, canvas.width, canvas.height)
-    return canvas
-  } finally {
-    URL.revokeObjectURL(url)
+function nextPage(pdf) {
+  if (pdf.__hasExportPage) pdf.addPage()
+  pdf.__hasExportPage = true
+}
+
+function paperIdentityPosition(page) {
+  const bounds = page.getBoundingClientRect()
+  const field = page.querySelector('.assessment-paper-student > span')
+  const label = field.querySelector('b').getBoundingClientRect()
+  return {
+    x: (label.right - bounds.left + 4) * 210 / PAGE.width,
+    y: (label.bottom - bounds.top - 1) * 297 / PAGE.height,
+    width: (field.getBoundingClientRect().right - label.right - 6) * 210 / PAGE.width,
   }
 }
 
-function addPage(pdf, canvas) {
-  if (pdf.__hasExportPage) pdf.addPage()
-  pdf.__hasExportPage = true
-  pdf.addImage(canvas, 'PNG', 0, 0, 210, 297, undefined, 'FAST')
-  canvas.width = canvas.height = 1
+function addPaperTemplates(pdf, templates, student, assessment, version) {
+  for (const template of templates) {
+    nextPage(pdf)
+    pdf.addImage(template.image, 'JPEG', 0, 0, 210, 297, template.alias)
+    pdf.setTextColor('#111111')
+    pdf.setFont('helvetica', 'normal')
+    if (template.identity) {
+      const position = template.identity
+      pdf.setFontSize(9)
+      const width = pdf.getTextWidth(student.name)
+      if (width > position.width) pdf.setFontSize(9 * position.width / width)
+      pdf.text(student.name, position.x, position.y)
+    }
+    pdf.setFontSize(7)
+    pdf.text(`${assessment.title} · ${student.name} · ${version?.label || 'A'}`, 105, 290, { align: 'center', maxWidth: 176 })
+  }
 }
 
 // Prefer a whitespace row when a single unusually long question spans pages.
@@ -98,7 +104,15 @@ function whitespaceCut(canvas, start, proposed) {
   return proposed
 }
 
-async function addPaperPages(pdf, paper, host, html2canvas) {
+async function renderPaperTemplates(paper, host, html2canvas, cacheKey) {
+  const templates = []
+  const saveTemplate = (canvas, identity) => {
+    templates.push({ image: canvas.toDataURL('image/jpeg', 0.96), identity, alias: `${cacheKey}:${templates.length}` })
+    canvas.width = canvas.height = 1
+  }
+  const footer = paper.querySelector(':scope > footer')
+  footer.textContent = ''
+  footer.style.height = '11px'
   await Promise.all([...paper.querySelectorAll('img')].map((image) => image.decode()))
   await document.fonts.ready
   const questions = [...paper.querySelector(':scope > ol').children]
@@ -117,10 +131,10 @@ async function addPaperPages(pdf, paper, host, html2canvas) {
   const fits = () => list.lastElementChild.getBoundingClientRect().bottom + 12 <= page.querySelector(':scope > footer').getBoundingClientRect().top
   const capture = () => html2canvas(page, { scale: PAGE.scale, backgroundColor: '#ffffff', logging: false })
   const finishPage = async () => {
-    if (fits()) addPage(pdf, await capture())
+    const identity = paperIdentityPosition(page)
+    if (fits()) saveTemplate(await capture(), identity)
     else {
       // Preserve the full content even when one question is taller than A4.
-      const footerText = page.querySelector(':scope > footer').textContent
       page.querySelector(':scope > footer').remove()
       Object.assign(page.style, { height: 'auto', paddingBottom: '0' })
       const canvas = await capture()
@@ -137,9 +151,7 @@ async function addPaperPages(pdf, paper, host, html2canvas) {
         context.fillStyle = '#ffffff'
         context.fillRect(0, 0, slice.width, slice.height)
         context.drawImage(canvas, 0, start, canvas.width, end - start, 0, top, canvas.width, end - start)
-        addPage(pdf, slice)
-        pdf.setFontSize(7)
-        pdf.text(footerText, 105, 290, { align: 'center', maxWidth: 176 })
+        saveTemplate(slice, start ? null : identity)
         start = end
       }
       canvas.width = canvas.height = 1
@@ -164,13 +176,15 @@ async function addPaperPages(pdf, paper, host, html2canvas) {
       }
     }
     if (page) await finishPage()
+    return templates
   } finally {
     page?.remove()
   }
 }
 
-export async function exportAssessmentClassesZip({ assessment, classes, students, school, includePaper = false, onProgress = () => {} }) {
-  const groups = buildClassExportGroups({ assessment, classes, students })
+export async function exportAssessmentClassPdfs({ assessment, classes, students, school, classIds = assessment.classIds, includePaper = false, onProgress = () => {}, onFile = () => {}, signal }) {
+  const checkCancelled = () => { if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError') }
+  const groups = buildClassExportGroups({ assessment: { ...assessment, classIds: assessment.classIds.filter((id) => classIds.includes(id)) }, classes, students })
   if (!groups.length) throw new Error('Nenhuma turma com alunos ativos para baixar.')
   const { jsPDF } = await import('jspdf')
   const html2canvas = includePaper ? (await import('html2canvas')).default : null
@@ -182,32 +196,58 @@ export async function exportAssessmentClassesZip({ assessment, classes, students
   host.appendChild(mount)
   document.body.appendChild(host)
   const root = createRoot(mount)
-  const files = []
   const imageCache = new Map()
+  const loadLogo = async (source) => {
+    if (!imageCache.has(source)) {
+      const data = await imageDataUrl(source)
+      const image = await readImage(data)
+      imageCache.set(source, { data, width: image.naturalWidth, height: image.naturalHeight })
+    }
+    return imageCache.get(source)
+  }
   const total = groups.reduce((sum, group) => sum + group.students.length, 0)
   let completed = 0
   try {
-    for (const group of groups) {
+    for (const [classIndex, group] of groups.entries()) {
+      checkCancelled()
       const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true })
       pdf.setProperties({ title: `${assessment.title} - ${group.classroom?.name || 'Turma'}` })
+      const paperCache = new Map()
       for (const student of group.students) {
-        onProgress({ completed, total, classroom: group.classroom?.name || 'Turma' })
+        checkCancelled()
+        onProgress({ completed, total, classroom: group.classroom?.name || 'Turma', classIndex: classIndex + 1, classTotal: groups.length })
         await new Promise((resolve) => setTimeout(resolve, 0))
         const props = { student, assessment, classroom: group.classroom, school }
+        const version = getAnswerKeyVersionForStudent(assessment, student)
+        const cacheKey = version?.id || 'default'
+        const needsPaper = includePaper && assessment.contentMode === 'full'
         flushSync(() => root.render(createElement(Fragment, null,
           createElement(AnswerSheet, props),
-          includePaper && assessment.contentMode === 'full' ? createElement(AssessmentPaper, props) : null,
+          needsPaper && !paperCache.has(cacheKey) ? createElement(AssessmentPaper, { ...props, student: { ...student, name: '' } }) : null,
         )))
-        addPage(pdf, await renderSheetCanvas(mount.querySelector('svg.answer-sheet'), imageCache))
-        if (includePaper && assessment.contentMode === 'full') await addPaperPages(pdf, mount.querySelector('.assessment-paper'), host, html2canvas)
+        nextPage(pdf)
+        await drawAnswerSheetPdf(pdf, mount.querySelector('svg.answer-sheet'), loadLogo)
+        if (needsPaper) {
+          if (!paperCache.has(cacheKey)) paperCache.set(cacheKey, await renderPaperTemplates(mount.querySelector('.assessment-paper'), host, html2canvas, cacheKey))
+          checkCancelled()
+          addPaperTemplates(pdf, paperCache.get(cacheKey), student, assessment, version)
+        }
         completed += 1
       }
-      files.push({ filename: group.filename, bytes: new Uint8Array(pdf.output('arraybuffer')) })
+      const bytes = new Uint8Array(pdf.output('arraybuffer'))
+      checkCancelled()
+      await onFile({ filename: group.filename, bytes, blob: new Blob([bytes], { type: 'application/pdf' }), classId: group.classroom?.id, studentCount: group.students.length })
     }
-    onProgress({ completed, total, classroom: '' })
-    return { ...createClassArchive(files, assessment.code), classCount: groups.length, studentCount: total }
+    onProgress({ completed, total, classroom: '', classIndex: groups.length, classTotal: groups.length })
+    return { classCount: groups.length, studentCount: total }
   } finally {
     root.unmount()
     host.remove()
   }
+}
+
+export async function exportAssessmentClassesZip(options) {
+  const files = []
+  const summary = await exportAssessmentClassPdfs({ ...options, onFile: (file) => { files.push({ filename: file.filename, bytes: file.bytes }) } })
+  return { ...createClassArchive(files, options.assessment.code), ...summary }
 }
