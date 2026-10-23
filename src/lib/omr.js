@@ -650,6 +650,7 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
       annulled,
       cancelled: isCancelled,
       status,
+      confidence: Math.round(readingClarity(status, scores) * 100),
       optionPositions: scores.map((item) => ({
         x: item.center.x,
         y: item.center.y,
@@ -667,9 +668,28 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   const gradedTotal = Math.max(0, assessment.questionCount - cancelled)
   return {
     answers, correct, wrong, blank, multiple, uncertain, cancelled, gradedTotal,
+    readingClarity: answers.length ? answers.reduce((sum, answer) => sum + answer.confidence, 0) / answers.length / 100 : 0,
     score: gradedTotal ? Math.round((correct / gradedTotal) * 100) : 0,
     answerSheetFormat: layout.id,
   }
+}
+
+// How clearly the evidence supports the reading, from 0 to 1: the gap
+// between the strongest and second strongest option for one mark, the
+// distance from any ink for a blank, the second mark for a double one.
+// A question sent to review is, by definition, not a clear reading.
+function readingClarity(status, scores) {
+  if (status === 'cancelled') return 1
+  const evidence = scores.map((score) => Math.max(
+    Math.min(score.rowContrast, score.localContrast),
+    Math.min(score.rowInteriorContrast, score.localInteriorContrast),
+  )).sort((first, second) => second - first)
+  const clamp = (value) => Math.max(0, Math.min(1, value))
+  if (status === 'uncertain') return 0
+  if (status === 'multiple') return clamp(evidence[1] / 0.25)
+  if (status === 'blank') return clamp(1 - evidence[0] / 0.1)
+  // Correct or wrong, including annulled questions that still carry a mark.
+  return evidence[0] < 0.05 ? clamp(1 - evidence[0] / 0.1) : clamp((evidence[0] - evidence[1]) / 0.25)
 }
 
 function cropPixels(imageData, bounds) {
@@ -810,7 +830,11 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
     ...marks,
     previewWidth: data.width,
     previewHeight: data.height,
-    confidence: Math.max(48, Math.min(99, Math.round(55 + markersFound * 7 + (qrIdentity ? 15 : 0) - marks.uncertain * 1.5))),
+    // 48–99, as before: estimated framing stays at the floor; otherwise the
+    // mean clarity of every question, reduced when the grid fit is weak.
+    confidence: detectedMarkers
+      ? Math.max(48, Math.min(99, Math.round(48 + 51 * marks.readingClarity * Math.min(1, gridAlignment === null ? 1 : gridAlignment / 0.12))))
+      : 48,
   }
 }
 

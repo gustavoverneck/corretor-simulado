@@ -103,6 +103,7 @@ const scenarios = {
   flat: [true, () => warp({ quad: flat })],
   strongPerspective: [true, () => warp({ quad: strong })],
   rot20: [true, () => warp({ quad: [[250, 250], [1450, 250], [1450, 1950], [250, 1950]], rotDeg: 20 })],
+  rot40: [true, () => warp({ quad: [[350, 400], [1350, 400], [1350, 1800], [350, 1800]], rotDeg: 40 })],
   rot90: [true, () => warp({ quad: [[250, 250], [1450, 250], [1450, 1950], [250, 1950]], rotDeg: 90 })],
   upsideDown: [true, () => warp({ quad: flat, rot180: true })],
   dim: [true, () => light(warp({ quad: flat }), { gain: 0.5 })],
