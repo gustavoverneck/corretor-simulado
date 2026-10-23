@@ -112,7 +112,8 @@ export function AnswerSheet({ student, assessment, classroom, school }) {
       <line x1="66" y1="1023" x2="728" y2="1023" stroke="#d8dedb" />
       <text x="66" y="1045" fontFamily="Arial" fontSize="8.5" fill="#69736f">{school.name} · {school.city}/{school.state}</text>
       <text x="728" y="1045" textAnchor="end" fontFamily="Arial" fontSize="8.5" fill="#69736f">{assessment.questionCount} questões · Página única</text>
-      <text x="397" y="1090" textAnchor="middle" fontFamily="Arial" fontSize="7" fill="#a2aaa6">{payload}</text>
+      <line x1="216" y1="1082" x2="578" y2="1082" stroke="#69736f" />
+      <text x="397" y="1097" textAnchor="middle" fontFamily="Arial" fontSize="9" fill="#69736f">Assinatura do(a) aluno(a)</text>
     </svg>
   )
 }
