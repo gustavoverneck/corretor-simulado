@@ -12,6 +12,10 @@ export const MARKERS = {
   bottomRight: { x: 744, y: 1013 },
 }
 export const CURRENT_MARKER_LAYOUT = 'answer-grid'
+// Centre of the printed QR (AnswerSheet draws it at 50,139 with size 156).
+const QR_CENTER = { x: 128, y: 217 }
+// Printed bubble outlines must line up with the grid or the alignment is rejected.
+const MIN_GRID_ALIGNMENT = 0.035
 
 export function bubbleCenter(questionIndex, optionIndex, questionCount = 40) {
   return layoutBubbleCenter(questionIndex, optionIndex, getSheetLayout(getSheetFormat(questionCount, 5)))
@@ -170,7 +174,24 @@ export function detectSheetMarkers(imageData, qrLocation) {
       }
     }
   }
+  if (best && qrLocation) best.corners = orientCornersByQr(best.corners, qrLocation)
   return best
+}
+
+// The four targets form a near-square, so a sheet photographed upside down or
+// sideways still passes the geometry checks with its corners swapped. The QR
+// sits only at the top left: choose the rotation that projects it there.
+function orientCornersByQr(corners, qrLocation, templateMarkers = MARKERS) {
+  const qrPoints = [qrLocation.topLeftCorner, qrLocation.topRightCorner, qrLocation.bottomRightCorner, qrLocation.bottomLeftCorner]
+  const qrCenter = { x: qrPoints.reduce((sum, point) => sum + point.x, 0) / 4, y: qrPoints.reduce((sum, point) => sum + point.y, 0) / 4 }
+  const cyclic = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft']
+  let best = null
+  for (let turn = 0; turn < 4; turn += 1) {
+    const rotated = Object.fromEntries(cyclic.map((key, index) => [key, corners[cyclic[(index + turn) % 4]]]))
+    const offset = distance(project(QR_CENTER, rotated, templateMarkers), qrCenter)
+    if (!best || offset < best.offset) best = { corners: rotated, offset }
+  }
+  return best.corners
 }
 
 function project(point, corners, templateMarkers = MARKERS) {
@@ -248,6 +269,102 @@ function sampleColorInk(imageData, center, radius) {
     }
   }
   return total ? ink / total : 0
+}
+
+// Divides every channel by a smooth estimate of the paper colour, so dim
+// photos, gradients and tinted light become white paper with dark targets.
+export function normalizeIllumination(imageData) {
+  const { width, height, data } = imageData
+  const block = Math.max(16, Math.round(Math.max(width, height) / 24))
+  const columns = Math.ceil(width / block)
+  const rows = Math.ceil(height / block)
+  const paper = new Float32Array(columns * rows * 4)
+  const histogram = new Uint32Array(64)
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const x0 = column * block
+      const y0 = row * block
+      const x1 = Math.min(width, x0 + block)
+      const y1 = Math.min(height, y0 + block)
+      histogram.fill(0)
+      let total = 0
+      for (let y = y0; y < y1; y += 2) {
+        for (let x = x0; x < x1; x += 2) {
+          histogram[Math.min(63, Math.floor(luminance(data, (y * width + x) * 4) * 64))] += 1
+          total += 1
+        }
+      }
+      // Paper is the brightest tenth of the block: ink, print and noise are darker.
+      let bin = 63
+      for (let seen = 0; bin > 0; bin -= 1) {
+        seen += histogram[bin]
+        if (seen >= total * 0.1) break
+      }
+      let red = 0
+      let green = 0
+      let blue = 0
+      let count = 0
+      for (let y = y0; y < y1; y += 2) {
+        for (let x = x0; x < x1; x += 2) {
+          const offset = (y * width + x) * 4
+          if (luminance(data, offset) * 64 < bin) continue
+          red += data[offset]
+          green += data[offset + 1]
+          blue += data[offset + 2]
+          count += 1
+        }
+      }
+      const index = (row * columns + column) * 4
+      paper[index] = red / Math.max(1, count)
+      paper[index + 1] = green / Math.max(1, count)
+      paper[index + 2] = blue / Math.max(1, count)
+      paper[index + 3] = bin / 64
+    }
+  }
+  // Each block keeps its own paper estimate: borrowing from neighbours would
+  // carry lit paper into the edge of a shadow and darken the bubbles there.
+  // Bilinear interpolation between block centres already gives a smooth field.
+  const field = paper.map((value, index) => (index % 4 === 3 ? value : Math.max(24, value)))
+  const output = new Uint8ClampedArray(data.length)
+  for (let y = 0; y < height; y += 1) {
+    const gy = Math.max(0, Math.min(rows - 1, (y + 0.5) / block - 0.5))
+    const r0 = Math.floor(gy)
+    const r1 = Math.min(rows - 1, r0 + 1)
+    const fy = gy - r0
+    for (let x = 0; x < width; x += 1) {
+      const gx = Math.max(0, Math.min(columns - 1, (x + 0.5) / block - 0.5))
+      const c0 = Math.floor(gx)
+      const c1 = Math.min(columns - 1, c0 + 1)
+      const fx = gx - c0
+      const offset = (y * width + x) * 4
+      for (let channel = 0; channel < 3; channel += 1) {
+        const top = field[(r0 * columns + c0) * 4 + channel] * (1 - fx) + field[(r0 * columns + c1) * 4 + channel] * fx
+        const bottom = field[(r1 * columns + c0) * 4 + channel] * (1 - fx) + field[(r1 * columns + c1) * 4 + channel] * fx
+        output[offset + channel] = data[offset + channel] * 255 / (top * (1 - fy) + bottom * fy)
+      }
+      output[offset + 3] = 255
+    }
+  }
+  return { data: output, width, height }
+}
+
+// Median contrast between each printed bubble outline and the paper just
+// outside it. A wrong set of corners places the grid off the outlines and
+// the contrast collapses to zero, so the reading cannot be trusted.
+export function gridAlignmentScore(imageData, corners, layout, questionCount, optionCount, templateMarkers = MARKERS) {
+  const templateWidth = templateMarkers.topRight.x - templateMarkers.topLeft.x
+  const sheetScale = distance(corners.topLeft, corners.topRight) / templateWidth
+  const radius = layout.bubbleRadius * sheetScale
+  const contrasts = []
+  for (let question = 0; question < questionCount; question += 1) {
+    for (let option = 0; option < optionCount; option += 1) {
+      const center = project(layoutBubbleCenter(question, option, layout), corners, templateMarkers)
+      const outline = sampleDarkness(imageData, center, radius * 1.15, radius * 0.85)
+      const outside = sampleDarkness(imageData, center, radius * 1.55, radius * 1.3)
+      contrasts.push(outline - outside)
+    }
+  }
+  return percentile(contrasts, 0.5)
 }
 
 function percentile(values, ratio) {
@@ -499,15 +616,18 @@ export function requireCurrentQr(payload) {
 }
 
 export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, settings = {}, resolveContext) {
-  let qr = readSheetQr(data)
-  let detectedMarkers = detectSheetMarkers(data, qr?.location)
+  // Alignment runs on the flat-fielded copy, where dim photos and lighting
+  // gradients still show four crisp targets. Marks are graded on the original
+  // pixels, whose row and neighbourhood baselines already absorb lighting and
+  // do not inherit the field's softened response to a hard shadow edge.
+  const flat = normalizeIllumination(data)
+  let qr = readSheetQr(flat)
+  let detectedMarkers = detectSheetMarkers(flat, qr?.location)
   const estimatedCorners = Object.fromEntries(Object.entries(MARKERS).map(([key, point]) => [key, { x: data.width * point.x / SHEET.width, y: data.height * point.y / SHEET.height }]))
   if (!qr) {
-    qr = readSheetQr(data, detectedMarkers?.corners || estimatedCorners)
-    if (qr) detectedMarkers = detectSheetMarkers(data, qr.location)
+    qr = readSheetQr(flat, detectedMarkers?.corners || estimatedCorners)
+    if (qr) detectedMarkers = detectSheetMarkers(flat, qr.location)
   }
-  const corners = detectedMarkers?.corners || estimatedCorners
-  const markersFound = detectedMarkers ? 4 : 0
   const qrIdentity = requireCurrentQr(qr?.data)
   const identity = { ...qrIdentity, studentId: qrIdentity.studentId || fallbackIdentity.studentId || null }
   const resolved = resolveContext?.(identity) || {}
@@ -517,6 +637,13 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
   if (qrIdentity && qrIdentity.assessmentId !== activeAssessment.id) throw new Error('O simulado identificado pelo QR não foi encontrado.')
 
   const sheetFormat = qrIdentity?.sheetFormat || null
+  const layout = qrIdentity.version === 2 ? getLegacySheetLayout(activeAssessment.questionCount) : validateSheetFormat(sheetFormat) ? getSheetLayout(sheetFormat) : null
+  const gridAlignment = detectedMarkers && layout ? gridAlignmentScore(flat, detectedMarkers.corners, layout, activeAssessment.questionCount, activeAssessment.optionCount) : null
+  // Four targets in a plausible shape can still be the wrong four (a QR finder,
+  // a dark mark). Without the printed grid under them, nothing is graded.
+  if (gridAlignment !== null && gridAlignment < MIN_GRID_ALIGNMENT) detectedMarkers = null
+  const corners = detectedMarkers?.corners || estimatedCorners
+  const markersFound = detectedMarkers ? 4 : 0
   let marks = qrIdentity.version === 2
     ? analyzeMarks(data, activeAssessment, activeAnswerKey, corners, settings, MARKERS, getLegacySheetLayout(activeAssessment.questionCount))
     : analyzePrintedSheet(data, activeAssessment, activeAnswerKey, corners, settings, MARKERS, sheetFormat)
@@ -538,6 +665,7 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
     markerCorners: detectedMarkers ? Object.fromEntries(Object.entries(corners).map(([key, point]) => [key, { x: Math.round(point.x), y: Math.round(point.y) }])) : null,
     markerLayout: CURRENT_MARKER_LAYOUT,
     alignmentMode: detectedMarkers ? 'answer-grid-markers' : 'estimated',
+    gridAlignment: gridAlignment === null ? null : Number(gridAlignment.toFixed(3)),
     ...marks,
     previewWidth: data.width,
     previewHeight: data.height,
@@ -553,10 +681,11 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
 
 export async function prepareOmrCalibration(file) {
   const { data, canvas } = await imageDataFromFile(file)
-  const qr = readSheetQr(data)
+  const flat = normalizeIllumination(data)
+  const qr = readSheetQr(flat)
   const identity = requireCurrentQr(qr?.data)
   if (!validateSheetFormat(identity.sheetFormat)) throw new Error('Para testar os ajustes, use uma folha com QR Code no formato atual (v3 ou v4).')
-  const markers = detectSheetMarkers(data, qr?.location)
+  const markers = detectSheetMarkers(flat, qr?.location)
   if (!markers) throw new Error('Os quatro marcadores precisam estar completos e nítidos para testar a leitura.')
   return { pixels: data, corners: markers.corners, format: identity.sheetFormat, preview: canvas.toDataURL('image/jpeg', 0.9), name: file.name }
 }

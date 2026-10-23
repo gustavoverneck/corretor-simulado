@@ -87,7 +87,14 @@ for (const version of [2, 3]) {
     context.fillStyle = '#fff'; context.fillRect(marker.x-7,marker.y-7,14,14)
     context.fillStyle = '#000'; context.fillRect(marker.x-3,marker.y-3,6,6)
   }
+  // Printed sheets always carry the bubble outlines; the reader checks that
+  // the grid it projects lands on them before trusting the four targets.
+  context.strokeStyle = '#4b5651'; context.lineWidth = 1.25
   for (let q=0;q<45;q+=1) {
+    for (let option=0;option<5;option+=1) {
+      const outline=layoutBubbleCenter(q,option,layout)
+      context.beginPath();context.arc(outline.x,outline.y,layout.bubbleRadius,0,Math.PI*2);context.stroke()
+    }
     const center=layoutBubbleCenter(q,1,layout)
     context.beginPath();context.arc(center.x,center.y,layout.bubbleRadius*.8,0,Math.PI*2);context.fill()
   }
