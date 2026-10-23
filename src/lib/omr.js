@@ -12,6 +12,10 @@ export const MARKERS = {
   bottomRight: { x: 744, y: 1013 },
 }
 export const CURRENT_MARKER_LAYOUT = 'answer-grid'
+// Centre of the printed QR (AnswerSheet draws it at 50,139 with size 156).
+const QR_CENTER = { x: 128, y: 217 }
+// Printed bubble outlines must line up with the grid or the alignment is rejected.
+const MIN_GRID_ALIGNMENT = 0.035
 
 export function bubbleCenter(questionIndex, optionIndex, questionCount = 40) {
   return layoutBubbleCenter(questionIndex, optionIndex, getSheetLayout(getSheetFormat(questionCount, 5)))
@@ -170,7 +174,24 @@ export function detectSheetMarkers(imageData, qrLocation) {
       }
     }
   }
+  if (best && qrLocation) best.corners = orientCornersByQr(best.corners, qrLocation)
   return best
+}
+
+// The four targets form a near-square, so a sheet photographed upside down or
+// sideways still passes the geometry checks with its corners swapped. The QR
+// sits only at the top left: choose the rotation that projects it there.
+function orientCornersByQr(corners, qrLocation, templateMarkers = MARKERS) {
+  const qrPoints = [qrLocation.topLeftCorner, qrLocation.topRightCorner, qrLocation.bottomRightCorner, qrLocation.bottomLeftCorner]
+  const qrCenter = { x: qrPoints.reduce((sum, point) => sum + point.x, 0) / 4, y: qrPoints.reduce((sum, point) => sum + point.y, 0) / 4 }
+  const cyclic = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft']
+  let best = null
+  for (let turn = 0; turn < 4; turn += 1) {
+    const rotated = Object.fromEntries(cyclic.map((key, index) => [key, corners[cyclic[(index + turn) % 4]]]))
+    const offset = distance(project(QR_CENTER, rotated, templateMarkers), qrCenter)
+    if (!best || offset < best.offset) best = { corners: rotated, offset }
+  }
+  return best.corners
 }
 
 function project(point, corners, templateMarkers = MARKERS) {
@@ -225,6 +246,43 @@ function sampleDarkness(imageData, center, radius, innerRadius = 0) {
   return total ? dark / total : 0
 }
 
+// How bright the paper is around a bubble: the brightest tenth of a square
+// around it, which print, ink and the outline never fill.
+function sampleLight(imageData, center, half) {
+  const { width, height, data } = imageData
+  const stride = Math.max(1, Math.round(half / 6))
+  const values = []
+  for (let y = Math.floor(center.y - half); y <= center.y + half; y += stride) {
+    for (let x = Math.floor(center.x - half); x <= center.x + half; x += stride) {
+      if (x >= 0 && y >= 0 && x < width && y < height) values.push(luminance(data, (y * width + x) * 4))
+    }
+  }
+  return Math.max(0.02, percentile(values, 0.9))
+}
+
+// The paper ring is split in eight sectors and the darker side is kept: when a
+// shadow edge crosses the bubble, its centre is compared with the shaded paper
+// instead of reading the shade as ink. A single sector (a stroke that left the
+// outline, a neighbouring mark) cannot set the value on its own.
+function samplePaper(imageData, center, radius, innerRadius) {
+  const { width, height, data } = imageData
+  const sums = new Float64Array(8)
+  const counts = new Uint32Array(8)
+  for (let y = Math.floor(center.y - radius); y <= center.y + radius; y += 1) {
+    for (let x = Math.floor(center.x - radius); x <= center.x + radius; x += 1) {
+      if (x < 0 || y < 0 || x >= width || y >= height) continue
+      const distance = Math.hypot(x - center.x, y - center.y)
+      if (distance > radius || distance < innerRadius) continue
+      const sector = Math.floor(((Math.atan2(y - center.y, x - center.x) + Math.PI) / (Math.PI * 2)) * 8) % 8
+      sums[sector] += 1 - luminance(data, (y * width + x) * 4)
+      counts[sector] += 1
+    }
+  }
+  const sectors = []
+  for (let sector = 0; sector < 8; sector += 1) if (counts[sector]) sectors.push(sums[sector] / counts[sector])
+  return percentile(sectors, 0.75)
+}
+
 function sampleColorInk(imageData, center, radius) {
   const { width, height, data } = imageData
   let ink = 0
@@ -250,6 +308,185 @@ function sampleColorInk(imageData, center, radius) {
   return total ? ink / total : 0
 }
 
+// Divides every channel by a smooth estimate of the paper colour, so dim
+// photos, gradients and tinted light become white paper with dark targets.
+export function normalizeIllumination(imageData) {
+  const { width, height, data } = imageData
+  const block = Math.max(16, Math.round(Math.max(width, height) / 24))
+  const columns = Math.ceil(width / block)
+  const rows = Math.ceil(height / block)
+  const paper = new Float32Array(columns * rows * 4)
+  const histogram = new Uint32Array(64)
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const x0 = column * block
+      const y0 = row * block
+      const x1 = Math.min(width, x0 + block)
+      const y1 = Math.min(height, y0 + block)
+      histogram.fill(0)
+      let total = 0
+      for (let y = y0; y < y1; y += 2) {
+        for (let x = x0; x < x1; x += 2) {
+          histogram[Math.min(63, Math.floor(luminance(data, (y * width + x) * 4) * 64))] += 1
+          total += 1
+        }
+      }
+      // Paper is the brightest tenth of the block: ink, print and noise are darker.
+      let bin = 63
+      for (let seen = 0; bin > 0; bin -= 1) {
+        seen += histogram[bin]
+        if (seen >= total * 0.1) break
+      }
+      let red = 0
+      let green = 0
+      let blue = 0
+      let count = 0
+      for (let y = y0; y < y1; y += 2) {
+        for (let x = x0; x < x1; x += 2) {
+          const offset = (y * width + x) * 4
+          if (luminance(data, offset) * 64 < bin) continue
+          red += data[offset]
+          green += data[offset + 1]
+          blue += data[offset + 2]
+          count += 1
+        }
+      }
+      const index = (row * columns + column) * 4
+      paper[index] = red / Math.max(1, count)
+      paper[index + 1] = green / Math.max(1, count)
+      paper[index + 2] = blue / Math.max(1, count)
+      paper[index + 3] = bin / 64
+    }
+  }
+  // Each block keeps its own paper estimate: borrowing from neighbours would
+  // carry lit paper into the edge of a shadow and darken the bubbles there.
+  // Bilinear interpolation between block centres already gives a smooth field.
+  const field = paper.map((value, index) => (index % 4 === 3 ? value : Math.max(24, value)))
+  const output = new Uint8ClampedArray(data.length)
+  for (let y = 0; y < height; y += 1) {
+    const gy = Math.max(0, Math.min(rows - 1, (y + 0.5) / block - 0.5))
+    const r0 = Math.floor(gy)
+    const r1 = Math.min(rows - 1, r0 + 1)
+    const fy = gy - r0
+    for (let x = 0; x < width; x += 1) {
+      const gx = Math.max(0, Math.min(columns - 1, (x + 0.5) / block - 0.5))
+      const c0 = Math.floor(gx)
+      const c1 = Math.min(columns - 1, c0 + 1)
+      const fx = gx - c0
+      const offset = (y * width + x) * 4
+      for (let channel = 0; channel < 3; channel += 1) {
+        const top = field[(r0 * columns + c0) * 4 + channel] * (1 - fx) + field[(r0 * columns + c1) * 4 + channel] * fx
+        const bottom = field[(r1 * columns + c0) * 4 + channel] * (1 - fx) + field[(r1 * columns + c1) * 4 + channel] * fx
+        output[offset + channel] = data[offset + channel] * 255 / (top * (1 - fy) + bottom * fy)
+      }
+      output[offset + 3] = 255
+    }
+  }
+  return { data: output, width, height }
+}
+
+function pixelDarkness(imageData, x, y) {
+  const px = Math.round(x)
+  const py = Math.round(y)
+  if (px < 0 || py < 0 || px >= imageData.width || py >= imageData.height) return 0
+  return 1 - luminance(imageData.data, (py * imageData.width + px) * 4)
+}
+
+// Darkness on the printed outline minus the paper just outside it.
+const OUTLINE_ANGLES = Array.from({ length: 16 }, (_, step) => [Math.cos(step * Math.PI / 8), Math.sin(step * Math.PI / 8)])
+
+function outlineContrast(imageData, center, radius) {
+  let outline = 0
+  let outside = 0
+  for (const [cos, sin] of OUTLINE_ANGLES) {
+    for (const ratio of [0.9, 1, 1.1]) outline += pixelDarkness(imageData, center.x + cos * radius * ratio, center.y + sin * radius * ratio)
+    outside += pixelDarkness(imageData, center.x + cos * radius * 1.5, center.y + sin * radius * 1.5)
+  }
+  return outline / 48 - outside / 16
+}
+
+// Four corners cannot follow a curved or wavy sheet. Walk each column from
+// the top (closest to the targets) and let every few rows shift by up to
+// three quarters of a bubble from the previous ones, to wherever the printed
+// outlines are darkest. Smooth drift is followed; a jump to a neighbouring
+// bubble is not reachable in one step.
+export function projectBubbleGrid(imageData, corners, layout, questionCount, optionCount, templateMarkers = MARKERS) {
+  const templateWidth = templateMarkers.topRight.x - templateMarkers.topLeft.x
+  const templateHeight = templateMarkers.bottomLeft.y - templateMarkers.topLeft.y
+  const horizontalScale = distance(corners.topLeft, corners.topRight) / templateWidth
+  const verticalScale = distance(corners.topLeft, corners.bottomLeft) / templateHeight
+  const sheetScale = Math.min(horizontalScale, verticalScale)
+  const radius = layout.bubbleRadius * sheetScale
+  const projected = Array.from({ length: questionCount }, (_, question) => (
+    Array.from({ length: optionCount }, (_, option) => project(layoutBubbleCenter(question, option, layout), corners, templateMarkers))
+  ))
+  const step = radius / 4
+  const middle = (optionCount - 1) / 2
+  // A row shifts as a whole (x, y) and may stretch sideways (spread per option),
+  // which is how a sheet bent across its width moves the outer options.
+  const shift = (offset, option) => ({ x: offset.x + offset.spread * (option - middle), y: offset.y })
+  const rowScore = (question, offset) => projected[question].reduce((sum, center, option) => {
+    const moved = shift(offset, option)
+    return sum + outlineContrast(imageData, { x: center.x + moved.x, y: center.y + moved.y }, radius)
+  }, 0)
+  const largestShift = (offset) => Math.max(...projected[0].map((_, option) => Math.hypot(shift(offset, option).x, offset.y)))
+  const none = { x: 0, y: 0, spread: 0 }
+  const offsets = Array(questionCount)
+  for (let start = 0; start < questionCount; start += layout.rowsPerColumn) {
+    const end = Math.min(questionCount, start + layout.rowsPerColumn)
+    let previous = none
+    for (let question = start; question < end; question += 1) {
+      const window = [question - 1, question, question + 1].filter((index) => index >= start && index < end)
+      const score = (offset) => window.reduce((sum, index) => sum + rowScore(index, offset), 0)
+      const margin = 0.03 * window.length * optionCount
+      let best = { offset: previous, score: score(previous) }
+      const kept = best.score
+      // Translation first, then the sideways stretch around it.
+      for (let dy = -3; dy <= 3; dy += 1) {
+        for (let dx = -3; dx <= 3; dx += 1) {
+          if (!dx && !dy) continue
+          const offset = { x: previous.x + dx * step, y: previous.y + dy * step, spread: previous.spread }
+          const candidate = score(offset)
+          if (candidate > best.score) best = { offset, score: candidate }
+        }
+      }
+      const translated = best.offset
+      for (const ds of [-2, -1, 1, 2]) {
+        const offset = { ...translated, spread: translated.spread + ds * step / 2 }
+        const candidate = score(offset)
+        if (candidate > best.score) best = { offset, score: candidate }
+      }
+      // Move only for a clear gain, so print noise cannot make the grid wander.
+      if (best.score > kept + margin) previous = best.offset
+      // The bubble samples tolerate a third of a radius, and smaller shifts are
+      // within the outline search's own noise. Keep the projection unless the
+      // shift is larger than that and clearly beats it on these rows.
+      offsets[question] = largestShift(previous) >= radius * 0.4 && score(previous) > score(none) + margin ? previous : none
+    }
+  }
+  const centers = projected.map((row, question) => row.map((center, option) => {
+    const moved = shift(offsets[question], option)
+    return { x: center.x + moved.x, y: center.y + moved.y }
+  }))
+  return { centers, radius, sheetScale }
+}
+
+// Median contrast between each printed bubble outline and the paper just
+// outside it. A wrong set of corners places the grid off the outlines and
+// the contrast collapses to zero, so the reading cannot be trusted.
+export function gridAlignmentScore(imageData, corners, layout, questionCount, optionCount, templateMarkers = MARKERS) {
+  const { centers, radius } = projectBubbleGrid(imageData, corners, layout, questionCount, optionCount, templateMarkers)
+  const contrasts = []
+  for (const row of centers) {
+    for (const center of row) {
+      const outline = sampleDarkness(imageData, center, radius * 1.15, radius * 0.85)
+      const outside = sampleDarkness(imageData, center, radius * 1.55, radius * 1.3)
+      contrasts.push(outline - outside)
+    }
+  }
+  return percentile(contrasts, 0.5)
+}
+
 function percentile(values, ratio) {
   if (!values.length) return 0
   const sorted = [...values].sort((first, second) => first - second)
@@ -272,6 +509,11 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   const interiorRadius = layout.bubbleRadius * 0.82 * sheetScale
   const letterRadius = layout.bubbleRadius * 0.38 * sheetScale
   const colorSampleRadius = Math.max(2.4, layout.bubbleRadius * 0.76 * sheetScale)
+  // The paper just outside each outline, between neighbouring bubbles. It
+  // lies under the same light as the bubble, so a shadow edge cannot raise
+  // one option of a row over the others.
+  const paperInnerRadius = layout.bubbleRadius * 1.3 * sheetScale
+  const paperOuterRadius = Math.max(paperInnerRadius + 1.5, layout.bubbleRadius * 1.55 * sheetScale)
   const { markThreshold, ambiguityThreshold } = resolveOmrSettings(settings)
   const contrastThreshold = Math.max(0.06, Math.min(0.13, markThreshold * 0.22))
   const possibleContrastThreshold = Math.min(contrastThreshold * 0.92, Math.max(0.045, ambiguityThreshold * 0.34))
@@ -289,50 +531,66 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   let uncertain = 0
   let cancelled = 0
 
+  const { centers } = projectBubbleGrid(imageData, corners, layout, assessment.questionCount, assessment.optionCount, templateMarkers)
   const measured = Array.from({ length: assessment.questionCount }, (_, question) => (
     Array.from({ length: assessment.optionCount }, (_, option) => {
-      const center = project(layoutBubbleCenter(question, option, layout), corners, templateMarkers)
+      const center = centers[question][option]
       return {
         option,
         value: sampleDarkness(imageData, center, sampleRadius),
         interior: sampleDarkness(imageData, center, interiorRadius, letterRadius),
+        paper: samplePaper(imageData, center, paperOuterRadius, paperInnerRadius),
+        light: sampleLight(imageData, center, paperOuterRadius * 1.25),
         color: sampleColorInk(imageData, center, colorSampleRadius),
         center,
       }
     })
   ))
 
+  // Under even light a row is compared by darkness, as always. When the paper
+  // around the options of a row differs (a shadow edge crosses it), darkness
+  // would rank the shaded options as marks, so that row is compared by the ink
+  // above each bubble's own surrounding paper instead.
+  measured.flat().forEach((score) => {
+    score.ink = score.value - score.paper
+    score.interiorInk = score.interior - score.paper
+  })
+  const contrasts = (scores, question, columnStart, columnEnd, key) => {
+    const rowBaseline = percentile(scores.map((score) => score[key]), 0.25)
+    return scores.map((score) => {
+      const nearby = []
+      for (let index = Math.max(columnStart, question - 6); index < Math.min(columnEnd, question + 7); index += 1) {
+        // Estimate paper from the lighter options in each nearby row.
+        // Repeated answers (or a one-question sheet) must not become background.
+        if (measured[index]?.[score.option]) nearby.push(percentile(measured[index].map((item) => item[key]), 0.25))
+      }
+      return { row: score[key] - rowBaseline, local: score[key] - percentile(nearby, 0.25) }
+    })
+  }
+
   for (let question = 0; question < assessment.questionCount; question += 1) {
     const scores = measured[question]
     const columnStart = Math.floor(question / layout.rowsPerColumn) * layout.rowsPerColumn
     const columnEnd = Math.min(assessment.questionCount, columnStart + layout.rowsPerColumn)
-    const rowBaseline = percentile(scores.map((score) => score.value), 0.25)
     // Black ink lowers the blue channel response. Use the median so it cannot
     // make the remaining blue-tinted paper look like a second weak answer.
     const rowColorBaseline = percentile(scores.map((score) => score.color), 0.5)
-    const rowInteriorBaseline = percentile(scores.map((score) => score.interior), 0.25)
-    scores.forEach((score) => {
-      const nearby = []
+    const lights = scores.map((score) => score.light)
+    const unevenLight = Math.max(...lights) > Math.min(...lights) * 1.12
+    const darkness = contrasts(scores, question, columnStart, columnEnd, unevenLight ? 'ink' : 'value')
+    const interior = contrasts(scores, question, columnStart, columnEnd, unevenLight ? 'interiorInk' : 'interior')
+    scores.forEach((score, index) => {
       const nearbyColors = []
-      const nearbyInterior = []
-      for (let index = Math.max(columnStart, question - 6); index < Math.min(columnEnd, question + 7); index += 1) {
-        if (measured[index]?.[score.option]) {
-          // Estimate paper from the lighter options in each nearby row.
-          // Repeated answers (or a one-question sheet) must not become background.
-          nearby.push(percentile(measured[index].map((item) => item.value), 0.25))
-          nearbyColors.push(measured[index][score.option].color)
-          nearbyInterior.push(percentile(measured[index].map((item) => item.interior), 0.25))
-        }
+      for (let row = Math.max(columnStart, question - 6); row < Math.min(columnEnd, question + 7); row += 1) {
+        if (measured[row]?.[score.option]) nearbyColors.push(measured[row][score.option].color)
       }
-      score.localBaseline = percentile(nearby, 0.25)
       score.localColorBaseline = percentile(nearbyColors, 0.25)
-      score.localInteriorBaseline = percentile(nearbyInterior, 0.25)
-      score.rowContrast = score.value - rowBaseline
-      score.localContrast = score.value - score.localBaseline
+      score.rowContrast = darkness[index].row
+      score.localContrast = darkness[index].local
       score.rowColorContrast = score.color - rowColorBaseline
       score.localColorContrast = score.color - score.localColorBaseline
-      score.rowInteriorContrast = score.interior - rowInteriorBaseline
-      score.localInteriorContrast = score.interior - score.localInteriorBaseline
+      score.rowInteriorContrast = interior[index].row
+      score.localInteriorContrast = interior[index].local
     })
     // Para cor, o fundo correto é a própria linha: todas as alternativas estão
     // sob a mesma luz. Comparar com outras questões deixava sombras verticais e
@@ -392,6 +650,7 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
       annulled,
       cancelled: isCancelled,
       status,
+      confidence: Math.round(readingClarity(status, scores) * 100),
       optionPositions: scores.map((item) => ({
         x: item.center.x,
         y: item.center.y,
@@ -409,9 +668,28 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   const gradedTotal = Math.max(0, assessment.questionCount - cancelled)
   return {
     answers, correct, wrong, blank, multiple, uncertain, cancelled, gradedTotal,
+    readingClarity: answers.length ? answers.reduce((sum, answer) => sum + answer.confidence, 0) / answers.length / 100 : 0,
     score: gradedTotal ? Math.round((correct / gradedTotal) * 100) : 0,
     answerSheetFormat: layout.id,
   }
+}
+
+// How clearly the evidence supports the reading, from 0 to 1: the gap
+// between the strongest and second strongest option for one mark, the
+// distance from any ink for a blank, the second mark for a double one.
+// A question sent to review is, by definition, not a clear reading.
+function readingClarity(status, scores) {
+  if (status === 'cancelled') return 1
+  const evidence = scores.map((score) => Math.max(
+    Math.min(score.rowContrast, score.localContrast),
+    Math.min(score.rowInteriorContrast, score.localInteriorContrast),
+  )).sort((first, second) => second - first)
+  const clamp = (value) => Math.max(0, Math.min(1, value))
+  if (status === 'uncertain') return 0
+  if (status === 'multiple') return clamp(evidence[1] / 0.25)
+  if (status === 'blank') return clamp(1 - evidence[0] / 0.1)
+  // Correct or wrong, including annulled questions that still carry a mark.
+  return evidence[0] < 0.05 ? clamp(1 - evidence[0] / 0.1) : clamp((evidence[0] - evidence[1]) / 0.25)
 }
 
 function cropPixels(imageData, bounds) {
@@ -499,15 +777,18 @@ export function requireCurrentQr(payload) {
 }
 
 export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, settings = {}, resolveContext) {
-  let qr = readSheetQr(data)
-  let detectedMarkers = detectSheetMarkers(data, qr?.location)
+  // Alignment runs on the flat-fielded copy, where dim photos and lighting
+  // gradients still show four crisp targets. Marks are graded on the original
+  // pixels, whose row and neighbourhood baselines already absorb lighting and
+  // do not inherit the field's softened response to a hard shadow edge.
+  const flat = normalizeIllumination(data)
+  let qr = readSheetQr(flat)
+  let detectedMarkers = detectSheetMarkers(flat, qr?.location)
   const estimatedCorners = Object.fromEntries(Object.entries(MARKERS).map(([key, point]) => [key, { x: data.width * point.x / SHEET.width, y: data.height * point.y / SHEET.height }]))
   if (!qr) {
-    qr = readSheetQr(data, detectedMarkers?.corners || estimatedCorners)
-    if (qr) detectedMarkers = detectSheetMarkers(data, qr.location)
+    qr = readSheetQr(flat, detectedMarkers?.corners || estimatedCorners)
+    if (qr) detectedMarkers = detectSheetMarkers(flat, qr.location)
   }
-  const corners = detectedMarkers?.corners || estimatedCorners
-  const markersFound = detectedMarkers ? 4 : 0
   const qrIdentity = requireCurrentQr(qr?.data)
   const identity = { ...qrIdentity, studentId: qrIdentity.studentId || fallbackIdentity.studentId || null }
   const resolved = resolveContext?.(identity) || {}
@@ -517,6 +798,13 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
   if (qrIdentity && qrIdentity.assessmentId !== activeAssessment.id) throw new Error('O simulado identificado pelo QR não foi encontrado.')
 
   const sheetFormat = qrIdentity?.sheetFormat || null
+  const layout = qrIdentity.version === 2 ? getLegacySheetLayout(activeAssessment.questionCount) : validateSheetFormat(sheetFormat) ? getSheetLayout(sheetFormat) : null
+  const gridAlignment = detectedMarkers && layout ? gridAlignmentScore(flat, detectedMarkers.corners, layout, activeAssessment.questionCount, activeAssessment.optionCount) : null
+  // Four targets in a plausible shape can still be the wrong four (a QR finder,
+  // a dark mark). Without the printed grid under them, nothing is graded.
+  if (gridAlignment !== null && gridAlignment < MIN_GRID_ALIGNMENT) detectedMarkers = null
+  const corners = detectedMarkers?.corners || estimatedCorners
+  const markersFound = detectedMarkers ? 4 : 0
   let marks = qrIdentity.version === 2
     ? analyzeMarks(data, activeAssessment, activeAnswerKey, corners, settings, MARKERS, getLegacySheetLayout(activeAssessment.questionCount))
     : analyzePrintedSheet(data, activeAssessment, activeAnswerKey, corners, settings, MARKERS, sheetFormat)
@@ -538,10 +826,15 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
     markerCorners: detectedMarkers ? Object.fromEntries(Object.entries(corners).map(([key, point]) => [key, { x: Math.round(point.x), y: Math.round(point.y) }])) : null,
     markerLayout: CURRENT_MARKER_LAYOUT,
     alignmentMode: detectedMarkers ? 'answer-grid-markers' : 'estimated',
+    gridAlignment: gridAlignment === null ? null : Number(gridAlignment.toFixed(3)),
     ...marks,
     previewWidth: data.width,
     previewHeight: data.height,
-    confidence: Math.max(48, Math.min(99, Math.round(55 + markersFound * 7 + (qrIdentity ? 15 : 0) - marks.uncertain * 1.5))),
+    // 48–99, as before: estimated framing stays at the floor; otherwise the
+    // mean clarity of every question, reduced when the grid fit is weak.
+    confidence: detectedMarkers
+      ? Math.max(48, Math.min(99, Math.round(48 + 51 * marks.readingClarity * Math.min(1, gridAlignment === null ? 1 : gridAlignment / 0.12))))
+      : 48,
   }
 }
 
@@ -553,10 +846,11 @@ export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}
 
 export async function prepareOmrCalibration(file) {
   const { data, canvas } = await imageDataFromFile(file)
-  const qr = readSheetQr(data)
+  const flat = normalizeIllumination(data)
+  const qr = readSheetQr(flat)
   const identity = requireCurrentQr(qr?.data)
   if (!validateSheetFormat(identity.sheetFormat)) throw new Error('Para testar os ajustes, use uma folha com QR Code no formato atual (v3 ou v4).')
-  const markers = detectSheetMarkers(data, qr?.location)
+  const markers = detectSheetMarkers(flat, qr?.location)
   if (!markers) throw new Error('Os quatro marcadores precisam estar completos e nítidos para testar a leitura.')
   return { pixels: data, corners: markers.corners, format: identity.sheetFormat, preview: canvas.toDataURL('image/jpeg', 0.9), name: file.name }
 }
