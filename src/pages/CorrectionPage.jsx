@@ -3,14 +3,16 @@ import {
   UploadCloud, Camera, ScanLine, CheckCircle2, AlertTriangle, FileImage, RotateCcw,
   Save, MoreHorizontal, QrCode, Focus, CircleDot, ChevronRight, X, ClipboardList,
   ListChecks, PencilLine, UsersRound, UserRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff, LockKeyhole, GitCompare,
-  ArrowUp, ArrowDown, ArrowUpDown,
+  ArrowUp, ArrowDown, ArrowUpDown, ShieldCheck, UserX, Download,
 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { CorrectedSheetPreview } from '../components/CorrectedSheetPreview'
 import { analyzeAnswerSheet } from '../lib/omr'
 import { withVersionQuestionAreas, getAssessmentForStudent, getAssessmentForVersion, getAssessmentForSubmission, CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAreas'
-import { cn, formatDateTime, nextStudentRegistration, normalize, uid } from '../lib/utils'
+import { analyzeItems, countAnswerKeyAlerts, MIN_RESPONSES, submissionsForAnswerKey, suspiciousItems } from '../lib/itemAnalysis'
+import { cn, downloadBlob, formatDateTime, nextStudentRegistration, normalize, uid } from '../lib/utils'
+import { getAttendance, setStudentsAbsent } from '../lib/attendance'
 
 const answerStatuses = {
   correct: { label: 'Correta', tone: 'green' },
@@ -82,6 +84,44 @@ function DetailedAnswerList({ answers, assessment, questionAreas, onChange, read
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function percentOf(value, total) {
+  return total ? Math.round((value / total) * 100) : 0
+}
+
+function AnswerKeyCheck({ answerKey, assessment, submissions, editable, onUseLetter }) {
+  const sheets = submissionsForAnswerKey(assessment, submissions, answerKey)
+  const items = analyzeItems({ answerKey, submissions: sheets, optionCount: assessment.optionCount })
+  const flagged = suspiciousItems(items)
+  const letters = Array.from({ length: assessment.optionCount }, (_, index) => String.fromCharCode(65 + index))
+  if (sheets.length < MIN_RESPONSES) {
+    return <div className="key-check key-check-idle"><ShieldCheck size={17} /><p><strong>Verificação automática do gabarito</strong>Começa quando houver {MIN_RESPONSES} folhas corrigidas com este gabarito ({sheets.length} até agora).</p></div>
+  }
+  if (!flagged.length) {
+    return <div className="key-check key-check-ok"><ShieldCheck size={17} /><p><strong>Nenhuma questão suspeita</strong>As respostas de {sheets.length} folhas corrigidas com este gabarito são coerentes com as alternativas cadastradas.</p></div>
+  }
+  return (
+    <div className="key-check key-check-alert">
+      <header><AlertTriangle size={17} /><p><strong>{flagged.filter((item) => item.flag === 'key').length ? 'Confira o gabarito destas questões' : 'Questões que merecem atenção'}</strong>Análise de {sheets.length} folhas corrigidas com este gabarito, em todas as turmas. Os alertas indicam onde conferir; a decisão de alterar é sua.</p></header>
+      <ul>
+        {flagged.map((item) => (
+          <li key={item.index} className={item.flag === 'key' ? 'is-key' : 'is-weak'}>
+            <div className="key-check-title">
+              <strong>Questão {String(item.number).padStart(2, '0')}</strong>
+              <Badge tone={item.flag === 'key' ? 'red' : 'ochre'}>{item.flag === 'key' ? 'Possível gabarito errado' : 'Pode estar ambígua'}</Badge>
+              <small>Gabarito: <b>{item.key}</b></small>
+            </div>
+            <p>{item.flag === 'key'
+              ? `${percentOf(item.distribution[item.suggested], item.responses)}% dos alunos marcaram ${item.suggested}, incluindo ${percentOf(item.topShares[item.suggested] * 100, 100)}% dos que tiveram melhor desempenho no restante da prova. Só ${percentOf(item.distribution[item.key], item.responses)}% marcaram ${item.key}.`
+              : `Os alunos com melhor desempenho no restante da prova acertaram esta questão menos que os demais. Confira o enunciado, as alternativas e o gabarito.`}</p>
+            <div className="key-check-bars">{letters.map((letter) => <span key={letter} className={cn(letter === item.key && 'is-answer', letter === item.suggested && 'is-suggested')}><i style={{ height: `${Math.max(4, percentOf(item.distribution[letter], item.responses))}%` }} /><b>{letter}</b><small>{percentOf(item.distribution[letter], item.responses)}%</small></span>)}</div>
+            {item.flag === 'key' && editable && <Button size="sm" variant="secondary" icon={PencilLine} onClick={() => onUseLetter(item.index, item.suggested)}>Revisar com {item.suggested}</Button>}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -224,7 +264,7 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
     <div className="answer-key-layout">
       <aside className="panel answer-key-assessments">
         <header><h3>Simulados</h3><Badge tone="neutral">{data.assessments.length}</Badge></header>
-        <div>{data.assessments.map((item) => <button key={item.id} className={item.id === assessment.id ? 'active' : ''} onClick={() => chooseAssessment(item.id)}><span><strong>{item.title}</strong><small>{item.code} · {item.questionCount} questões</small></span><em>{item.classIds.length}</em></button>)}</div>
+        <div>{data.assessments.map((item) => { const alerts = countAnswerKeyAlerts(item, data.submissions); return <button key={item.id} className={item.id === assessment.id ? 'active' : ''} onClick={() => chooseAssessment(item.id)}><span><strong>{item.title}</strong><small>{item.code} · {item.questionCount} questões{alerts ? <b className="key-alert-count"> · {alerts} {alerts === 1 ? 'alerta' : 'alertas'}</b> : null}</small></span><em>{item.classIds.length}</em></button> })}</div>
       </aside>
 
       <section className="panel answer-key-workspace">
@@ -262,7 +302,7 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
             <div className="key-edit-footer"><div><AlertTriangle size={16} /><p>Anuladas valem um acerto; canceladas são retiradas do total válido. Ao salvar, as correções desta versão são recalculadas.</p></div><Button variant="ghost" onClick={() => setEditing(false)}>Cancelar</Button><Button icon={Save} onClick={saveAnswerKey}>Salvar alterações</Button></div>
           </div>
         ) : (
-          <div className="answer-key-view"><AnswerKeyStrip answerKey={answerKey} /><div className="question-area-summary"><span>ÁREAS DAS QUESTÕES</span><div>{areaSummary.map(([area, count]) => <Badge tone="neutral" key={area}>{area} · {count}</Badge>)}</div></div><div className="key-legend"><span><i /> Número da questão</span><span><i /> Resposta correta</span></div></div>
+          <div className="answer-key-view"><AnswerKeyStrip answerKey={answerKey} /><AnswerKeyCheck answerKey={answerKey} assessment={assessment} submissions={data.submissions} editable={!assessmentClosed} onUseLetter={(index, letter) => startEditing(answerKey.map((value, keyIndex) => keyIndex === index ? letter : value))} /><div className="question-area-summary"><span>ÁREAS DAS QUESTÕES</span><div>{areaSummary.map(([area, count]) => <Badge tone="neutral" key={area}>{area} · {count}</Badge>)}</div></div><div className="key-legend"><span><i /> Número da questão</span><span><i /> Resposta correta</span></div></div>
         )}
       </section>
     </div>
@@ -486,6 +526,47 @@ function compareResponsePair(first, second, questionCount) {
   return { questions, sameAnswers, sameMarkedAnswers, markedQuestions, comparableQuestions: comparableQuestions.length, similarity: comparableQuestions.length ? Math.round((sameAnswers / comparableQuestions.length) * 100) : 0 }
 }
 
+const attendanceStatuses = {
+  corrected: { label: 'Folha corrigida', tone: 'green' },
+  absent: { label: 'Faltou', tone: 'red' },
+  pending: { label: 'Sem folha', tone: 'ochre' },
+}
+
+function AttendancePanel({ data, setData, notify, initialAssessmentId }) {
+  const [assessmentId, setAssessmentId] = useState(initialAssessmentId || data.assessments[0]?.id || '')
+  const [classId, setClassId] = useState('all')
+  const [filter, setFilter] = useState('open')
+  const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
+  const classOptions = assessment?.classIds.map((id) => data.classes.find((item) => item.id === id)).filter(Boolean) || []
+  const attendance = getAttendance(assessment, data.students, data.submissions, classId)
+  const visibleRows = attendance.rows.filter((row) => filter === 'all' || (filter === 'open' ? row.status !== 'corrected' : row.status === filter))
+  const assessmentClosed = isAssessmentClosed(assessment)
+
+  function markAbsent(studentIds, absent) {
+    if (!studentIds.length) return
+    setData((current) => ({ ...current, assessments: current.assessments.map((item) => item.id === assessment.id ? setStudentsAbsent(item, studentIds, absent) : item) }))
+    notify(absent ? 'Ausência registrada' : 'Ausência removida', `${studentIds.length} aluno${studentIds.length === 1 ? '' : 's'} ${absent ? 'marcado(s) como ausente(s)' : 'voltou(aram) para sem folha'}.`)
+  }
+
+  function exportList() {
+    const rows = attendance.rows.filter((row) => row.status !== 'corrected')
+    const lines = [['Aluno', 'Matrícula', 'Turma', 'Situação'], ...rows.map((row) => [row.student.name, row.student.registration, data.classes.find((item) => item.id === row.student.classId)?.name, attendanceStatuses[row.status].label])]
+    const csv = lines.map((line) => line.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n')
+    downloadBlob(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }), `ausentes-${assessment.code || assessment.id}.csv`)
+  }
+
+  if (!assessment) return <EmptyState icon={UserX} title="Nenhum simulado" description="Crie um simulado antes de acompanhar a presença." />
+
+  const pendingIds = attendance.rows.filter((row) => row.status === 'pending').map((row) => row.student.id)
+  return <section className="panel attendance-panel">
+    <header className="panel-header"><div><h3>Presença e folhas faltantes</h3><p>Veja quem ainda não teve a folha corrigida e registre quem faltou ao simulado.</p></div><Button size="sm" variant="secondary" icon={Download} disabled={!attendance.absent && !attendance.pending} onClick={exportList}>Exportar lista</Button></header>
+    <div className="plagiarism-toolbar"><label><span>Simulado</span><select value={assessment.id} onChange={(event) => { setAssessmentId(event.target.value); setClassId('all') }}>{data.assessments.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label><span>Turma</span><select value={classId} onChange={(event) => setClassId(event.target.value)}><option value="all">Todas as turmas</option>{classOptions.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><div className="plagiarism-mode" role="group" aria-label="Filtrar alunos"><button className={filter === 'open' ? 'active' : ''} onClick={() => setFilter('open')}>Sem folha e ausentes</button><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todos</button></div></div>
+    <div className="plagiarism-summary attendance-summary"><div><strong>{attendance.corrected}</strong><span>com folha corrigida</span></div><div><strong>{attendance.pending}</strong><span>sem folha e sem registro</span></div><div><strong>{attendance.absent}</strong><span>marcados como ausentes</span></div><div><strong>{attendance.total ? Math.round(((attendance.corrected) / (attendance.total - attendance.absent || 1)) * 100) : 0}%</strong><span>dos presentes já corrigidos</span></div></div>
+    {pendingIds.length > 0 && <div className="attendance-bulk"><p>Terminou de corrigir {classId === 'all' ? 'todas as turmas' : 'esta turma'}? Os {pendingIds.length} alunos restantes podem ser registrados como ausentes de uma vez.</p><Button size="sm" variant="secondary" icon={UserX} disabled={assessmentClosed} onClick={() => { if (window.confirm(`Marcar ${pendingIds.length} aluno(s) sem folha como ausente(s)?`)) markAbsent(pendingIds, true) }}>Marcar restantes como ausentes</Button></div>}
+    {visibleRows.length ? <div className="table-wrap"><table className="attendance-table"><thead><tr><th>ALUNO</th><th>TURMA</th><th>SITUAÇÃO</th><th /></tr></thead><tbody>{visibleRows.map((row) => { const itemClass = data.classes.find((item) => item.id === row.student.classId); return <tr key={row.student.id}><td><strong>{row.student.name}</strong><small className="cell-subtitle">{row.student.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span></td><td><Badge tone={attendanceStatuses[row.status].tone}>{attendanceStatuses[row.status].label}</Badge></td><td>{row.status === 'pending' && <Button size="sm" variant="ghost" icon={UserX} disabled={assessmentClosed} onClick={() => markAbsent([row.student.id], true)}>Faltou</Button>}{row.status === 'absent' && <Button size="sm" variant="ghost" icon={RotateCcw} disabled={assessmentClosed} onClick={() => markAbsent([row.student.id], false)}>Desfazer</Button>}</td></tr> })}</tbody></table></div> : <EmptyState icon={CheckCircle2} title="Nenhum aluno pendente" description="Todos os alunos desta seleção têm folha corrigida ou ausência registrada." />}
+  </section>
+}
+
 function PlagiarismPanel({ data, initialAssessmentId }) {
   const [assessmentId, setAssessmentId] = useState(initialAssessmentId || data.assessments[0]?.id || '')
   const [classId, setClassId] = useState('all')
@@ -536,7 +617,7 @@ export function CorrectionPage({ data, setData, notify }) {
     || data.assessments[0]
   const [tab, setTab] = useState(() => {
     const requested = new URLSearchParams(window.location.search).get('tab')
-    return ['scan', 'responses', 'keys', 'reviews', 'plagiarism'].includes(requested) ? requested : 'scan'
+    return ['scan', 'responses', 'keys', 'reviews', 'attendance', 'plagiarism'].includes(requested) ? requested : 'scan'
   })
   const [assessmentId, setAssessmentId] = useState(initialAssessment?.id)
   const [classId, setClassId] = useState(initialAssessment?.classIds[0] || '')
@@ -554,6 +635,8 @@ export function CorrectionPage({ data, setData, notify }) {
   const assessment = data.assessments.find((item) => item.id === assessmentId)
   const assessmentClosed = isAssessmentClosed(assessment)
   const pendingReviews = getPendingReviewSubmissions(data.submissions, data.assessments)
+  const attendanceOpen = getAttendance(assessment, data.students, data.submissions).pending
+  const answerKeyAlerts = useMemo(() => data.assessments.reduce((total, item) => total + countAnswerKeyAlerts(item, data.submissions), 0), [data.assessments, data.submissions])
   const classroom = data.classes.find((item) => item.id === classId)
   const answerKey = getAnswerKeyForClass(assessment, classId)
   const eligibleStudents = data.students.filter((student) => student.classId === classId && student.status === 'Ativo')
@@ -1019,11 +1102,12 @@ export function CorrectionPage({ data, setData, notify }) {
 
   return (
     <div className="page-stack correction-page">
-      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagens ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>Visualizar e editar</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{pendingReviews.length} pendentes</small></span></button><button className={tab === 'plagiarism' ? 'active' : ''} onClick={() => setTab('plagiarism')}><GitCompare size={17} /><span>Verificar similaridade<small>Comparar respostas</small></span></button></div>}
+      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagens ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>{answerKeyAlerts ? `${answerKeyAlerts} ${answerKeyAlerts === 1 ? 'alerta' : 'alertas'} para conferir` : 'Visualizar e editar'}</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{pendingReviews.length} pendentes</small></span></button><button className={tab === 'attendance' ? 'active' : ''} onClick={() => setTab('attendance')}><UserX size={17} /><span>Presença<small>{attendanceOpen} sem folha</small></span></button><button className={tab === 'plagiarism' ? 'active' : ''} onClick={() => setTab('plagiarism')}><GitCompare size={17} /><span>Verificar similaridade<small>Comparar respostas</small></span></button></div>}
 
       {!result && !batch && tab === 'responses' && <ResponsesPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'keys' && <AnswerKeysPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'reviews' && <ReviewQueue data={data} setData={setData} notify={notify} />}
+      {!result && !batch && tab === 'attendance' && <AttendancePanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'plagiarism' && <PlagiarismPanel data={data} initialAssessmentId={assessmentId} />}
 
       {!result && !batch && tab === 'scan' && <>

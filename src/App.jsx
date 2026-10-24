@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutDashboard, UsersRound, ClipboardList, ScanLine, BarChart3, Upload,
   Settings, Search, ChevronDown, GraduationCap, Menu, X, HelpCircle, HardDrive,
-  PanelLeftClose, PanelLeftOpen, GitCompare,
+  PanelLeftClose, PanelLeftOpen, GitCompare, AlertTriangle, Download,
 } from 'lucide-react'
 import { createInitialState } from './data'
 import { DashboardPage } from './pages/DashboardPage'
@@ -13,12 +13,14 @@ import { SegesImportPage } from './pages/SegesImportPage'
 import { ResultsPage } from './pages/ResultsPage'
 import { CorrelationPage } from './pages/CorrelationPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { Toast } from './components/ui'
+import { Button, Toast } from './components/ui'
 import { cn, formatDateTime } from './lib/utils'
 import { getQuestionAreas } from './lib/knowledgeAreas'
 import { getPendingReviewSubmissions } from './lib/assessment'
+import { backupReminder, getStorageStatus, isQuotaError, loadStoredState, readBackupMeta, recordBackup, requestPersistentStorage, saveStoredState, snoozeBackupReminder } from './lib/storage'
+import { downloadBackup } from './lib/backup'
 
-const STORAGE_KEY = 'luma-avaliacoes-state-v1'
+const SAVE_DELAY_MS = 400
 
 const navigation = [
   { id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard },
@@ -41,24 +43,42 @@ const titles = {
   settings: ['Configurações', 'Ajuste a escola, a leitura óptica e o banco de dados local.'],
 }
 
-function loadInitialState() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved)
-      const assessments = Array.isArray(parsed?.assessments)
-        ? parsed.assessments.map((assessment) => ({ ...assessment, questionAreas: getQuestionAreas(assessment) }))
-        : parsed.assessments
-      return { ...parsed, assessments }
-    }
-  } catch {
-    // O estado demonstrativo é usado quando o armazenamento está indisponível.
-  }
-  return createInitialState()
+function normalizeState(parsed) {
+  if (!parsed) return createInitialState()
+  const assessments = Array.isArray(parsed?.assessments)
+    ? parsed.assessments.map((assessment) => ({ ...assessment, questionAreas: getQuestionAreas(assessment) }))
+    : parsed.assessments
+  return { ...parsed, assessments }
+}
+
+function formatBytes(bytes) {
+  if (bytes == null) return '—'
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1).replace('.', ',')} GB`
 }
 
 export default function App() {
-  const [data, setData] = useState(loadInitialState)
+  const [loaded, setLoaded] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    loadStoredState().then((result) => {
+      if (active) setLoaded({ data: normalizeState(result.data), backend: result.backend })
+    })
+    requestPersistentStorage()
+    return () => { active = false }
+  }, [])
+
+  if (!loaded) return <div className="app-loading" role="status"><span className="brand-mark"><i /><i /><i /></span><p>Carregando dados locais…</p></div>
+  return <Workspace initialData={loaded.data} backend={loaded.backend} />
+}
+
+function Workspace({ initialData, backend }) {
+  const [data, setData] = useState(initialData)
+  const [saveError, setSaveError] = useState(null)
+  const [backupMeta, setBackupMeta] = useState(readBackupMeta)
+  const [storageStatus, setStorageStatus] = useState(null)
   const [page, setPage] = useState(() => {
     const requested = new URLSearchParams(window.location.search).get('page')
     return titles[requested] ? requested : 'dashboard'
@@ -68,9 +88,40 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [globalSearch, setGlobalSearch] = useState('')
 
+  const pendingSave = useRef(null)
+  const firstRender = useRef(true)
+
+  const persist = useCallback(async (snapshot) => {
+    try {
+      await saveStoredState(snapshot, backend)
+      setSaveError(null)
+    } catch (error) {
+      setSaveError(isQuotaError(error)
+        ? 'O espaço de armazenamento do navegador acabou. Baixe um backup agora e libere espaço antes de continuar.'
+        : `As últimas alterações não foram salvas neste navegador (${error?.message || 'erro desconhecido'}). Baixe um backup para não perdê-las.`)
+    }
+    getStorageStatus().then(setStorageStatus)
+  }, [backend])
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-  }, [data])
+    if (firstRender.current) {
+      firstRender.current = false
+      getStorageStatus().then(setStorageStatus)
+      return undefined
+    }
+    pendingSave.current = data
+    const timer = window.setTimeout(() => { pendingSave.current = null; persist(data) }, SAVE_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [data, persist])
+
+  useEffect(() => {
+    // Grava imediatamente quando a aba vai para segundo plano ou está sendo fechada.
+    const flush = () => { if (pendingSave.current) { const snapshot = pendingSave.current; pendingSave.current = null; persist(snapshot) } }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flush)
+    return () => { document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('pagehide', flush) }
+  }, [persist])
 
   useEffect(() => {
     if (!toast || toast.tone === 'loading') return undefined
@@ -91,7 +142,17 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: 'smooth' })
     },
     notify: (title, message, tone = 'success') => setToast({ title, message, tone }),
-  }), [data])
+    exportBackup: () => {
+      downloadBackup(data)
+      setBackupMeta(recordBackup())
+      setToast({ title: 'Backup criado', message: 'Guarde o arquivo em uma pasta segura ou unidade externa.', tone: 'success' })
+    },
+    backupMeta,
+    storageStatus,
+    storageBackend: backend,
+  }), [data, backupMeta, storageStatus, backend])
+
+  const reminder = backupReminder(data, backupMeta)
 
   const currentTitle = titles[page] || titles.dashboard
   const activeStudents = data.students.filter((student) => student.status.toLowerCase() === 'ativo').length
@@ -134,8 +195,9 @@ export default function App() {
           <button><HelpCircle size={18} /><span>Central de ajuda</span></button>
           <div className="storage-meter">
             <div><span>Dados locais</span><small>{activeStudents} alunos</small></div>
-            <div className="meter"><i style={{ width: `${Math.min(92, 18 + activeStudents / 4)}%` }} /></div>
-            <small>Última importação: {data.importHistory?.[0] ? formatDateTime(data.importHistory[0].createdAt) : 'nenhuma'}</small>
+            <div className="meter"><i style={{ width: `${storageStatus?.quota ? Math.max(2, Math.min(100, (storageStatus.usage / storageStatus.quota) * 100)) : 0}%` }} /></div>
+            <small>{storageStatus?.usage != null ? `${formatBytes(storageStatus.usage)} usados` : 'Uso de espaço indisponível'}</small>
+            <small>Último backup: {backupMeta.lastBackupAt ? formatDateTime(backupMeta.lastBackupAt) : 'nenhum'}</small>
           </div>
         </div>
       </aside>
@@ -165,6 +227,8 @@ export default function App() {
         </header>
 
         <section className="content-area">
+          {saveError && <div className="storage-alert storage-alert-danger" role="alert"><AlertTriangle size={18} /><p><strong>Falha ao salvar</strong>{saveError}</p><Button size="sm" icon={Download} onClick={context.exportBackup}>Baixar backup</Button></div>}
+          {!saveError && reminder && <div className="storage-alert" role="status"><HardDrive size={18} /><p><strong>{reminder.days == null ? 'Nenhum backup baixado ainda' : `Último backup há ${reminder.days} dias`}</strong>Os dados ficam só neste navegador e podem ser perdidos se ele for limpo ou reinstalado.</p><Button size="sm" icon={Download} onClick={context.exportBackup}>Baixar backup</Button><Button size="sm" variant="ghost" onClick={() => setBackupMeta(snoozeBackupReminder())}>Lembrar amanhã</Button></div>}
           <div className="page-heading">
             <div><h1>{currentTitle[0]}</h1><p>{currentTitle[1]}</p></div>
           </div>
