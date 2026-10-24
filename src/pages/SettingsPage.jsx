@@ -2,11 +2,11 @@ import { useRef, useState } from 'react'
 import { Building2, ScanLine, Database, Save, RotateCcw, Download, Upload, HardDrive } from 'lucide-react'
 import { Badge, Button, Field } from '../components/ui'
 import { createInitialState } from '../data'
-import { downloadBlob } from '../lib/utils'
+import { formatDateTime } from '../lib/utils'
 import { OmrSettingsPanel } from '../components/OmrSettingsPanel'
 import { resolveOmrSettings } from '../lib/omrSettings'
 
-export function SettingsPage({ data, setData, notify }) {
+export function SettingsPage({ data, setData, notify, exportBackup, backupMeta, storageStatus, storageBackend }) {
   const restoreInput = useRef(null)
   const [activeSection, setActiveSection] = useState('school')
 
@@ -43,18 +43,6 @@ export function SettingsPage({ data, setData, notify }) {
     notify('Configurações salvas', 'Os dados aparecerão nas próximas folhas geradas.')
   }
 
-  function exportBackup() {
-    const backup = {
-      format: 'sistema-avaliacoes-backup',
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      data,
-    }
-    const date = new Date().toISOString().slice(0, 10)
-    downloadBlob(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }), `backup-sistema-avaliacoes-${date}.json`)
-    notify('Backup criado', 'Guarde o arquivo em uma pasta segura ou unidade externa.')
-  }
-
   async function restoreBackup(file) {
     if (!file) return
     try {
@@ -79,7 +67,7 @@ export function SettingsPage({ data, setData, notify }) {
       <div className="settings-content page-stack">
         <section id="settings-school" className="panel settings-section"><header><span><Building2 size={20} /></span><div><h3>Identificação da escola</h3><p>Informações usadas no cabeçalho das folhas e relatórios.</p></div></header><form onSubmit={saveSchool} className="form-grid two-columns"><Field label="Nome da unidade"><input name="name" defaultValue={data.school.name} /></Field><Field label="Código INEP"><input name="inep" defaultValue={data.school.inep} /></Field><Field label="Endereço"><input name="address" defaultValue={data.school.address || ''} placeholder="Rua, número e bairro" /></Field><Field label="CEP"><input name="postalCode" defaultValue={data.school.postalCode || ''} placeholder="00000-000" /></Field><Field label="Município"><input name="city" defaultValue={data.school.city} /></Field><Field label="UF"><input name="state" defaultValue={data.school.state} maxLength="2" /></Field><div className="settings-save"><Button type="submit" icon={Save}>Salvar alterações</Button></div></form></section>
         <OmrSettingsPanel settings={data.settings?.omr} onChange={updateOmrSettings} />
-        <section id="settings-database" className="panel settings-section local-database-section"><header><span><Database size={20} /></span><div><h3>Banco de dados local</h3><p>Todos os cadastros e resultados ficam somente neste navegador.</p></div><Badge tone="green"><HardDrive size={13} /> Somente neste dispositivo</Badge></header><div className="local-data-summary"><div><strong>{data.students.length}</strong><span>alunos</span></div><div><strong>{data.classes.length}</strong><span>turmas</span></div><div><strong>{data.assessments.length}</strong><span>simulados</span></div><div><strong>{data.submissions.length}</strong><span>correções</span></div></div><div className="backup-action"><div><strong>Backup manual</strong><p>Exporte regularmente uma cópia completa. Ela pode ser restaurada neste ou em outro computador.</p></div><div><Button variant="secondary" icon={Upload} onClick={() => restoreInput.current?.click()}>Restaurar backup</Button><Button icon={Download} onClick={exportBackup}>Baixar backup</Button><input ref={restoreInput} hidden type="file" accept="application/json,.json" onChange={(event) => restoreBackup(event.target.files[0])} /></div></div><div className="danger-action"><p><strong>Restaurar dados iniciais</strong><small>Substitui as alterações locais feitas neste navegador.</small></p><Button variant="danger" icon={RotateCcw} onClick={() => { if (window.confirm('Restaurar todos os dados da demonstração?')) { setData(createInitialState()); notify('Base restaurada', 'Os dados iniciais foram recuperados.') } }}>Restaurar demonstração</Button></div></section>
+        <section id="settings-database" className="panel settings-section local-database-section"><header><span><Database size={20} /></span><div><h3>Banco de dados local</h3><p>Todos os cadastros e resultados ficam somente neste navegador.</p></div><Badge tone="green"><HardDrive size={13} /> Somente neste dispositivo</Badge></header><div className="storage-status-grid"><div><span>Armazenamento</span><strong>{storageBackend === 'indexeddb' ? 'Banco do navegador (IndexedDB)' : 'Armazenamento simples (limitado)'}</strong></div><div><span>Proteção contra limpeza automática</span><strong>{storageStatus?.persisted ? 'Ativada' : storageStatus?.persisted === false ? 'Não concedida pelo navegador' : 'Indisponível'}</strong></div><div><span>Espaço usado</span><strong>{storageStatus?.usage != null ? `${(storageStatus.usage / 1024 / 1024).toFixed(1).replace('.', ',')} MB${storageStatus.quota ? ` de ${(storageStatus.quota / 1024 / 1024 / 1024).toFixed(1).replace('.', ',')} GB` : ''}` : 'Indisponível'}</strong></div><div><span>Último backup</span><strong>{backupMeta?.lastBackupAt ? formatDateTime(backupMeta.lastBackupAt) : 'Nenhum neste navegador'}</strong></div></div><div className="local-data-summary"><div><strong>{data.students.length}</strong><span>alunos</span></div><div><strong>{data.classes.length}</strong><span>turmas</span></div><div><strong>{data.assessments.length}</strong><span>simulados</span></div><div><strong>{data.submissions.length}</strong><span>correções</span></div></div><div className="backup-action"><div><strong>Backup manual</strong><p>Exporte regularmente uma cópia completa. Ela pode ser restaurada neste ou em outro computador.</p></div><div><Button variant="secondary" icon={Upload} onClick={() => restoreInput.current?.click()}>Restaurar backup</Button><Button icon={Download} onClick={exportBackup}>Baixar backup</Button><input ref={restoreInput} hidden type="file" accept="application/json,.json" onChange={(event) => restoreBackup(event.target.files[0])} /></div></div><div className="danger-action"><p><strong>Restaurar dados iniciais</strong><small>Substitui as alterações locais feitas neste navegador.</small></p><Button variant="danger" icon={RotateCcw} onClick={() => { if (window.confirm('Restaurar todos os dados da demonstração?')) { setData(createInitialState()); notify('Base restaurada', 'Os dados iniciais foram recuperados.') } }}>Restaurar demonstração</Button></div></section>
       </div>
     </div>
   )

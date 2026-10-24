@@ -31,7 +31,9 @@
     "test:pdf-pages": "node scripts/test-pdf-pages.mjs",
     "test:assessment-import": "node scripts/test-assessment-import.mjs",
     "test:omr-settings": "node scripts/test-omr-settings.mjs",
-    "test:omr-settings-ui": "node scripts/test-omr-settings-ui.mjs"
+    "test:omr-settings-ui": "node scripts/test-omr-settings-ui.mjs",
+    "test:item-analysis": "node scripts/test-item-analysis.mjs",
+    "test:attendance": "node scripts/test-attendance.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
