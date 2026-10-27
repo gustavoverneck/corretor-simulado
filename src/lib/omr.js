@@ -118,7 +118,10 @@ function markerGeometryScore(corners, imageData, templateMarkers) {
   const sidePenalty = (Math.abs(corners.topLeft.x - corners.bottomLeft.x) + Math.abs(corners.topRight.x - corners.bottomRight.x)) / (averageHeight * 2)
   const coverage = Math.min(1, (averageWidth * averageHeight) / (imageData.width * imageData.height * 0.38))
   const patternScore = Object.values(corners).reduce((sum, marker) => sum + marker.score, 0) / 4
-  return patternScore + coverage * 0.7 - ratioPenalty * 1.4 - widthPenalty * 0.7 - heightPenalty * 0.7 - levelPenalty * 0.45 - sidePenalty * 0.25
+  // Targets far smaller than the sheet they would frame are print details.
+  const templateWidth = templateMarkers.topRight.x - templateMarkers.topLeft.x
+  const sizePenalty = Math.max(0, Math.log((averageWidth / templateWidth) / (scales.reduce((sum, scale) => sum + scale, 0) / 4)) - 0.4)
+  return patternScore + coverage * 0.7 - sizePenalty * 0.5 - ratioPenalty * 1.4 - widthPenalty * 0.7 - heightPenalty * 0.7 - levelPenalty * 0.45 - sidePenalty * 0.25
 }
 
 export function detectSheetMarkers(imageData, qrLocation) {
@@ -154,11 +157,17 @@ export function detectSheetMarkers(imageData, qrLocation) {
   })
 
   candidates.sort((first, second) => second.score - first.score)
+  // Filled bubbles and print details also look like small targets, and on a
+  // dark scan they can outscore a real marker. Capping each scale keeps the
+  // real markers, which share one scale, among the candidates.
   const distinct = []
+  const perScale = new Map()
   candidates.forEach((candidate) => {
-    if (distinct.length >= 24) return
+    if (distinct.length >= 40 || (perScale.get(candidate.scale) || 0) >= 5) return
     const overlaps = distinct.some((kept) => distance(candidate, kept) < 18 * Math.max(candidate.scale, kept.scale))
-    if (!overlaps) distinct.push(candidate)
+    if (overlaps) return
+    distinct.push(candidate)
+    perScale.set(candidate.scale, (perScale.get(candidate.scale) || 0) + 1)
   })
   if (distinct.length < 4) return null
 
@@ -859,6 +868,7 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
     rawQr: qr?.data || null,
     markersFound,
     markerCorners: detectedMarkers ? Object.fromEntries(Object.entries(corners).map(([key, point]) => [key, { x: Math.round(point.x), y: Math.round(point.y) }])) : null,
+    qrCorners: qr?.location ? { topLeft: qr.location.topLeftCorner, topRight: qr.location.topRightCorner } : null,
     markerLayout: CURRENT_MARKER_LAYOUT,
     alignmentMode: detectedMarkers ? 'answer-grid-markers' : 'estimated',
     gridAlignment: gridAlignment === null ? null : Number(gridAlignment.toFixed(3)),
@@ -913,7 +923,8 @@ function imageDataToCanvas(imageData) {
 // page upright and reads it again, so the preview and its marks stand upright.
 export function analyzeUprightSheet(data, ...args) {
   const result = analyzeSheetImage(data, ...args)
-  const turns = result.markersFound ? uprightQuarterTurns(result.markerCorners) : 0
+  // Without the four targets the QR still shows which way is up.
+  const turns = uprightQuarterTurns(result.markersFound ? result.markerCorners : result.qrCorners)
   if (!turns) return { result, pixels: data, turns: 0 }
   const pixels = rotateImageData(data, turns)
   return { result: analyzeSheetImage(pixels, ...args), pixels, turns }
