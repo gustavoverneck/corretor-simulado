@@ -174,8 +174,43 @@ export function detectSheetMarkers(imageData, qrLocation) {
       }
     }
   }
-  if (best && qrLocation) best.corners = orientCornersByQr(best.corners, qrLocation)
+  if (!best) return null
+  best.corners = refineMarkerCenters(imageData, best.corners)
+  if (qrLocation) best.corners = orientCornersByQr(best.corners, qrLocation)
   return best
+}
+
+// The candidate search walks a grid of a quarter marker, so each target can be
+// off by a few pixels, and the bubble grid inherits that error: a quarter of a
+// bubble radius is enough for the interior sample to reach the printed
+// outline. Every marker is a symmetric square, so the centroid of its dark
+// pixels is its centre at sub-pixel precision.
+function refineMarkerCenters(imageData, corners) {
+  const { width, height, data } = imageData
+  const scale = distance(corners.topLeft, corners.topRight) / (MARKERS.topRight.x - MARKERS.topLeft.x)
+  // The printed square is 30 units wide; nothing else dark is printed within 22.
+  const half = 20 * scale
+  return Object.fromEntries(Object.entries(corners).map(([key, point]) => {
+    let center = { x: point.x, y: point.y }
+    for (let pass = 0; pass < 3; pass += 1) {
+      let sumX = 0
+      let sumY = 0
+      let total = 0
+      for (let y = Math.max(0, Math.floor(center.y - half)); y <= Math.min(height - 1, center.y + half); y += 1) {
+        for (let x = Math.max(0, Math.floor(center.x - half)); x <= Math.min(width - 1, center.x + half); x += 1) {
+          const darkness = 1 - luminance(data, (y * width + x) * 4)
+          if (darkness < 0.5) continue
+          sumX += x * darkness
+          sumY += y * darkness
+          total += darkness
+        }
+      }
+      if (!total) break
+      center = { x: sumX / total, y: sumY / total }
+    }
+    // A stain or a cut marker drags the centroid away: keep the search result.
+    return [key, distance(center, point) <= 6 * scale ? { ...point, x: center.x, y: center.y } : point]
+  }))
 }
 
 // The four targets form a near-square, so a sheet photographed upside down or
@@ -506,7 +541,7 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   const sampleRadius = Math.max(1.8, layout.bubbleRadius * 0.56 * sheetScale)
   // A second pass covers the interior away from the printed letter, while
   // staying inside the outline. It catches partial/off-centre pencil strokes.
-  const interiorRadius = layout.bubbleRadius * 0.82 * sheetScale
+  const interiorRadius = layout.bubbleRadius * 0.86 * sheetScale
   const letterRadius = layout.bubbleRadius * 0.38 * sheetScale
   const colorSampleRadius = Math.max(2.4, layout.bubbleRadius * 0.76 * sheetScale)
   // The paper just outside each outline, between neighbouring bubbles. It
@@ -838,15 +873,67 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
   }
 }
 
+// Quarter turns (clockwise) that bring a sheet read sideways or upside down
+// back upright, from the direction of its top edge between the targets.
+export function uprightQuarterTurns(corners) {
+  if (!corners) return 0
+  const angle = Math.atan2(corners.topRight.y - corners.topLeft.y, corners.topRight.x - corners.topLeft.x)
+  return ((4 - Math.round(angle / (Math.PI / 2))) % 4 + 4) % 4
+}
+
+export function rotateImageData(imageData, quarterTurns) {
+  const turns = ((quarterTurns % 4) + 4) % 4
+  if (!turns) return imageData
+  const { width, height, data } = imageData
+  const outWidth = turns === 2 ? width : height
+  const outHeight = turns === 2 ? height : width
+  const output = new Uint8ClampedArray(data.length)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const [nx, ny] = turns === 1 ? [height - 1 - y, x] : turns === 2 ? [width - 1 - x, height - 1 - y] : [y, width - 1 - x]
+      const from = (y * width + x) * 4
+      output.set(data.subarray(from, from + 4), (ny * outWidth + nx) * 4)
+    }
+  }
+  return { data: output, width: outWidth, height: outHeight }
+}
+
+function imageDataToCanvas(imageData) {
+  const canvas = document.createElement('canvas')
+  canvas.width = imageData.width
+  canvas.height = imageData.height
+  const context = canvas.getContext('2d')
+  const target = context.createImageData(imageData.width, imageData.height)
+  target.data.set(imageData.data)
+  context.putImageData(target, 0, 0)
+  return canvas
+}
+
+// Reads the sheet and, when it was scanned sideways or upside down, turns the
+// page upright and reads it again, so the preview and its marks stand upright.
+export function analyzeUprightSheet(data, ...args) {
+  const result = analyzeSheetImage(data, ...args)
+  const turns = result.markersFound ? uprightQuarterTurns(result.markerCorners) : 0
+  if (!turns) return { result, pixels: data, turns: 0 }
+  const pixels = rotateImageData(data, turns)
+  return { result: analyzeSheetImage(pixels, ...args), pixels, turns }
+}
+
 export async function analyzeAnswerSheet(file, assessment, fallbackIdentity = {}, settings = {}, resolveContext) {
   const { data, canvas } = await imageDataFromFile(file)
-  const result = analyzeSheetImage(data, assessment, fallbackIdentity, settings, resolveContext)
-  return { ...result, previewUrl: canvas.toDataURL('image/jpeg', 0.82) }
+  const { result, pixels, turns } = analyzeUprightSheet(data, assessment, fallbackIdentity, settings, resolveContext)
+  return { ...result, previewUrl: (turns ? imageDataToCanvas(pixels) : canvas).toDataURL('image/jpeg', 0.82) }
 }
 
 export async function prepareOmrCalibration(file) {
-  const { data, canvas } = await imageDataFromFile(file)
-  const flat = normalizeIllumination(data)
+  let { data, canvas } = await imageDataFromFile(file)
+  let flat = normalizeIllumination(data)
+  const turns = uprightQuarterTurns(detectSheetMarkers(flat, readSheetQr(flat)?.location)?.corners)
+  if (turns) {
+    data = rotateImageData(data, turns)
+    canvas = imageDataToCanvas(data)
+    flat = normalizeIllumination(data)
+  }
   const qr = readSheetQr(flat)
   const identity = requireCurrentQr(qr?.data)
   if (!validateSheetFormat(identity.sheetFormat)) throw new Error('Para testar os ajustes, use uma folha com QR Code no formato atual (v3 ou v4).')

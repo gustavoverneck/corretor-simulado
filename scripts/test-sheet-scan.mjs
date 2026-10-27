@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { transformWithEsbuild } from 'vite'
 import { createCanvas, loadImage } from '@napi-rs/canvas'
 import QRCode from 'qrcode'
-import { analyzeSheetImage, layoutBubbleCenter, MARKERS, readSheetQr } from '../src/lib/omr.js'
+import { analyzeSheetImage, analyzeUprightSheet, detectSheetMarkers, layoutBubbleCenter, MARKERS, readSheetQr, rotateImageData } from '../src/lib/omr.js'
 import { getSheetFormat, getSheetLayout, FIXED_SHEET_LAYOUT, getLegacySheetLayout } from '../src/lib/sheetFormat.js'
 import { crc32, qrPayload } from '../src/lib/utils.js'
 import { getAssessmentForStudent } from '../src/lib/assessment.js'
@@ -115,9 +115,9 @@ for (const questionCount of [40, 60, 90]) {
   const scenarios = [
     { label: 'empty', marks: [], status: 'blank', selected: [] },
     { label: 'off-centre', marks: [{ option: 3, offset: .65, radius: .42 }], status: 'correct', selected: ['D'] },
-    { label: 'weak edge', marks: [{ option: 3, offset: .78, radius: .24 }], status: 'uncertain', selected: ['D'] },
+    { label: 'weak edge', marks: [{ option: 3, offset: .7, radius: .24 }], status: 'uncertain', selected: ['D'] },
     { label: 'dust', marks: [{ option: 3, offset: .65, radius: .08 }], status: 'blank', selected: [] },
-    { label: 'clear and weak', marks: [{ option: 0, offset: 0, radius: .8 }, { option: 3, offset: .78, radius: .24 }], status: 'uncertain', selected: ['A', 'D'] },
+    { label: 'clear and weak', marks: [{ option: 0, offset: 0, radius: .8 }, { option: 3, offset: .7, radius: .24 }], status: 'uncertain', selected: ['A', 'D'] },
     { label: 'two clear', marks: [{ option: 0, offset: 0, radius: .8 }, { option: 3, offset: 0, radius: .8 }], status: 'multiple', selected: ['A', 'D'] },
   ]
   for (const scenario of scenarios) {
@@ -158,4 +158,37 @@ for (const [index, classId] of ['a', 'b', 'c'].entries()) {
   assert.equal(scanned.identity.studentId, versionStudent.id)
 }
 
-console.log('Impressão e leitura integradas: QR vetorial, formatos novos/v2/v3, versões com contagens distintas, escalas, marcas parciais, duplas, sujeira, posições e ausência de marcador validados.')
+// Scans come sideways or upside down: the page is turned upright before reading,
+// and the targets are located to a fraction of a pixel at any scan resolution,
+// since a few pixels already push the interior sample onto the printed outline.
+{
+  const questionCount = 40
+  const assessment = { id: 'assessment-mjhiv57a-a8bcd', title: 'Rotação', code: 'ROT', questionCount, optionCount: 5, answerKey: Array(questionCount).fill('A') }
+  const layout = getSheetLayout(getSheetFormat(questionCount, 5))
+  let svg = renderToStaticMarkup(React.createElement(AnswerSheet, { student, assessment, school, classroom: { name: 'Turma A' } }))
+  const marks = Array.from({ length: questionCount }, (_, q) => {
+    const center = layoutBubbleCenter(q, q % 3, layout)
+    return `<circle cx="${center.x}" cy="${center.y}" r="${layout.bubbleRadius * 1.1}" fill="#333"/>`
+  })
+  svg = svg.slice(0, svg.lastIndexOf('</svg>')) + marks.join('') + '</svg>'
+  for (const scale of [1.3, 1.5, 2.07, 2.9]) {
+    const { pixels } = await rasterize(svg, scale)
+    const markers = detectSheetMarkers(pixels)
+    for (const [key, point] of Object.entries(MARKERS)) {
+      // Pixel indices sit half a pixel before the continuous coordinates.
+      const error = Math.hypot(markers.corners[key].x + 0.5 - point.x * scale, markers.corners[key].y + 0.5 - point.y * scale) / scale
+      assert.ok(error < 0.35, `Marcador ${key} com precisão subpixel na escala ${scale}: ${error.toFixed(2)}`)
+    }
+  }
+  const { pixels } = await rasterize(svg, 1.5)
+  for (const turn of [0, 1, 2, 3]) {
+    const { result, turns, pixels: upright } = analyzeUprightSheet(rotateImageData(pixels, turn), assessment)
+    assert.equal(turns, (4 - turn) % 4, `Página girada ${turn * 90}° volta à posição normal`)
+    assert.equal(upright.width, pixels.width)
+    assert.ok(result.markerCorners.topLeft.x < upright.width / 2 && result.markerCorners.topLeft.y < upright.height / 2)
+    result.answers.forEach((answer, q) => assert.deepEqual(answer.selected, ['ABCDE'[q % 3]], `Q${q + 1} girada ${turn * 90}°`))
+    assert.equal(result.uncertain + result.multiple, 0)
+  }
+}
+
+console.log('Impressão e leitura integradas: QR vetorial, formatos novos/v2/v3, versões com contagens distintas, escalas, marcas parciais, duplas, sujeira, posições, páginas giradas, marcadores com precisão subpixel e ausência de marcador validados.')

@@ -205,7 +205,7 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
             ...submission, ...graded, answerKeySnapshot: draft,
             answerKeyVersionId: selectedVersion && updatedVersion.forked ? updatedVersion.versionId : submission.answerKeyVersionId,
             answerKeyVersionLabel: selectedVersion?.label || submission.answerKeyVersionLabel,
-            status: graded.multiple > 0 || graded.uncertain > 0 ? 'Revisar' : 'Corrigido',
+            status: graded.uncertain > 0 ? 'Revisar' : 'Corrigido',
             correctedAt: new Date().toISOString(),
           }
         }),
@@ -591,7 +591,7 @@ export function CorrectionPage({ data, setData, notify }) {
       const pairKey = itemStudent && itemAssessment ? `${itemAssessment.id}:${itemStudent.id}` : ''
       if (!issue && seen.has(pairKey)) issue = 'Folha duplicada no lote'
       if (!issue) seen.add(pairKey)
-      const needsReview = !issue && (!item.qrFound || item.multiple > 0 || item.uncertain > 0 || item.markersFound < 4)
+      const needsReview = !issue && (!item.qrFound || item.uncertain > 0 || item.markersFound < 4)
       return { index, item, assessment: getAssessmentForStudent(itemAssessment, itemStudent), student: itemStudent, classroom: itemClass, existingSubmission, issue, pairKey, needsReview, valid: !issue }
     })
   }, [batch, data])
