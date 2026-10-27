@@ -29,7 +29,7 @@ export function calculateSubmissionMetrics(submission, assessment, selectedAreas
       multiple: Number(submission.multiple || 0),
       uncertain: Number(submission.uncertain || 0),
       cancelled: Number(submission.cancelled || 0),
-      review: Number(submission.multiple || 0) + Number(submission.uncertain || 0),
+      review: Number(submission.uncertain || 0),
       score: Number(submission.score || 0),
     }
   }
@@ -49,7 +49,7 @@ export function calculateSubmissionMetrics(submission, assessment, selectedAreas
     else if (status === 'uncertain') metrics.uncertain += 1
     else metrics.review += 1
   })
-  metrics.review += metrics.multiple + metrics.uncertain
+  metrics.review += metrics.uncertain
   metrics.score = metrics.total ? Math.round((metrics.correct / metrics.total) * 100) : 0
   return metrics
 }

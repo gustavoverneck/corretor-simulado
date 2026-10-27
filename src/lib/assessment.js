@@ -65,7 +65,7 @@ export function applyAssessmentRevision(data, revisedAssessment, { regradeSubmis
       answerKeySnapshot: [...answerKey],
       answerKeyVersionId: version?.id,
       answerKeyVersionLabel: version?.label,
-      status: graded.multiple > 0 || graded.uncertain > 0 ? 'Revisar' : 'Corrigido',
+      status: graded.uncertain > 0 ? 'Revisar' : 'Corrigido',
       regradedAt,
     }
   })
