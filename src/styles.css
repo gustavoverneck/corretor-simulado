@@ -1180,3 +1180,51 @@ td > strong { color: #27362f; font-weight: 650; }
   .assessment-packets > .assessment-paper:last-child { page-break-after: auto; break-after: auto; }
   .answer-sheet { width: 210mm; height: 296mm; }
 }
+
+.app-loading { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 14px; color: var(--muted); font-size: 12px; }
+.storage-meter > small { display: block; }
+.storage-meter > small + small { margin-top: 2px; }
+.storage-alert { margin-bottom: 16px; padding: 12px 15px; display: flex; align-items: center; gap: 12px; color: #94683f; background: #fbf0e2; border: 1px solid #f0dec6; border-radius: 9px; }
+.storage-alert > svg { flex: none; }
+.storage-alert p { flex: 1; font-size: 10px; line-height: 1.5; }
+.storage-alert strong { display: block; margin-bottom: 2px; font-size: 11px; }
+.storage-alert-danger { color: var(--red); background: var(--red-soft); border-color: #efd3cf; }
+.storage-status-grid { margin: 16px 0 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.storage-status-grid > div { padding: 11px 13px; display: grid; gap: 4px; background: var(--soft); border-radius: 8px; }
+.storage-status-grid span { color: var(--muted); font-size: 9.5px; }
+.storage-status-grid strong { font-size: 11px; }
+@media (max-width: 640px) { .storage-alert { flex-wrap: wrap; } .storage-alert p { flex-basis: calc(100% - 30px); } }
+
+.key-check { margin-top: 16px; padding: 12px 15px; display: flex; gap: 10px; align-items: flex-start; border-radius: 9px; border: 1px solid var(--line); background: #fff; }
+.key-check > svg, .key-check header > svg { flex: none; margin-top: 1px; }
+.key-check p { font-size: 10px; line-height: 1.5; color: var(--muted); }
+.key-check p strong { display: block; margin-bottom: 2px; font-size: 11px; color: var(--ink); }
+.key-check-ok { color: var(--green); background: var(--green-soft); border-color: #d4e5dd; }
+.key-check-idle { color: var(--muted); background: var(--soft); }
+.key-check-alert { display: block; color: var(--red); background: #fffaf9; border-color: #efd3cf; }
+.key-check-alert header { display: flex; gap: 10px; }
+.key-check-alert ul { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.key-check-alert li { padding: 11px 13px; display: grid; gap: 8px; background: #fff; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); }
+.key-check-alert li.is-key { border-left: 3px solid var(--red); }
+.key-check-alert li.is-weak { border-left: 3px solid var(--ochre); }
+.key-check-alert li > .button { justify-self: start; }
+.key-check-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px; }
+.key-check-title small { color: var(--muted); font-size: 10px; }
+.key-check-bars { height: 74px; display: flex; align-items: flex-end; gap: 8px; }
+.key-check-bars span { width: 34px; height: 100%; display: grid; grid-template-rows: 1fr auto auto; justify-items: center; gap: 2px; }
+.key-check-bars i { align-self: end; width: 100%; background: #d7dfdb; border-radius: 4px 4px 0 0; }
+.key-check-bars b { font-size: 10px; }
+.key-check-bars small { color: var(--muted); font-size: 9px; }
+.key-check-bars .is-answer i { background: var(--ochre); }
+.key-check-bars .is-suggested i { background: var(--green); }
+.key-alert-count { color: var(--red); font-weight: 700; }
+
+.attendance-panel { overflow: hidden; }
+.attendance-panel .attendance-summary { margin: 17px 21px; grid-template-columns: repeat(4, 1fr); }
+.attendance-bulk { margin: 0 21px 17px; padding: 11px 13px; display: flex; align-items: center; gap: 12px; background: #fbf0e2; border: 1px solid #f0dec6; border-radius: 8px; }
+.attendance-bulk p { flex: 1; color: #94683f; font-size: 9.5px; line-height: 1.45; }
+.attendance-table { min-width: 560px; }
+.attendance-table td { height: 52px; }
+.attendance-table td strong, .attendance-table td small { display: block; }
+.attendance-table td:last-child { text-align: right; }
+@media (max-width: 720px) { .attendance-panel .attendance-summary { grid-template-columns: 1fr 1fr; } .attendance-bulk { flex-wrap: wrap; } }
