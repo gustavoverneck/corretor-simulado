@@ -189,6 +189,14 @@ for (const [index, classId] of ['a', 'b', 'c'].entries()) {
     result.answers.forEach((answer, q) => assert.deepEqual(answer.selected, ['ABCDE'[q % 3]], `Q${q + 1} girada ${turn * 90}°`))
     assert.equal(result.uncertain + result.multiple, 0)
   }
+  // A covered target: nothing is graded, but the QR still turns the page upright.
+  const covered = await rasterize(svg, 1.5)
+  covered.context.fillStyle = '#fff'
+  covered.context.fillRect((MARKERS.bottomRight.x - 20) * 1.5, (MARKERS.bottomRight.y - 20) * 1.5, 60, 60)
+  const flipped = analyzeUprightSheet(rotateImageData(covered.context.getImageData(0, 0, covered.canvas.width, covered.canvas.height), 2), assessment)
+  assert.equal(flipped.turns, 2, 'Sem um marcador, o QR indica a orientação')
+  assert.equal(flipped.result.markersFound, 0)
+  assert.equal(flipped.result.uncertain, questionCount)
 }
 
 console.log('Impressão e leitura integradas: QR vetorial, formatos novos/v2/v3, versões com contagens distintas, escalas, marcas parciais, duplas, sujeira, posições, páginas giradas, marcadores com precisão subpixel e ausência de marcador validados.')
