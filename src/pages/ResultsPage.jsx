@@ -10,6 +10,7 @@ import { uniqueQuestionAreas } from '../lib/knowledgeAreas'
 import { isAssessmentClosed } from '../lib/assessment'
 import { MultiFilter } from '../components/MultiFilter'
 import { ResultsReportModal } from '../components/ResultsReportModal'
+import { StudentResultModal } from '../components/StudentResultModal'
 import { calculateSubmissionMetrics, calculateAreaResults, calculateQuestionResults, resolveSelection } from '../lib/results'
 
 const areaColors = ['#47776a', '#a47245', '#6b6682', '#52718a', '#a65f5a', '#748b5f', '#8b6d48', '#5d7180']
@@ -187,6 +188,7 @@ export function ResultsPage({ data, notify }) {
   const [questionChartMode, setQuestionChartMode] = useState('general')
   const [studentSearch, setStudentSearch] = useState('')
   const [reportOpen, setReportOpen] = useState(false)
+  const [openStudentRowId, setOpenStudentRowId] = useState(null)
   const selectedAssessmentIds = resolveSelection(assessmentIds, correctedAssessments.map((item) => item.id), correctedAssessments.slice(0, 1).map((item) => item.id))
   const selectedAssessments = correctedAssessments.filter((item) => selectedAssessmentIds.includes(item.id))
   const multipleAssessments = selectedAssessments.length > 1
@@ -218,6 +220,7 @@ export function ResultsPage({ data, notify }) {
     .map((item, index) => ({ item, rank: index + 1 }))
     .filter(({ item }) => !studentSearchQuery || normalize(`${item.student?.name} ${item.student?.registration}`).includes(studentSearchQuery))
   const avg = average(studentRows.map((item) => item.score))
+  const openStudentRow = resultRows.find((item) => item.id === openStudentRowId)
   const detailedSubmissions = filteredRows.filter((item) => Array.isArray(item.answers))
   const areaResults = calculateAreaResults(selectedAssessments, filteredRows).map((item, index) => ({ ...item, color: areaColors[index % areaColors.length] }))
   const selectedAreaResults = areaResults.filter((item) => selectedAreas.includes(item.area))
@@ -341,6 +344,15 @@ export function ResultsPage({ data, notify }) {
         ],
       }} />
 
+      <StudentResultModal
+        row={openStudentRow}
+        studentRows={openStudentRow ? resultRows.filter((item) => item.studentId === openStudentRow.studentId) : []}
+        peerRows={resultRows}
+        areaColors={areaColors}
+        onSelectRow={(item) => setOpenStudentRowId(item.id)}
+        onClose={() => setOpenStudentRowId(null)}
+      />
+
       <div className="stats-grid">
         <StatCard label="Média do recorte" value={`${avg}%`} note={selectedAreas.length === areas.length ? 'de aproveitamento' : `em ${selectedAreas.length} área${selectedAreas.length !== 1 ? 's' : ''}`} icon={Target} tone="green" />
         <StatCard label="Participação" value={`${studentRows.length}`} note={selectedBandIds.length === performanceBands.length ? `de ${eligibleStudents} ${multipleAssessments ? 'participações possíveis' : 'alunos elegíveis'}` : `de ${classScopedRows.length} correções no recorte`} icon={UsersRound} tone="blue" />
@@ -377,7 +389,7 @@ export function ResultsPage({ data, notify }) {
         <span><Lightbulb size={22} /></span><div><div className="eyebrow">LEITURA PEDAGÓGICA</div><h3>{weakestArea ? `${weakestArea.area} apresenta o menor aproveitamento no recorte: ${weakestArea.score}%.` : 'Ajuste os filtros para gerar uma leitura por área.'}</h3><p>{weakestArea ? `Foram ${weakestArea.correct} acertos em ${weakestArea.attempts} respostas analisadas. Use os gráficos interativos para localizar turmas, faixas e questões prioritárias.` : 'O sistema destacará automaticamente a área que requer maior atenção.'}</p></div><button onClick={() => document.getElementById('area-analysis')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Ver análise por área <ArrowUpRight size={16} /></button>
       </section>
 
-      <section className="panel ranking-panel"><header className="panel-header"><div><h3>Resultados por aluno</h3><p>Uma linha por aluno e simulado, ordenada pelo aproveitamento no recorte</p></div><div className="ranking-header-actions"><label className="search-input ranking-search"><Search size={16} /><input type="search" value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Buscar por nome ou matrícula" aria-label="Buscar aluno nos resultados" />{studentSearch && <button type="button" aria-label="Limpar busca" onClick={() => setStudentSearch('')}><X size={14} /></button>}</label><Badge tone="neutral">{visibleStudentRows.length === studentRows.length ? `${studentRows.length} corrigidos` : `${visibleStudentRows.length} de ${studentRows.length}`}</Badge></div></header>{studentRows.length ? visibleStudentRows.length ? <div className="table-wrap"><table><thead><tr><th>#</th><th>ALUNO</th><th>SIMULADO</th><th>TURMA</th><th>ACERTOS</th><th>EM BRANCO</th><th>DESEMPENHO</th><th>STATUS</th></tr></thead><tbody>{visibleStudentRows.map(({ item, rank }) => <tr key={item.id}><td><span className={rank <= 3 ? 'rank-top' : 'rank'}>{rank}</span></td><td><div className="student-name"><span style={{ background: `${item.classroom?.color}1c`, color: item.classroom?.color }}>{initials(item.student?.name)}</span><strong>{item.student?.name || 'Aluno removido'}</strong></div></td><td><strong>{item.assessment.code}</strong><small className="cell-subtitle">{item.assessment.title}</small></td><td>{item.classroom?.name || '—'}</td><td><strong>{item.correct}</strong> / {item.total}</td><td>{item.blank}</td><td><div className="student-score"><span><i style={{ width: `${item.score}%` }} /></span><strong>{item.score}%</strong>{item.score >= avg ? <TrendingUp size={15} /> : <TrendingDown size={15} />}</div></td><td><Badge tone={item.status === 'Revisar' ? isAssessmentClosed(item.assessment) ? 'neutral' : 'ochre' : 'green'}>{item.status === 'Revisar' && isAssessmentClosed(item.assessment) ? 'Encerrado com ressalva' : item.status}</Badge></td></tr>)}</tbody></table></div> : <div className="results-empty-filter"><Search size={25} /><strong>Nenhum aluno encontrado</strong><p>Tente buscar por outro nome ou número de matrícula.</p><Button variant="ghost" icon={X} onClick={() => setStudentSearch('')}>Limpar busca</Button></div> : <div className="results-empty-filter"><BarChart3 size={25} /><strong>Nenhum resultado neste recorte</strong><p>Altere a turma, a área ou a faixa de desempenho.</p><Button variant="ghost" icon={RotateCcw} onClick={resetFilters}>Limpar filtros</Button></div>}</section>
+      <section className="panel ranking-panel"><header className="panel-header"><div><h3>Resultados por aluno</h3><p>Uma linha por aluno e simulado, ordenada pelo aproveitamento no recorte · clique em um aluno para ver as questões e as áreas</p></div><div className="ranking-header-actions"><label className="search-input ranking-search"><Search size={16} /><input type="search" value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Buscar por nome ou matrícula" aria-label="Buscar aluno nos resultados" />{studentSearch && <button type="button" aria-label="Limpar busca" onClick={() => setStudentSearch('')}><X size={14} /></button>}</label><Badge tone="neutral">{visibleStudentRows.length === studentRows.length ? `${studentRows.length} corrigidos` : `${visibleStudentRows.length} de ${studentRows.length}`}</Badge></div></header>{studentRows.length ? visibleStudentRows.length ? <div className="table-wrap"><table><thead><tr><th>#</th><th>ALUNO</th><th>SIMULADO</th><th>TURMA</th><th>ACERTOS</th><th>EM BRANCO</th><th>DESEMPENHO</th><th>STATUS</th></tr></thead><tbody>{visibleStudentRows.map(({ item, rank }) => <tr key={item.id} className="clickable-row" tabIndex={0} aria-label={`Ver acertos de ${item.student?.name || 'aluno removido'} em ${item.assessment.title}`} onClick={() => setOpenStudentRowId(item.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpenStudentRowId(item.id) } }}><td><span className={rank <= 3 ? 'rank-top' : 'rank'}>{rank}</span></td><td><div className="student-name"><span style={{ background: `${item.classroom?.color}1c`, color: item.classroom?.color }}>{initials(item.student?.name)}</span><strong>{item.student?.name || 'Aluno removido'}</strong></div></td><td><strong>{item.assessment.code}</strong><small className="cell-subtitle">{item.assessment.title}</small></td><td>{item.classroom?.name || '—'}</td><td><strong>{item.correct}</strong> / {item.total}</td><td>{item.blank}</td><td><div className="student-score"><span><i style={{ width: `${item.score}%` }} /></span><strong>{item.score}%</strong>{item.score >= avg ? <TrendingUp size={15} /> : <TrendingDown size={15} />}</div></td><td><Badge tone={item.status === 'Revisar' ? isAssessmentClosed(item.assessment) ? 'neutral' : 'ochre' : 'green'}>{item.status === 'Revisar' && isAssessmentClosed(item.assessment) ? 'Encerrado com ressalva' : item.status}</Badge></td></tr>)}</tbody></table></div> : <div className="results-empty-filter"><Search size={25} /><strong>Nenhum aluno encontrado</strong><p>Tente buscar por outro nome ou número de matrícula.</p><Button variant="ghost" icon={X} onClick={() => setStudentSearch('')}>Limpar busca</Button></div> : <div className="results-empty-filter"><BarChart3 size={25} /><strong>Nenhum resultado neste recorte</strong><p>Altere a turma, a área ou a faixa de desempenho.</p><Button variant="ghost" icon={RotateCcw} onClick={resetFilters}>Limpar filtros</Button></div>}</section>
     </div>
   )
 }
