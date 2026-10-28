@@ -34,7 +34,8 @@
     "test:omr-settings-ui": "node scripts/test-omr-settings-ui.mjs",
     "test:item-analysis": "node scripts/test-item-analysis.mjs",
     "test:attendance": "node scripts/test-attendance.mjs",
-    "test:grade-list": "node scripts/test-grade-list.mjs"
+    "test:grade-list": "node scripts/test-grade-list.mjs",
+    "test:student-result": "node scripts/test-student-result.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
