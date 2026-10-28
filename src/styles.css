@@ -807,7 +807,7 @@ td > strong { color: #27362f; font-weight: 650; }
 .report-scope-note p { margin-top: 6px; font-size: 11px; color: #63786d; }
 .report-format-options, .report-section-options { padding: 0; border: 0; min-width: 0; }
 .report-format-options legend, .report-section-options legend { margin-bottom: 10px; color: #354d41; font-size: 13px; font-weight: 700; }
-.report-format-options > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.report-format-options > div { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .report-format-options label { position: relative; padding: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; border: 1px solid #dce4df; border-radius: 9px; color: #62786b; cursor: pointer; }
 .report-format-options label.selected { border-color: #527d69; background: #f1f7f3; box-shadow: inset 0 0 0 1px #527d69; }
 .report-format-options label > input { position: absolute; top: 15px; right: 15px; accent-color: #47776a; }

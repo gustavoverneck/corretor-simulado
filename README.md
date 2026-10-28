@@ -75,6 +75,8 @@ O CSV usa UTF-8, separador ponto e vírgula e uma casa decimal. Questões cancel
 
 Em **Resultados → Gerar relatório**, escolha PDF A4, PDF em apresentação 16:9 ou PowerPoint editável (`.pptx`). O documento reúne os simulados selecionados e respeita os filtros de turma, área e faixa de desempenho. É possível visualizar o PDF antes de baixar e selecionar comparativos por turma, série/ano, área, simulado e questões, incluindo perfis individuais das turmas.
 
+A opção **Planilha de notas** gera um arquivo `.xlsx` só com as notas, para os professores: uma aba por turma, com cada aluno em ordem alfabética, os acertos em cada área e o total/aproveitamento de cada simulado, além da média da turma. Simulados e áreas de conhecimento têm cores diferentes, e os totais são fórmulas que se recalculam se a planilha for editada. O botão **Exportar planilha** continua baixando o CSV completo do recorte (alunos, áreas e questões).
+
 O relatório inclui resumo executivo, distribuição de desempenho, sugestões de acompanhamento e critérios de cálculo. As médias usam os percentuais de cada correção; áreas e questões usam acertos sobre respostas válidas. A geração ocorre localmente, com textos e gráficos vetoriais, e distingue participações de estudantes únicos.
 
 ## Correção de PDF em lote
