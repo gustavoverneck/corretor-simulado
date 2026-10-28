@@ -317,7 +317,7 @@ export function ResultsPage({ data, notify }) {
   return (
     <div className="page-stack results-page">
       <section className="results-filter-panel">
-        <header><div><span><SlidersHorizontal size={17} /></span><div><strong>Explorar resultados</strong><small>Combine os filtros ou clique diretamente nos gráficos.</small></div></div><div className="results-report-actions"><Button variant="secondary" icon={Download} onClick={exportResults}>Exportar recorte</Button><Button icon={FileText} disabled={!studentRows.length} onClick={() => setReportOpen(true)}>Gerar relatório</Button></div></header>
+        <header><div><span><SlidersHorizontal size={17} /></span><div><strong>Explorar resultados</strong><small>Combine os filtros ou clique diretamente nos gráficos.</small></div></div><div className="results-report-actions"><Button variant="secondary" icon={Download} onClick={exportResults}>Exportar planilha</Button><Button icon={FileText} disabled={!studentRows.length} onClick={() => setReportOpen(true)}>Gerar relatório</Button></div></header>
         <div className="results-filter-grid">
           <MultiFilter label="SIMULADOS" options={correctedAssessments.map((item) => ({ value: item.id, label: item.title }))} selected={selectedAssessmentIds} onChange={changeAssessments} allLabel="Todos os simulados" />
           <MultiFilter label="TURMAS" options={assessmentClasses.map((item) => ({ value: item.id, label: `${item.name} · ${item.shift}` }))} selected={selectedClassIds} onChange={setSelectedClassIds} allLabel="Todas as turmas" />
