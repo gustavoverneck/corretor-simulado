@@ -13,6 +13,7 @@ import { getSheetLayout, getSheetFormat } from '../lib/sheetFormat'
 import { CURRENT_MARKER_LAYOUT } from '../lib/omr'
 import { buildSegesResultRows, calculateAssessmentResult, formatSegesGrade, SEGES_RESULT_STATUS, segesResultsFilename, serializeSegesResultsCsv, indexAssessmentSubmissions } from '../lib/segesResults'
 import { average, cn, downloadBlob, formatDate, initials, uid } from '../lib/utils'
+import { createAnswerKeyPdf, createAttendancePdf, printDocumentFilename } from '../lib/printDocuments'
 import { assessmentToLatex, createPrintableVersions, createStudentPrintableVersions, emptyQuestion, resizeQuestions } from '../lib/fullAssessment'
 
 const subjectOptions = ['Língua Portuguesa', 'Matemática', 'Ciências da Natureza', 'Ciências Humanas', 'Linguagens']
@@ -169,6 +170,11 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const [pendingAnswerRevision, setPendingAnswerRevision] = useState(null)
   const [pendingStudentVersionRevision, setPendingStudentVersionRevision] = useState(null)
   const [studentSort, setStudentSort] = useState({ key: 'name', direction: 'asc' })
+  const [printDocument, setPrintDocument] = useState(null)
+  const [printDocumentClassIds, setPrintDocumentClassIds] = useState(assessment.classIds)
+  const [printMarkAbsent, setPrintMarkAbsent] = useState(false)
+  const [printAttendanceLayout, setPrintAttendanceLayout] = useState('signature')
+  const [printingDocument, setPrintingDocument] = useState(false)
   const submissions = data.submissions.filter((item) => item.assessmentId === assessment.id)
   const closed = isAssessmentClosed(assessment)
   const totalStudents = data.students.filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo').length
@@ -348,6 +354,30 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
     )
   }
 
+  function openPrintDocument(kind) {
+    setPrintDocumentClassIds(studentClassFilter !== 'all' && kind === 'attendance' ? [studentClassFilter] : assessment.classIds)
+    setPrintDocument(kind)
+  }
+
+  function togglePrintDocumentClass(classId) {
+    setPrintDocumentClassIds((current) => current.includes(classId) ? current.filter((id) => id !== classId) : [...current, classId])
+  }
+
+  async function generatePrintDocument() {
+    setPrintingDocument(true)
+    try {
+      const options = { assessment, classes: data.classes, students: data.students, submissions: data.submissions, school: data.school, classIds: printDocumentClassIds, markAbsent: printMarkAbsent, layout: printAttendanceLayout }
+      const blob = printDocument === 'attendance' ? await createAttendancePdf(options) : await createAnswerKeyPdf(options)
+      downloadBlob(blob, printDocumentFilename(assessment, printDocument, printAttendanceLayout))
+      notify(printDocument === 'answer-key' ? 'Gabarito gerado' : printAttendanceLayout === 'checklist' ? 'Lista de conferência gerada' : 'Lista de presença gerada', `PDF com ${printDocumentClassIds.length} ${printDocumentClassIds.length === 1 ? 'turma' : 'turmas'}, uma por página, pronto para imprimir.`)
+      setPrintDocument(null)
+    } catch (error) {
+      notify('Não foi possível gerar o PDF', error.message, 'warning')
+    } finally {
+      setPrintingDocument(false)
+    }
+  }
+
   function startEditingAreas() {
     setAreaDraft(questionAreas)
     setBulkAreaDraft('')
@@ -489,11 +519,13 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       <div className="assessment-detail-progress"><div><span>{closed ? 'Participação final registrada' : 'Andamento da correção'}</span><strong>{submissions.length} de {totalStudents}</strong></div><div className="wide-progress"><i style={{ width: `${progress}%` }} /></div></div>
 
       <section className="assessment-detail-areas">
-        {areaVersions.length > 1 && <label>Versão <select value={areaVersion.id} onChange={(event) => { setAreaVersionId(event.target.value); setEditingAreas(false) }}>{areaVersions.map((version) => <option key={version.id} value={version.id}>{version.label}</option>)}</select></label>}
         <header>
           <div><h3>Áreas das questões</h3><p>Classifique cada questão para organizar os filtros e as análises pedagógicas.</p></div>
-          {!editingAreas && !closed && <Button variant="secondary" size="sm" icon={PencilLine} onClick={startEditingAreas}>Editar áreas</Button>}
-          {closed && <Badge tone="neutral"><LockKeyhole size={12} /> Reabra para editar</Badge>}
+          <div className="assessment-detail-areas-actions">
+            {areaVersions.length > 1 && <label><span>Versão</span><select value={areaVersion.id} onChange={(event) => { setAreaVersionId(event.target.value); setEditingAreas(false) }}>{areaVersions.map((version) => <option key={version.id} value={version.id}>{version.label}</option>)}</select></label>}
+            {!editingAreas && !closed && <Button variant="secondary" size="sm" icon={PencilLine} onClick={startEditingAreas}>Editar áreas</Button>}
+            {closed && <Badge tone="neutral"><LockKeyhole size={12} /> Reabra para editar</Badge>}
+          </div>
         </header>
         <div className="assessment-area-summary">
           {areaSummary.map(([area, count]) => <span key={area}><strong>{area}</strong><small>{count} {count === 1 ? 'questão' : 'questões'}</small></span>)}
@@ -512,7 +544,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       </section>
 
       <section className="assessment-detail-classes">
-        <header><h3>Turmas e gabaritos</h3><p>Clique em uma resposta para alterá-la, anulá-la com ponto ou cancelá-la sem entrar na nota daquela versão.</p></header>
+        <header><div><h3>Turmas e gabaritos</h3><p>Clique em uma resposta para alterá-la, anulá-la com ponto ou cancelá-la sem entrar na nota daquela versão.</p></div><Button variant="secondary" size="sm" icon={Printer} onClick={() => openPrintDocument('answer-key')}>Imprimir gabaritos</Button></header>
         {assessment.classIds.map((classId) => {
           const classroom = data.classes.find((item) => item.id === classId)
           const students = data.students.filter((student) => student.classId === classId && student.status === 'Ativo')
@@ -560,7 +592,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       <section className="assessment-version-roster">
         <header>
           <div><h3>Alunos e resultados</h3><p>Confira a nota geral, a situação da correção e a versão de gabarito de cada aluno.</p></div>
-          <div className="assessment-roster-actions"><Button variant="secondary" size="sm" icon={Download} onClick={openResultExport}>Exportar notas</Button><label><span>Filtrar por turma</span><select value={studentClassFilter} onChange={(event) => setStudentClassFilter(event.target.value)}><option value="all">Todas as turmas</option>{assessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); return <option value={classId} key={classId}>{classroom?.name || 'Turma removida'}</option> })}</select></label></div>
+          <div className="assessment-roster-actions"><Button variant="secondary" size="sm" icon={Printer} onClick={() => openPrintDocument('attendance')}>Lista de presença</Button><Button variant="secondary" size="sm" icon={Download} onClick={openResultExport}>Exportar notas</Button><label><span>Filtrar por turma</span><select value={studentClassFilter} onChange={(event) => setStudentClassFilter(event.target.value)}><option value="all">Todas as turmas</option>{assessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); return <option value={classId} key={classId}>{classroom?.name || 'Turma removida'}</option> })}</select></label></div>
         </header>
         <div className="assessment-version-roster-summary"><Badge tone="blue">{versionedStudents.length} aluno{versionedStudents.length !== 1 ? 's' : ''}</Badge><span>Notas exibidas na escala de 0 a 10.</span></div>
         <div className="table-wrap">
@@ -590,6 +622,32 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
         footer={<><Button variant="ghost" onClick={() => setPendingStudentVersionRevision(null)}>Cancelar</Button><Button icon={RotateCcw} onClick={() => changeStudentVersion(pendingStudentVersionRevision.student, pendingStudentVersionRevision.versionId, true)}>Trocar e recalcular {pendingStudentVersionRevision?.affectedCount || 0} {pendingStudentVersionRevision?.affectedCount === 1 ? 'prova' : 'provas'}</Button></>}
       >
         {pendingStudentVersionRevision && <div className="assessment-revision-confirmation"><span><AlertTriangle size={22} /></span><div><strong>{pendingStudentVersionRevision.student.name}</strong><p>A versão será alterada para {pendingStudentVersionRevision.versionLabel}. {pendingStudentVersionRevision.affectedCount} {pendingStudentVersionRevision.affectedCount === 1 ? 'prova será recalculada' : 'provas serão recalculadas'} usando as mesmas marcações.</p><small>Nenhuma resposta digitalizada será apagada.</small></div></div>}
+      </Modal>
+
+      <Modal
+        open={Boolean(printDocument)}
+        onClose={() => setPrintDocument(null)}
+        title={printDocument === 'attendance' ? 'Imprimir lista de presença' : 'Imprimir gabaritos'}
+        subtitle={printDocument === 'attendance' ? 'Uma folha por turma, com os alunos em ordem alfabética.' : 'O gabarito oficial de cada turma, com todas as versões e as áreas das questões.'}
+        footer={<><Button variant="ghost" onClick={() => setPrintDocument(null)}>Cancelar</Button><Button icon={Printer} disabled={!printDocumentClassIds.length || printingDocument} onClick={generatePrintDocument}>{printingDocument ? 'Gerando PDF…' : 'Gerar PDF'}</Button></>}
+      >
+        <div className="seges-results-export">
+          {printDocument === 'attendance' && <div className="print-document-layouts" role="radiogroup" aria-label="Modelo da lista">
+            {[
+              { id: 'signature', title: 'Para assinatura', description: 'Campo de assinatura para usar no dia da aplicação.' },
+              { id: 'checklist', title: 'Conferência da correção', description: 'Corrigido e Ausente já vêm marcados; quem não tem nenhum dos dois fica destacado para você conferir.' },
+            ].map((option) => <label className={cn(printAttendanceLayout === option.id && 'checked')} key={option.id}><input type="radio" name="attendance-layout" checked={printAttendanceLayout === option.id} onChange={() => setPrintAttendanceLayout(option.id)} /><span><strong>{option.title}</strong><small>{option.description}</small></span></label>)}
+          </div>}
+          <section className="seges-results-export-classes">
+            <div><strong>Turmas incluídas</strong><span>Cada turma começa em uma nova página do PDF.</span></div>
+            <div>{assessment.classIds.map((classId) => {
+              const classroom = data.classes.find((item) => item.id === classId)
+              const checked = printDocumentClassIds.includes(classId)
+              return <label className={cn(checked && 'checked')} key={classId}><input type="checkbox" checked={checked} onChange={() => togglePrintDocumentClass(classId)} /><span style={{ background: classroom?.color }} /><strong>{classroom?.name || 'Turma removida'}</strong><CheckCircle2 size={15} /></label>
+            })}</div>
+          </section>
+          {printDocument === 'attendance' && printAttendanceLayout === 'signature' && <label className="print-document-option"><input type="checkbox" checked={printMarkAbsent} onChange={(event) => setPrintMarkAbsent(event.target.checked)} /><span><strong>Marcar ausências já registradas</strong><small>Alunos marcados como ausentes na correção saem com “AUSENTE” no campo de assinatura.</small></span></label>}
+        </div>
       </Modal>
 
       <Modal
