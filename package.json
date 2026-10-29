@@ -35,6 +35,7 @@
     "test:item-analysis": "node scripts/test-item-analysis.mjs",
     "test:attendance": "node scripts/test-attendance.mjs",
     "test:grade-list": "node scripts/test-grade-list.mjs",
+    "test:grade-scale": "node scripts/test-grade-scale.mjs",
     "test:student-result": "node scripts/test-student-result.mjs"
   },
   "dependencies": {

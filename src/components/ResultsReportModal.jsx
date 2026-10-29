@@ -3,12 +3,14 @@ import { Download, Eye, FileText, Presentation, LoaderCircle, Sheet } from 'luci
 import { Button, Field, Modal } from './ui'
 import { buildResultsReport, REPORT_SECTIONS } from '../lib/resultsReport'
 import { downloadBlob } from '../lib/utils'
+import { loadPreferredMaxGrade, loadPreferredRounding, parseMaxGrade, savePreferredMaxGrade, savePreferredRounding } from '../lib/gradeScale'
+import { GradeRoundingField, GradeScaleField } from './GradeScaleField'
 
 const outputs = [
   { id: 'a4', label: 'PDF · A4', description: 'Documento vertical para leitura e impressão.', icon: FileText },
   { id: 'slides', label: 'PDF · Apresentação', description: 'Páginas horizontais em proporção 16:9.', icon: Presentation },
   { id: 'pptx', label: 'PowerPoint', description: 'Arquivo .pptx com textos e gráficos editáveis.', icon: Presentation },
-  { id: 'grades', label: 'Planilha de notas', description: 'Arquivo .xlsx com uma aba por turma e as notas de cada aluno por área e no total.', icon: Sheet },
+  { id: 'grades', label: 'Planilha de notas', description: 'Arquivo .xlsx com uma aba por turma, os acertos por área, o aproveitamento e a nota na escala escolhida.', icon: Sheet },
 ]
 
 export function ResultsReportModal({ open, onClose, source, notify }) {
@@ -16,6 +18,8 @@ export function ResultsReportModal({ open, onClose, source, notify }) {
   const [output, setOutput] = useState('a4')
   const [sections, setSections] = useState(() => REPORT_SECTIONS.map((section) => section.id))
   const [classDetails, setClassDetails] = useState(false)
+  const [maxGradeText, setMaxGradeText] = useState(() => String(loadPreferredMaxGrade()))
+  const [rounding, setRounding] = useState(loadPreferredRounding)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [preview, setPreview] = useState(null)
@@ -29,8 +33,12 @@ export function ResultsReportModal({ open, onClose, source, notify }) {
     try {
       let file
       if (output === 'grades') {
+        const maxGrade = parseMaxGrade(maxGradeText)
+        if (!maxGrade) throw new Error('Escolha a escala da nota antes de gerar a planilha.')
+        savePreferredMaxGrade(maxGrade)
+        savePreferredRounding(rounding)
         const { buildGradeList, generateGradeListWorkbook } = await import('../lib/gradeListReport')
-        file = generateGradeListWorkbook(buildGradeList({ ...source, title: title === 'Relatório de resultados' ? 'Notas por turma' : title }))
+        file = generateGradeListWorkbook(buildGradeList({ ...source, title: title === 'Relatório de resultados' ? 'Notas por turma' : title, maxGrade, rounding }))
       } else {
         const report = buildResultsReport({ ...source, title, sections, classDetails })
         const { generateReportFile } = await import('../lib/reportExport')
@@ -49,7 +57,7 @@ export function ResultsReportModal({ open, onClose, source, notify }) {
   return <Modal open={open} onClose={busy ? () => {} : onClose} title="Gerar relatório" subtitle="Gráficos e análise dos resultados nos filtros atuais." size="xl" footer={<>
     <Button variant="secondary" onClick={onClose} disabled={busy}>Fechar</Button>
     {output !== 'grades' && <Button variant="secondary" icon={Eye} onClick={() => generate(true)} disabled={busy}>Prévia em PDF</Button>}
-    <Button icon={busy ? LoaderCircle : Download} onClick={() => generate()} disabled={busy}>{busy ? 'Gerando…' : output === 'pptx' ? 'Baixar PowerPoint' : output === 'grades' ? 'Baixar planilha' : 'Baixar PDF'}</Button>
+    <Button icon={busy ? LoaderCircle : Download} onClick={() => generate()} disabled={busy || (output === 'grades' && !parseMaxGrade(maxGradeText))}>{busy ? 'Gerando…' : output === 'pptx' ? 'Baixar PowerPoint' : output === 'grades' ? 'Baixar planilha' : 'Baixar PDF'}</Button>
   </>}>
     <div className="results-report-options">
       <div className="report-scope-note"><strong>O que vai aparecer</strong><span>{source.rows.length} participações · {source.assessments.length} simulados · {source.filters.find(([label]) => label === 'Turmas')?.[1]}</span><p>Os gráficos e destaques mostram somente as atividades, áreas e faixas que você escolheu.</p></div>
@@ -61,7 +69,8 @@ export function ResultsReportModal({ open, onClose, source, notify }) {
       {output !== 'grades' && <fieldset className="report-section-options"><legend>O que você quer mostrar?</legend><p>A visão geral, o mapa dos resultados, os destaques e os próximos passos sempre acompanham o documento.</p><div>{REPORT_SECTIONS.map((section) => <label key={section.id}><input type="checkbox" checked={sections.includes(section.id)} onChange={() => setSections((current) => current.includes(section.id) ? current.filter((id) => id !== section.id) : [...current, section.id])} disabled={busy} /><span>{section.label}</span></label>)}</div>
         <label className="report-class-detail"><input type="checkbox" checked={classDetails} onChange={(event) => setClassDetails(event.target.checked)} disabled={busy || !sections.includes('classes')} /><span>Adicionar um perfil por área para cada turma</span></label>
       </fieldset>}
-      {output === 'grades' && <p className="report-scope-note">Uma aba por turma, com os alunos em ordem alfabética. Cada simulado tem sua cor e cada área de conhecimento também. Para cada simulado aparecem os acertos por área, o total de acertos, as questões válidas e o aproveitamento, além da média da turma. Os totais são fórmulas, então ajustes feitos depois na planilha são recalculados.</p>}
+      {output === 'grades' && <div className="grade-scale-options"><GradeScaleField value={maxGradeText} onChange={setMaxGradeText} disabled={busy} /><GradeRoundingField value={rounding} onChange={setRounding} disabled={busy} /></div>}
+      {output === 'grades' && <p className="report-scope-note">Uma aba por turma, com os alunos em ordem alfabética. Cada simulado tem sua cor e cada área de conhecimento também. Para cada simulado aparecem os acertos por área, o total de acertos, as questões válidas, o aproveitamento (%) e a nota na escala escolhida, além da média da turma. Os totais são fórmulas, então ajustes feitos depois na planilha são recalculados.</p>}
       {error && <p className="report-error" role="alert">{error}</p>}
       {preview && <section className="report-preview"><header><strong>Prévia do documento</strong><span>{preview.pages} páginas</span></header><iframe title="Prévia do relatório em PDF" src={preview.url} /></section>}
     </div>

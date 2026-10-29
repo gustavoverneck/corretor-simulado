@@ -4,7 +4,9 @@ import {
   Lightbulb, MousePointerClick, RotateCcw, SlidersHorizontal, Target,
   TrendingDown, TrendingUp, UsersRound, Network, FileText, Search, X,
 } from 'lucide-react'
-import { Badge, Button, StatCard } from '../components/ui'
+import { Badge, Button, Modal, StatCard } from '../components/ui'
+import { GradeRoundingField, GradeScaleField } from '../components/GradeScaleField'
+import { formatMaxGrade, gradeScaleLabel, loadPreferredMaxGrade, loadPreferredRounding, parseMaxGrade, roundingDescription, savePreferredMaxGrade, savePreferredRounding, scaleGrade } from '../lib/gradeScale'
 import { average, cn, downloadBlob, initials, normalize } from '../lib/utils'
 import { uniqueQuestionAreas } from '../lib/knowledgeAreas'
 import { isAssessmentClosed } from '../lib/assessment'
@@ -188,6 +190,9 @@ export function ResultsPage({ data, notify }) {
   const [questionChartMode, setQuestionChartMode] = useState('general')
   const [studentSearch, setStudentSearch] = useState('')
   const [reportOpen, setReportOpen] = useState(false)
+  const [csvExportOpen, setCsvExportOpen] = useState(false)
+  const [csvMaxGrade, setCsvMaxGrade] = useState('10')
+  const [csvRounding, setCsvRounding] = useState(loadPreferredRounding)
   const [openStudentRowId, setOpenStudentRowId] = useState(null)
   const selectedAssessmentIds = resolveSelection(assessmentIds, correctedAssessments.map((item) => item.id), correctedAssessments.slice(0, 1).map((item) => item.id))
   const selectedAssessments = correctedAssessments.filter((item) => selectedAssessmentIds.includes(item.id))
@@ -293,15 +298,26 @@ export function ResultsPage({ data, notify }) {
     setSelectedQuestion(null)
   }
 
+  function openCsvExport() {
+    setCsvMaxGrade(String(loadPreferredMaxGrade()))
+    setCsvRounding(loadPreferredRounding())
+    setCsvExportOpen(true)
+  }
+
   function exportResults() {
+    const maxGrade = parseMaxGrade(csvMaxGrade)
+    if (!maxGrade) return
+    savePreferredMaxGrade(maxGrade)
+    savePreferredRounding(csvRounding)
     const filterRows = [
       ['Simulados', selectedAssessments.map((item) => item.title).join(', ')],
       ['Turma', selectedClassIds.length === assessmentClasses.length ? 'Todas' : selectedClassNames.join(', ')],
       ['Área / componente', selectedAreas.length === areas.length ? 'Todas' : selectedAreas.join(', ')],
       ['Faixa de desempenho', selectedBandIds.length === performanceBands.length ? 'Todas' : selectedBandLabels.join(', ')],
+      ['Escala da nota', `0 a ${formatMaxGrade(maxGrade)}, ${roundingDescription(csvRounding)}`],
     ]
-    const header = ['Simulado', 'Matrícula', 'Aluno', 'Turma', 'Questões válidas', 'Acertos', 'Erros', 'Brancos', 'Canceladas', 'Revisões', 'Aproveitamento (%)']
-    const rows = studentRows.map((item) => [item.assessment.title, item.student?.registration, item.student?.name, item.classroom?.name, item.total, item.correct, item.wrong, item.blank, item.cancelled, item.review, item.score])
+    const header = ['Simulado', 'Matrícula', 'Aluno', 'Turma', 'Questões válidas', 'Acertos', 'Erros', 'Brancos', 'Canceladas', 'Revisões', 'Aproveitamento (%)', gradeScaleLabel(maxGrade)]
+    const rows = studentRows.map((item) => [item.assessment.title, item.student?.registration, item.student?.name, item.classroom?.name, item.total, item.correct, item.wrong, item.blank, item.cancelled, item.review, item.score, formatMaxGrade(scaleGrade(item.correct, item.total, maxGrade, csvRounding) ?? '')])
     const areaHeader = ['Área / componente', 'Questões', 'Respostas válidas', 'Acertos', 'Erros', 'Em branco', 'Canceladas', 'Para revisão', 'Aproveitamento (%)']
     const areaRows = selectedAreaResults.map((item) => [item.area, item.questions, item.attempts, item.correct, item.wrong, item.blank, item.cancelled, item.review, item.score])
     const questionHeader = ['Simulado', 'Questão', 'Área / componente', 'Respostas válidas', 'Acertos', 'Erros', 'Em branco', 'Canceladas', 'Para revisão', 'Aproveitamento (%)']
@@ -312,6 +328,7 @@ export function ResultsPage({ data, notify }) {
       [], ['ANÁLISE POR QUESTÃO'], questionHeader, ...questionRows,
     ].map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n')
     downloadBlob(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }), `resultados-${selectedAssessments.map((item) => item.code).join('-')}.csv`)
+    setCsvExportOpen(false)
     notify('Relatório exportado', `${studentRows.length} resultado${studentRows.length !== 1 ? 's' : ''} do recorte atual foram incluídos.`)
   }
 
@@ -320,7 +337,7 @@ export function ResultsPage({ data, notify }) {
   return (
     <div className="page-stack results-page">
       <section className="results-filter-panel">
-        <header><div><span><SlidersHorizontal size={17} /></span><div><strong>Explorar resultados</strong><small>Combine os filtros ou clique diretamente nos gráficos.</small></div></div><div className="results-report-actions"><Button variant="secondary" icon={Download} onClick={exportResults}>Exportar planilha</Button><Button icon={FileText} disabled={!studentRows.length} onClick={() => setReportOpen(true)}>Gerar relatório</Button></div></header>
+        <header><div><span><SlidersHorizontal size={17} /></span><div><strong>Explorar resultados</strong><small>Combine os filtros ou clique diretamente nos gráficos.</small></div></div><div className="results-report-actions"><Button variant="secondary" icon={Download} onClick={openCsvExport}>Exportar planilha</Button><Button icon={FileText} disabled={!studentRows.length} onClick={() => setReportOpen(true)}>Gerar relatório</Button></div></header>
         <div className="results-filter-grid">
           <MultiFilter label="SIMULADOS" options={correctedAssessments.map((item) => ({ value: item.id, label: item.title }))} selected={selectedAssessmentIds} onChange={changeAssessments} allLabel="Todos os simulados" />
           <MultiFilter label="TURMAS" options={assessmentClasses.map((item) => ({ value: item.id, label: `${item.name} · ${item.shift}` }))} selected={selectedClassIds} onChange={setSelectedClassIds} allLabel="Todas as turmas" />
@@ -330,6 +347,14 @@ export function ResultsPage({ data, notify }) {
         </div>
         <div className="results-filter-summary"><Badge tone={hasFilters ? 'blue' : 'neutral'}>{studentRows.length} resultado{studentRows.length !== 1 ? 's' : ''}</Badge><span>{selectedAssessments.length} simulado{multipleAssessments ? 's' : ''} · {selectedClassIds.length === assessmentClasses.length ? 'Todas as turmas' : selectedClassNames.join(', ')} · {selectedAreas.length === areas.length ? 'Todas as áreas' : selectedAreas.join(', ')} · {selectedBandIds.length === performanceBands.length ? 'Todas as faixas' : selectedBandLabels.join(', ')}</span></div>
       </section>
+
+      <Modal open={csvExportOpen} onClose={() => setCsvExportOpen(false)} title="Exportar planilha" subtitle="Arquivo .csv com os resultados do recorte atual, por aluno, área e questão." size="sm" footer={<>
+        <Button variant="secondary" onClick={() => setCsvExportOpen(false)}>Cancelar</Button>
+        <Button icon={Download} disabled={!parseMaxGrade(csvMaxGrade)} onClick={exportResults}>Baixar planilha</Button>
+      </>}>
+        <div className="grade-scale-options stacked"><GradeScaleField value={csvMaxGrade} onChange={setCsvMaxGrade} hint="Além do aproveitamento (%), cada aluno ganha uma coluna com a nota nessa escala." />
+        <GradeRoundingField value={csvRounding} onChange={setCsvRounding} /></div>
+      </Modal>
 
       <ResultsReportModal open={reportOpen} onClose={() => setReportOpen(false)} notify={notify} source={{
         school: data.school,

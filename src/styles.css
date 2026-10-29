@@ -368,7 +368,12 @@ td > strong { color: #27362f; font-weight: 650; }
 .seges-results-export-intro > div { display: flex; flex-direction: column; }
 .seges-results-export-intro strong { color: #32473f; font-size: 10.5px; }
 .seges-results-export-intro span { margin-top: 4px; color: #738079; font-size: 8.5px; }
-.seges-results-export-config { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 12px; }
+.seges-results-export-config { display: grid; grid-template-columns: minmax(0, 1fr) 200px 270px; gap: 12px; }
+.grade-scale-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.grade-scale-options.stacked { grid-template-columns: 1fr; gap: 16px; }
+.grade-scale-field { display: flex; gap: 8px; }
+.grade-scale-field select { flex: 1 1 auto; min-width: 0; }
+.grade-scale-field input { flex: 0 0 80px; width: 80px; }
 .seges-results-export-classes { padding: 13px 14px; border: 1px solid #e0e6e2; border-radius: 9px; }
 .seges-results-export-classes > div:first-child { display: flex; flex-direction: column; }
 .seges-results-export-classes > div:first-child strong { color: #35463f; font-size: 10px; }
@@ -939,7 +944,7 @@ td > strong { color: #27362f; font-weight: 650; }
   .assessment-version-roster header label { align-items: stretch; }
   .assessment-version-roster header select { width: 100%; }
   .assessment-version-roster-summary { align-items: flex-start; flex-direction: column; }
-  .seges-results-export-config { grid-template-columns: 1fr; }
+  .seges-results-export-config, .grade-scale-options { grid-template-columns: 1fr; }
   .seges-results-export-summary { grid-template-columns: repeat(2, 1fr); }
   .seges-results-export-summary > div:nth-child(2) { border-right: 0; }
   .seges-results-export-summary > div:nth-child(-n+2) { border-bottom: 1px solid #e6ebe8; }

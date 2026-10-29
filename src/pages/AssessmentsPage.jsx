@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Upload, Plus, Search, ClipboardList, CalendarDays, UsersRound, Printer, ScanLine, CheckCircle2, Eye, FileText, Trash2, AlertTriangle, Layers3, X, Shuffle, UserPlus, PencilLine, Ban, CircleOff, Download, FileSpreadsheet, LockKeyhole, RotateCcw, ArrowUp, ArrowDown, ArrowUpDown, FileCode2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
+import { GradeRoundingField, GradeScaleField } from '../components/GradeScaleField'
+import { loadPreferredRounding, savePreferredRounding } from '../lib/gradeScale'
 import { AnswerSheet, PrintableSheets } from '../components/AnswerSheet'
 import { FullAssessmentEditor } from '../components/FullAssessmentEditor'
 import { AssessmentPaper, AssessmentPackets } from '../components/AssessmentPaper'
@@ -158,6 +160,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const [exportClassIds, setExportClassIds] = useState(assessment.classIds)
   const [exportScope, setExportScope] = useState('all')
   const [exportMaxGrade, setExportMaxGrade] = useState('10')
+  const [exportRounding, setExportRounding] = useState(loadPreferredRounding)
   const [editingAreas, setEditingAreas] = useState(false)
   const [areaVersionId, setAreaVersionId] = useState('')
   const [areaDraft, setAreaDraft] = useState(() => getQuestionAreas(assessment))
@@ -191,7 +194,8 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
     classIds: exportClassIds,
     scope: exportScope,
     maxGrade: validExportMaxGrade ? parsedExportMaxGrade : 10,
-  }), [assessment, data.classes, data.students, data.submissions, exportClassIds, exportScope, parsedExportMaxGrade, validExportMaxGrade])
+    rounding: exportRounding,
+  }), [assessment, data.classes, data.students, data.submissions, exportClassIds, exportScope, parsedExportMaxGrade, validExportMaxGrade, exportRounding])
   const exportSummary = exportRows.reduce((summary, row) => {
     summary[row.status] = (summary[row.status] || 0) + 1
     return summary
@@ -300,6 +304,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
     setExportClassIds([...assessment.classIds])
     setExportScope('all')
     setExportMaxGrade('10')
+    setExportRounding(loadPreferredRounding())
     setExportOpen(true)
   }
 
@@ -323,6 +328,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       notify('Nenhuma nota pronta', 'O recorte selecionado não possui correções prontas para lançamento.', 'warning')
       return
     }
+    savePreferredRounding(exportRounding)
 
     const csv = serializeSegesResultsCsv(exportRows, {
       assessment,
@@ -598,7 +604,8 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
           <div className="seges-results-export-intro"><FileSpreadsheet size={22} /><div><strong>{assessment.title}</strong><span>{assessment.code} · cada arquivo representa somente o recorte escolhido abaixo.</span></div></div>
           <div className="seges-results-export-config">
             <Field label="Resultado a exportar" hint="Para várias áreas, faça uma exportação separada de cada recorte."><select value={exportScope} onChange={(event) => setExportScope(event.target.value)}><option value="all">Nota geral do simulado</option>{areaSummary.map(([area, count]) => <option value={area} key={area}>{area} · {count} {count === 1 ? 'questão' : 'questões'}</option>)}</select></Field>
-            <Field label="Nota máxima" hint="A nota final é arredondada para uma casa decimal."><input type="text" inputMode="decimal" value={exportMaxGrade} onChange={(event) => setExportMaxGrade(event.target.value)} aria-invalid={!validExportMaxGrade} /></Field>
+            <GradeScaleField label="Nota máxima" hint="Use o mesmo valor da avaliação no SEGES." value={exportMaxGrade} onChange={setExportMaxGrade} />
+            <GradeRoundingField value={exportRounding} onChange={setExportRounding} />
           </div>
           <section className="seges-results-export-classes">
             <div><strong>Turmas incluídas</strong><span>O arquivo pode reunir várias turmas; a extensão usará a turma aberta no SEGES.</span></div>
