@@ -1,6 +1,7 @@
 import { calculateSubmissionMetrics } from './resultsMetrics.js'
 import { uniqueQuestionAreas } from './knowledgeAreas.js'
 import { buildXlsx, cellRef } from './xlsx.js'
+import { DEFAULT_ROUNDING, gradeScaleLabel, normalizeRounding, roundingDescription, roundingFormula, scaleGrade } from './gradeScale.js'
 
 const assessmentColors = ['2F6B5B', '9A5B2B', '3E5F7D', '5E5683', '8F4440', '5C7542', '7A5A33', '4B5F6E']
 const areaColors = ['47776A', 'C0843F', '52718A', '7D6BA8', 'B35F59', '6E9150', 'A88B45', '4F8C93', 'B0668F', '6B7B86']
@@ -25,7 +26,7 @@ function latestRows(rows) {
   return [...latest.values()]
 }
 
-export function buildGradeList({ school, assessments, rows, selectedAreas = [], title = 'Notas por turma', generatedAt = new Date() }) {
+export function buildGradeList({ school, assessments, rows, selectedAreas = [], title = 'Notas por turma', maxGrade = 10, rounding = DEFAULT_ROUNDING, generatedAt = new Date() }) {
   if (!rows.length) throw new Error('Não há resultados no recorte selecionado. Ajuste os filtros antes de gerar a lista de notas.')
   const uniqueRows = latestRows(rows)
   const classMap = new Map()
@@ -53,6 +54,7 @@ export function buildGradeList({ school, assessments, rows, selectedAreas = [], 
         correct: row.correct,
         total: row.total,
         score: row.score,
+        grade: scaleGrade(row.correct, row.total, maxGrade, rounding),
         review: row.review,
       })).sort((first, second) => byName(first.name, second.name))
       const areaAverages = areas.map((_, index) => {
@@ -67,6 +69,8 @@ export function buildGradeList({ school, assessments, rows, selectedAreas = [], 
 
   return {
     title: title.trim() || 'Notas por turma',
+    maxGrade,
+    rounding: normalizeRounding(rounding),
     school: school?.name || '',
     date: new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long', timeZone: 'America/Sao_Paulo' }).format(generatedAt),
     dateKey: new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'America/Sao_Paulo' }).format(generatedAt),
@@ -80,6 +84,8 @@ function tint(hex, amount) {
 }
 
 export function generateGradeListWorkbook(list) {
+  const maxGrade = list.maxGrade || 10
+  const rounding = normalizeRounding(list.rounding)
   const areaColor = new Map()
   list.classes.forEach((group) => group.assessments.forEach((assessment) => assessment.areas.forEach((area) => {
     if (!areaColor.has(area)) areaColor.set(area, areaColors[areaColor.size % areaColors.length])
@@ -101,7 +107,7 @@ export function generateGradeListWorkbook(list) {
     let column = 3
     group.assessments.forEach((assessment) => {
       blocks.push({ assessment, start: column, color: assessmentColor.get(assessment.id) })
-      column += assessment.areas.length + 3
+      column += assessment.areas.length + 4
     })
     const lastColumn = column - 1
     const headerRow = 4
@@ -109,14 +115,14 @@ export function generateGradeListWorkbook(list) {
     const rows = [
       [{ v: `Turma ${group.label}`, s: { bold: true, size: 15, color: '203B32' } }],
       [{ v: [list.title, list.school, list.date].filter(Boolean).join(' · '), s: { color: '667A71' } }],
-      [{ v: 'Áreas: número de acertos. Acertos: soma das áreas. %: acertos ÷ questões válidas (canceladas não contam). * = marcações pendentes de revisão.', s: { italic: true, size: 9, color: '667A71' } }],
+      [{ v: `Áreas: número de acertos. Acertos: soma das áreas. %: acertos ÷ questões válidas (canceladas não contam). ${gradeScaleLabel(maxGrade)}: % × ${String(maxGrade).replace('.', ',')}, ${roundingDescription(rounding)}. * = marcações pendentes de revisão.`, s: { italic: true, size: 9, color: '667A71' } }],
       [],
       [{ v: 'Nº', s: head }, { v: 'Aluno', s: { ...head, align: 'left' } }, { v: 'Matrícula', s: head }],
       [{ v: '', s: head }, { v: '', s: head }, { v: '', s: head }],
     ]
     const merges = [`A1:${cellRef(0, Math.max(lastColumn, 5))}`, `A2:${cellRef(1, Math.max(lastColumn, 5))}`, `A3:${cellRef(2, Math.max(lastColumn, 5))}`, 'A5:A6', 'B5:B6', 'C5:C6']
     blocks.forEach(({ assessment, start, color }) => {
-      const blockEnd = start + assessment.areas.length + 2
+      const blockEnd = start + assessment.areas.length + 3
       rows[headerRow][start] = { v: assessment.title, s: { bold: true, color: 'FFFFFF', fill: color, align: 'center', border: 'strong', borderColor: color, wrap: true } }
       for (let index = start + 1; index <= blockEnd; index += 1) rows[headerRow][index] = { v: '', s: { fill: color, border: true } }
       if (blockEnd > start) merges.push(`${cellRef(headerRow, start)}:${cellRef(headerRow, blockEnd)}`)
@@ -130,6 +136,7 @@ export function generateGradeListWorkbook(list) {
       rows[headerRow + 1][offset] = { v: 'Acertos', s: { ...totalHead, border: assessment.areas.length ? true : 'strong', borderColor: color } }
       rows[headerRow + 1][offset + 1] = { v: 'Questões válidas', s: totalHead }
       rows[headerRow + 1][offset + 2] = { v: '%', s: totalHead }
+      rows[headerRow + 1][offset + 3] = { v: gradeScaleLabel(maxGrade), s: totalHead }
     })
 
     students.forEach((student, studentIndex) => {
@@ -162,6 +169,9 @@ export function generateGradeListWorkbook(list) {
         row[offset + 2] = result
           ? { f: `IFERROR(${correctRef}/${validRef},"")`, v: result.total ? result.correct / result.total : '', s: { ...totalStyle, numFmt: 'percent' } }
           : { v: null, s: { ...totalStyle, numFmt: 'percent' } }
+        row[offset + 3] = result
+          ? { f: `IFERROR(${roundingFormula(`${correctRef}/${validRef}*${maxGrade}`, rounding)},"")`, v: result.grade ?? '', s: { ...totalStyle, numFmt: 'decimal' } }
+          : { v: null, s: { ...totalStyle, numFmt: 'decimal' } }
       })
       row[1] = { v: `${student.name}${review ? ' *' : ''}`, s: { border: true } }
       rows.push(row)
@@ -178,11 +188,12 @@ export function generateGradeListWorkbook(list) {
         mean(assessment.students.map((student) => student.correct)),
         mean(assessment.students.map((student) => student.total)),
         mean(assessment.students.filter((student) => student.total).map((student) => student.correct / student.total)),
+        mean(assessment.students.map((student) => student.grade).filter(Number.isFinite)),
       ]
       columns.forEach((value, index) => {
         const col = start + index
         const range = `${cellRef(firstDataRow, col)}:${cellRef(lastDataRow, col)}`
-        const isPercent = index === columns.length - 1
+        const isPercent = index === columns.length - 2
         averageRow[col] = { f: `IFERROR(AVERAGE(${range}),"")`, v: value, s: { ...averageStyle, numFmt: isPercent ? 'percent' : 'decimal', border: index ? true : 'strong', borderColor: color } }
       })
     })
@@ -194,6 +205,7 @@ export function generateGradeListWorkbook(list) {
       cols[start + assessment.areas.length] = 9
       cols[start + assessment.areas.length + 1] = 10
       cols[start + assessment.areas.length + 2] = 8
+      cols[start + assessment.areas.length + 3] = 10
     })
     const heights = { 0: 22, [headerRow]: 32, [headerRow + 1]: 48 }
     return { name: group.label, rows, merges, cols, heights, freeze: { rows: firstDataRow, columns: 2 } }

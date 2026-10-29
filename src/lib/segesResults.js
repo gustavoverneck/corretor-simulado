@@ -1,5 +1,6 @@
 import { getAssessmentForSubmission } from './assessment.js'
 import { getQuestionAreas } from './knowledgeAreas.js'
+import { DEFAULT_ROUNDING, roundGrade } from './gradeScale.js'
 
 export const SEGES_RESULT_STATUS = {
   ready: 'PRONTO',
@@ -27,7 +28,7 @@ export function indexAssessmentSubmissions(submissions, assessmentId) {
   return indexed
 }
 
-export function calculateAssessmentResult(submission, assessment, scope = 'all', maxGrade = 10) {
+export function calculateAssessmentResult(submission, assessment, scope = 'all', maxGrade = 10, rounding = DEFAULT_ROUNDING) {
   if (!submission || !assessment) return null
   assessment = getAssessmentForSubmission(assessment, submission)
 
@@ -57,11 +58,11 @@ export function calculateAssessmentResult(submission, assessment, scope = 'all',
 
   if (!valid) return null
   const percentage = correct / valid * 100
-  const grade = Math.round((correct / valid * Number(maxGrade || 0)) * 10) / 10
+  const grade = roundGrade(correct / valid * Number(maxGrade || 0), rounding)
   return { correct, valid, percentage, grade }
 }
 
-export function buildSegesResultRows({ assessment, classes, students, submissions, classIds, scope = 'all', maxGrade = 10 }) {
+export function buildSegesResultRows({ assessment, classes, students, submissions, classIds, scope = 'all', maxGrade = 10, rounding = DEFAULT_ROUNDING }) {
   const selectedClassIds = new Set(classIds)
   const classOrder = new Map(assessment.classIds.map((classId, index) => [classId, index]))
   const classesById = new Map(classes.map((classroom) => [classroom.id, classroom]))
@@ -75,7 +76,7 @@ export function buildSegesResultRows({ assessment, classes, students, submission
     ))
     .map((student) => {
       const submission = submissionsByStudent.get(student.id)
-      const metrics = calculateAssessmentResult(submission, assessment, scope, maxGrade)
+      const metrics = calculateAssessmentResult(submission, assessment, scope, maxGrade, rounding)
       let status = SEGES_RESULT_STATUS.ready
       if (!submission) status = SEGES_RESULT_STATUS.missing
       else if (submission.status === 'Revisar') status = SEGES_RESULT_STATUS.review
