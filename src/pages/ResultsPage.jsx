@@ -187,6 +187,7 @@ export function ResultsPage({ data, notify }) {
   const [selectedBandIds, setSelectedBandIds] = useState(() => performanceBands.map((item) => item.id))
   const [selectedQuestion, setSelectedQuestion] = useState(null)
   const [distributionChartMode, setDistributionChartMode] = useState('general')
+  const [distributionValueMode, setDistributionValueMode] = useState('count')
   const [questionChartMode, setQuestionChartMode] = useState('general')
   const [studentSearch, setStudentSearch] = useState('')
   const [reportOpen, setReportOpen] = useState(false)
@@ -255,8 +256,20 @@ export function ResultsPage({ data, notify }) {
       count: classScopedRows.filter((item) => item.classId === classroom.id && matchesBand(item.score, band.id)).length,
     })),
   }))
-  const maxDistribution = Math.max(1, ...distribution.map((item) => item.count))
-  const maxClassDistribution = Math.max(1, ...distribution.flatMap((item) => item.classes.map((classResult) => classResult.count)))
+  // No modo percentual, a turma é a base de cada barra agrupada para comparar turmas de tamanhos diferentes.
+  const classTotals = new Map(chartClasses.map(({ classroom }) => [classroom.id, classScopedRows.filter((item) => item.classId === classroom.id).length]))
+  distribution.forEach((item) => {
+    item.percent = classScopedRows.length ? item.count / classScopedRows.length * 100 : 0
+    item.classes.forEach((classResult) => {
+      const total = classTotals.get(classResult.classroom.id)
+      classResult.percent = total ? classResult.count / total * 100 : 0
+    })
+  })
+  const showDistributionPercent = distributionValueMode === 'percent'
+  const distributionValue = (item) => showDistributionPercent ? item.percent : item.count
+  const formatDistributionValue = (item) => showDistributionPercent ? `${Math.round(item.percent)}%` : item.count
+  const maxDistribution = Math.max(showDistributionPercent ? 0.01 : 1, ...distribution.map(distributionValue))
+  const maxClassDistribution = Math.max(showDistributionPercent ? 0.01 : 1, ...distribution.flatMap((item) => item.classes.map(distributionValue)))
   const eligibleStudents = selectedAssessments.reduce((sum, assessment) => sum + data.students.filter((student) => assessment.classIds.includes(student.classId)
     && student.status === 'Ativo' && selectedClassIds.includes(student.classId)).length, 0)
   const selectedClassNames = assessmentClasses.filter((item) => selectedClassIds.includes(item.id)).map((item) => item.name)
@@ -398,9 +411,9 @@ export function ResultsPage({ data, notify }) {
       <div className="results-grid">
         <section className="panel class-comparison"><header className="panel-header"><div><h3>Comparativo por turma</h3><p>Clique para isolar uma turma; continue clicando para combinar outras</p></div></header><div className="horizontal-chart">{classResults.map((item) => <button type="button" className={cn(selectedClassIds.includes(item.classroom.id) && selectedClassIds.length < assessmentClasses.length && 'selected')} aria-pressed={selectedClassIds.includes(item.classroom.id) && selectedClassIds.length < assessmentClasses.length} key={item.classroom.id} onClick={() => toggleClass(item.classroom.id)}><span><strong>{item.classroom.name}</strong><small>{item.count} {multipleAssessments ? 'correções' : 'participantes'}</small></span><span><i style={{ width: `${item.avg}%`, background: item.classroom.color }} /><em>{item.avg}%</em></span></button>)}</div></section>
         <section className="panel distribution-panel">
-          <header className="panel-header"><div><h3>Distribuição de desempenho</h3><p>Clique para isolar uma faixa; continue clicando para combinar outras</p></div><div className="chart-view-toggle" role="group" aria-label="Visualização da distribuição"><button type="button" className={distributionChartMode === 'general' ? 'active' : ''} aria-pressed={distributionChartMode === 'general'} onClick={() => setDistributionChartMode('general')}>Geral</button><button type="button" className={distributionChartMode === 'class' ? 'active' : ''} aria-pressed={distributionChartMode === 'class'} onClick={() => setDistributionChartMode('class')}>Por turma</button></div></header>
+          <header className="panel-header"><div><h3>Distribuição de desempenho</h3><p>Clique para isolar uma faixa; continue clicando para combinar outras</p></div><div className="chart-panel-actions"><div className="chart-view-toggle" role="group" aria-label="Valores da distribuição"><button type="button" className={!showDistributionPercent ? 'active' : ''} aria-pressed={!showDistributionPercent} title="Número de alunos em cada faixa" onClick={() => setDistributionValueMode('count')}>Nº de alunos</button><button type="button" className={showDistributionPercent ? 'active' : ''} aria-pressed={showDistributionPercent} title={distributionChartMode === 'class' ? 'Percentual dos alunos de cada turma' : 'Percentual do total de alunos'} onClick={() => setDistributionValueMode('percent')}>% de alunos</button></div><div className="chart-view-toggle" role="group" aria-label="Visualização da distribuição"><button type="button" className={distributionChartMode === 'general' ? 'active' : ''} aria-pressed={distributionChartMode === 'general'} onClick={() => setDistributionChartMode('general')}>Geral</button><button type="button" className={distributionChartMode === 'class' ? 'active' : ''} aria-pressed={distributionChartMode === 'class'} onClick={() => setDistributionChartMode('class')}>Por turma</button></div></div></header>
           {distributionChartMode === 'class' && <ClassChartLegend classes={chartClasses} />}
-          <div className={cn('distribution-chart', distributionChartMode === 'class' && 'by-class')}>{distribution.map((item) => <button type="button" className={cn(selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length && 'selected')} aria-pressed={selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length} style={distributionChartMode === 'class' ? { minWidth: `${Math.max(92, chartClasses.length * 24 + 16)}px` } : undefined} key={item.id} onClick={() => toggleBand(item.id)}><span className={cn('distribution-bar', distributionChartMode === 'class' && 'grouped')}>{distributionChartMode === 'general' ? <i style={{ height: item.count ? `${Math.max(7, item.count / maxDistribution * 100)}%` : 0, background: item.color }}><span>{item.count}</span></i> : item.classes.map((classResult) => <i key={classResult.classroom.id} title={`${classResult.classroom.name}: ${classResult.count} aluno${classResult.count !== 1 ? 's' : ''}`} style={{ height: classResult.count ? `${Math.max(7, classResult.count / maxClassDistribution * 100)}%` : 0, background: classResult.color }}><span>{classResult.count}</span></i>)}</span><span className="distribution-label"><small>{item.label}</small><strong>{item.name}</strong></span></button>)}</div>
+          <div className={cn('distribution-chart', distributionChartMode === 'class' && 'by-class')}>{distribution.map((item) => <button type="button" className={cn(selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length && 'selected')} aria-pressed={selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length} style={distributionChartMode === 'class' ? { minWidth: `${Math.max(92, chartClasses.length * 24 + 16)}px` } : undefined} key={item.id} onClick={() => toggleBand(item.id)}><span className={cn('distribution-bar', distributionChartMode === 'class' && 'grouped')}>{distributionChartMode === 'general' ? <i title={`${item.count} aluno${item.count !== 1 ? 's' : ''} (${Math.round(item.percent)}%)`} style={{ height: item.count ? `${Math.max(7, distributionValue(item) / maxDistribution * 100)}%` : 0, background: item.color }}><span>{formatDistributionValue(item)}</span></i> : item.classes.map((classResult) => <i key={classResult.classroom.id} title={`${classResult.classroom.name}: ${classResult.count} aluno${classResult.count !== 1 ? 's' : ''} (${Math.round(classResult.percent)}% da turma)`} style={{ height: classResult.count ? `${Math.max(7, distributionValue(classResult) / maxClassDistribution * 100)}%` : 0, background: classResult.color }}><span>{formatDistributionValue(classResult)}</span></i>)}</span><span className="distribution-label"><small>{item.label}</small><strong>{item.name}</strong></span></button>)}</div>
         </section>
       </div>
 
