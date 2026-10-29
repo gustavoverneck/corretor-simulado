@@ -519,11 +519,13 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       <div className="assessment-detail-progress"><div><span>{closed ? 'Participação final registrada' : 'Andamento da correção'}</span><strong>{submissions.length} de {totalStudents}</strong></div><div className="wide-progress"><i style={{ width: `${progress}%` }} /></div></div>
 
       <section className="assessment-detail-areas">
-        {areaVersions.length > 1 && <label>Versão <select value={areaVersion.id} onChange={(event) => { setAreaVersionId(event.target.value); setEditingAreas(false) }}>{areaVersions.map((version) => <option key={version.id} value={version.id}>{version.label}</option>)}</select></label>}
         <header>
           <div><h3>Áreas das questões</h3><p>Classifique cada questão para organizar os filtros e as análises pedagógicas.</p></div>
-          {!editingAreas && !closed && <Button variant="secondary" size="sm" icon={PencilLine} onClick={startEditingAreas}>Editar áreas</Button>}
-          {closed && <Badge tone="neutral"><LockKeyhole size={12} /> Reabra para editar</Badge>}
+          <div className="assessment-detail-areas-actions">
+            {areaVersions.length > 1 && <label><span>Versão</span><select value={areaVersion.id} onChange={(event) => { setAreaVersionId(event.target.value); setEditingAreas(false) }}>{areaVersions.map((version) => <option key={version.id} value={version.id}>{version.label}</option>)}</select></label>}
+            {!editingAreas && !closed && <Button variant="secondary" size="sm" icon={PencilLine} onClick={startEditingAreas}>Editar áreas</Button>}
+            {closed && <Badge tone="neutral"><LockKeyhole size={12} /> Reabra para editar</Badge>}
+          </div>
         </header>
         <div className="assessment-area-summary">
           {areaSummary.map(([area, count]) => <span key={area}><strong>{area}</strong><small>{count} {count === 1 ? 'questão' : 'questões'}</small></span>)}

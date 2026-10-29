@@ -284,6 +284,9 @@ td > strong { color: #27362f; font-weight: 650; }
 .assessment-detail-areas > header { min-height: 67px; padding: 13px 15px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: #fafbfa; border-bottom: 1px solid #e7ebe8; }
 .assessment-detail-areas h3 { font-family: Georgia, serif; font-size: 15px; }
 .assessment-detail-areas header p { margin-top: 4px; color: #828e89; font-size: 9px; }
+.assessment-detail-areas-actions { flex: 0 0 auto; display: flex; align-items: flex-end; gap: 9px; }
+.assessment-detail-areas-actions label { display: flex; flex-direction: column; gap: 5px; color: #7f8b86; font-size: 7.5px; font-weight: 750; letter-spacing: .35px; text-transform: uppercase; }
+.assessment-detail-areas-actions select { width: 150px; height: 35px; padding: 0 32px 0 10px; color: #35443f; background-color: white; border: 1px solid #dce2de; border-radius: 7px; font-size: 10px; text-transform: none; }
 .assessment-area-summary { padding: 11px 14px; display: flex; flex-wrap: wrap; gap: 7px; }
 .assessment-area-summary > span { min-height: 35px; padding: 7px 10px; display: flex; align-items: flex-start; flex-direction: column; justify-content: center; color: #48685e; background: #edf4f1; border: 1px solid #dbe8e2; border-radius: 7px; }
 .assessment-area-summary strong { font-size: 8.5px; }
@@ -967,6 +970,8 @@ td > strong { color: #27362f; font-weight: 650; }
   .seges-results-export-summary > div:nth-child(-n+2) { border-bottom: 1px solid #e6ebe8; }
   .assessment-detail-areas > header { align-items: stretch; flex-direction: column; }
   .assessment-detail-areas > header .button { width: 100%; }
+  .assessment-detail-areas-actions { align-items: stretch; flex-direction: column; }
+  .assessment-detail-areas-actions select { width: 100%; }
   .assessment-area-bulk { align-items: stretch; flex-direction: column; }
   .assessment-area-bulk .field, .assessment-area-bulk .button { width: 100%; }
   .assessment-area-grid { grid-template-columns: 1fr; }
