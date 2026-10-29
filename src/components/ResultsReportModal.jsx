@@ -54,7 +54,7 @@ export function ResultsReportModal({ open, onClose, source, notify }) {
     } finally { setBusy(false) }
   }
 
-  return <Modal open={open} onClose={busy ? () => {} : onClose} title="Gerar relatório" subtitle="Gráficos e análise dos resultados nos filtros atuais." size="xl" footer={<>
+  return <Modal open={open} onClose={busy ? () => {} : onClose} title="Gerar relatório" subtitle="Gráficos e análise dos resultados nos filtros atuais." size="lg" footer={<>
     <Button variant="secondary" onClick={onClose} disabled={busy}>Fechar</Button>
     {output !== 'grades' && <Button variant="secondary" icon={Eye} onClick={() => generate(true)} disabled={busy}>Prévia em PDF</Button>}
     <Button icon={busy ? LoaderCircle : Download} onClick={() => generate()} disabled={busy || (output === 'grades' && !parseMaxGrade(maxGradeText))}>{busy ? 'Gerando…' : output === 'pptx' ? 'Baixar PowerPoint' : output === 'grades' ? 'Baixar planilha' : 'Baixar PDF'}</Button>
