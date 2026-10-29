@@ -173,6 +173,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const [printDocument, setPrintDocument] = useState(null)
   const [printDocumentClassIds, setPrintDocumentClassIds] = useState(assessment.classIds)
   const [printMarkAbsent, setPrintMarkAbsent] = useState(false)
+  const [printAttendanceLayout, setPrintAttendanceLayout] = useState('signature')
   const [printingDocument, setPrintingDocument] = useState(false)
   const submissions = data.submissions.filter((item) => item.assessmentId === assessment.id)
   const closed = isAssessmentClosed(assessment)
@@ -365,10 +366,10 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   async function generatePrintDocument() {
     setPrintingDocument(true)
     try {
-      const options = { assessment, classes: data.classes, students: data.students, submissions: data.submissions, school: data.school, classIds: printDocumentClassIds, markAbsent: printMarkAbsent }
+      const options = { assessment, classes: data.classes, students: data.students, submissions: data.submissions, school: data.school, classIds: printDocumentClassIds, markAbsent: printMarkAbsent, layout: printAttendanceLayout }
       const blob = printDocument === 'attendance' ? await createAttendancePdf(options) : await createAnswerKeyPdf(options)
-      downloadBlob(blob, printDocumentFilename(assessment, printDocument))
-      notify(printDocument === 'attendance' ? 'Lista de presença gerada' : 'Gabarito gerado', `PDF com ${printDocumentClassIds.length} ${printDocumentClassIds.length === 1 ? 'turma' : 'turmas'}, uma por página, pronto para imprimir.`)
+      downloadBlob(blob, printDocumentFilename(assessment, printDocument, printAttendanceLayout))
+      notify(printDocument === 'answer-key' ? 'Gabarito gerado' : printAttendanceLayout === 'checklist' ? 'Lista de conferência gerada' : 'Lista de presença gerada', `PDF com ${printDocumentClassIds.length} ${printDocumentClassIds.length === 1 ? 'turma' : 'turmas'}, uma por página, pronto para imprimir.`)
       setPrintDocument(null)
     } catch (error) {
       notify('Não foi possível gerar o PDF', error.message, 'warning')
@@ -625,10 +626,16 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
         open={Boolean(printDocument)}
         onClose={() => setPrintDocument(null)}
         title={printDocument === 'attendance' ? 'Imprimir lista de presença' : 'Imprimir gabaritos'}
-        subtitle={printDocument === 'attendance' ? 'Uma folha por turma, em ordem alfabética, com espaço para assinatura.' : 'O gabarito oficial de cada turma, com todas as versões e as áreas das questões.'}
+        subtitle={printDocument === 'attendance' ? 'Uma folha por turma, com os alunos em ordem alfabética.' : 'O gabarito oficial de cada turma, com todas as versões e as áreas das questões.'}
         footer={<><Button variant="ghost" onClick={() => setPrintDocument(null)}>Cancelar</Button><Button icon={Printer} disabled={!printDocumentClassIds.length || printingDocument} onClick={generatePrintDocument}>{printingDocument ? 'Gerando PDF…' : 'Gerar PDF'}</Button></>}
       >
         <div className="seges-results-export">
+          {printDocument === 'attendance' && <div className="print-document-layouts" role="radiogroup" aria-label="Modelo da lista">
+            {[
+              { id: 'signature', title: 'Para assinatura', description: 'Campo de assinatura para usar no dia da aplicação.' },
+              { id: 'checklist', title: 'Conferência da correção', description: 'Corrigido e Ausente já vêm marcados; quem não tem nenhum dos dois fica destacado para você conferir.' },
+            ].map((option) => <label className={cn(printAttendanceLayout === option.id && 'checked')} key={option.id}><input type="radio" name="attendance-layout" checked={printAttendanceLayout === option.id} onChange={() => setPrintAttendanceLayout(option.id)} /><span><strong>{option.title}</strong><small>{option.description}</small></span></label>)}
+          </div>}
           <section className="seges-results-export-classes">
             <div><strong>Turmas incluídas</strong><span>Cada turma começa em uma nova página do PDF.</span></div>
             <div>{assessment.classIds.map((classId) => {
@@ -637,7 +644,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
               return <label className={cn(checked && 'checked')} key={classId}><input type="checkbox" checked={checked} onChange={() => togglePrintDocumentClass(classId)} /><span style={{ background: classroom?.color }} /><strong>{classroom?.name || 'Turma removida'}</strong><CheckCircle2 size={15} /></label>
             })}</div>
           </section>
-          {printDocument === 'attendance' && <label className="print-document-option"><input type="checkbox" checked={printMarkAbsent} onChange={(event) => setPrintMarkAbsent(event.target.checked)} /><span><strong>Marcar ausências já registradas</strong><small>Alunos marcados como ausentes na correção saem com “AUSENTE” no campo de assinatura.</small></span></label>}
+          {printDocument === 'attendance' && printAttendanceLayout === 'signature' && <label className="print-document-option"><input type="checkbox" checked={printMarkAbsent} onChange={(event) => setPrintMarkAbsent(event.target.checked)} /><span><strong>Marcar ausências já registradas</strong><small>Alunos marcados como ausentes na correção saem com “AUSENTE” no campo de assinatura.</small></span></label>}
         </div>
       </Modal>
 
