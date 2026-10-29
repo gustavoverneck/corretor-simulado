@@ -305,7 +305,8 @@ td > strong { color: #27362f; font-weight: 650; }
 .assessment-area-choice select { padding-right: 28px; }
 .assessment-area-choice input:focus, .assessment-area-choice select:focus { border-color: #7d9e93; box-shadow: 0 0 0 2px rgba(78, 120, 108, .1); outline: 0; }
 .assessment-area-actions { margin-top: 12px; display: flex; justify-content: flex-end; gap: 7px; }
-.assessment-detail-classes > header { margin-bottom: 10px; }
+.assessment-detail-classes > header { margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.assessment-detail-classes > header .button { flex: 0 0 auto; }
 .assessment-detail-classes h3 { font-family: Georgia, serif; font-size: 15px; }
 .assessment-detail-classes header p { margin-top: 4px; color: #828e89; font-size: 9px; }
 .assessment-detail-class { margin-top: 9px; overflow: hidden; border: 1px solid #e2e7e4; border-radius: 9px; }
@@ -364,6 +365,11 @@ td > strong { color: #27362f; font-weight: 650; }
 .assessment-student-version-select:disabled { cursor: default; opacity: .72; }
 .assessment-version-roster-empty { padding: 24px 16px; color: #84908b; border-top: 1px solid #edf0ee; font-size: 9.5px; text-align: center; }
 .seges-results-export { display: flex; flex-direction: column; gap: 17px; }
+.print-document-option { padding: 12px 14px; display: flex; align-items: flex-start; gap: 10px; border: 1px solid #e0e6e2; border-radius: 9px; cursor: pointer; }
+.print-document-option input { margin-top: 2px; }
+.print-document-option span { display: flex; flex-direction: column; gap: 4px; }
+.print-document-option strong { color: #35463f; font-size: 10px; }
+.print-document-option small { color: #818d88; font-size: 8px; line-height: 1.4; }
 .seges-results-export-intro { min-height: 61px; padding: 13px 15px; display: flex; align-items: center; gap: 11px; color: #4e786c; background: #eef5f1; border: 1px solid #dce9e3; border-radius: 9px; }
 .seges-results-export-intro > div { display: flex; flex-direction: column; }
 .seges-results-export-intro strong { color: #32473f; font-size: 10.5px; }
@@ -942,6 +948,7 @@ td > strong { color: #27362f; font-weight: 650; }
   .assessment-inline-key-editor > small { grid-column: 1; }
   .assessment-version-roster > header { align-items: stretch; flex-direction: column; }
   .assessment-roster-actions { align-items: stretch; flex-direction: column; }
+  .assessment-detail-classes > header { align-items: stretch; flex-direction: column; }
   .assessment-roster-actions .button { width: 100%; }
   .assessment-version-roster header label { align-items: stretch; }
   .assessment-version-roster header select { width: 100%; }
