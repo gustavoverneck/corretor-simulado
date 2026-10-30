@@ -60,6 +60,6 @@ assert.deepEqual(versionGroups.map((group) => group.label), ['1ª série', '2ª 
 assert.equal(versionGroups[0].submissions.length + versionGroups[1].submissions.length, 60)
 
 const { bytes, sheetNames } = buildCorrelationWorkbook({ assessment, scopeLabel: 'todas as turmas', itemReport, itemLabel: '', areaReport, insights, attention })
-assert.deepEqual(sheetNames, ['Resumo', 'Questões', 'Áreas', 'Alunos'])
+assert.deepEqual(sheetNames, ['Resumo', 'Questões', 'Áreas', 'Alunos', 'Legenda'])
 assert.ok(bytes.length > 1000)
 console.log('Teacher insights tests passed.')
