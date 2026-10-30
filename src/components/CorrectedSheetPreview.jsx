@@ -3,7 +3,7 @@ import { useState } from 'react'
 const colors = {
   correct: '#16803c',
   wrong: '#dc2626',
-  multiple: '#dc2626',
+  multiple: '#f97316',
   uncertain: '#b77900',
   cancelled: '#64748b',
 }
