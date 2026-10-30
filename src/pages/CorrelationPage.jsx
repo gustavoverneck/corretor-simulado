@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react'
-import { Activity, BarChart3, BookOpenCheck, Download, FileSpreadsheet, FileText, GitCompare, Grid3x3, Layers3, Lightbulb, ListChecks, Network, Settings2, UsersRound } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Activity, BarChart3, BookOpenCheck, CircleHelp, Download, FileSpreadsheet, FileText, GitCompare, Grid3x3, Layers3, Lightbulb, ListChecks, Network, Settings2, UsersRound } from 'lucide-react'
 import { Badge, Button, EmptyState } from '../components/ui'
 import { downloadBlob, formatDate, initials } from '../lib/utils'
 import { buildBipartiteNetwork, buildQuestionNetwork, buildStudentNetwork, buildTemporalAnalysis, questionCategory, summarizeBehavior } from '../lib/networkAnalysis'
 import { answerKeyGroups, buildAreaReport, buildItemReport, buildTeacherInsights, correlationStrength, pairFor, reliabilityLabel, studentsNeedingAttention } from '../lib/teacherInsights'
 import { buildCorrelationWorkbook } from '../lib/correlationReport'
+import { CORRELATION_HELP, CORRELATION_HELP_ORDER } from '../lib/correlationHelp'
 
 const colors = ['#47776a', '#b98558', '#796e91', '#56758d', '#a56565', '#748b5f']
 const number = (value, digits = 3) => Number(value || 0).toFixed(digits).replace('.', ',')
@@ -62,22 +64,51 @@ function scoreClass(value) {
   return value < 40 ? 'low' : value < 60 ? 'mid' : value < 80 ? 'good' : 'high'
 }
 
+function HelpContent({ help }) {
+  return <><strong>{help.title}</strong><p>{help.text}</p>{help.ranges && <ul>{help.ranges.map(([tone, range, meaning]) => <li key={range}><Badge tone={tone}>{range}</Badge><span>{meaning}</span></li>)}</ul>}{help.note && <small>{help.note}</small>}</>
+}
+
+// Ícone "?" que abre a explicação; fica num portal para não ser cortado pelas tabelas com rolagem.
+function HelpTip({ id }) {
+  const help = CORRELATION_HELP[id]; const button = useRef(null); const [position, setPosition] = useState(null)
+  useEffect(() => {
+    if (!position) return undefined
+    const close = (event) => { if (event.type === 'keydown' ? event.key === 'Escape' : !button.current?.contains(event.target) && !event.target.closest?.('.help-popover')) setPosition(null) }
+    const hide = () => setPosition(null)
+    document.addEventListener('mousedown', close); document.addEventListener('keydown', close); window.addEventListener('scroll', hide, true); window.addEventListener('resize', hide)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); window.removeEventListener('scroll', hide, true); window.removeEventListener('resize', hide) }
+  }, [position])
+  function toggle(event) {
+    event.stopPropagation()
+    if (position) return setPosition(null)
+    const rect = button.current.getBoundingClientRect(); const width = Math.min(320, window.innerWidth - 24)
+    setPosition({ width, left: Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12)), top: rect.bottom + 8, bottom: window.innerHeight - rect.top + 8, above: rect.bottom > window.innerHeight * .6 })
+  }
+  if (!help) return null
+  return <><button ref={button} type="button" className={`help-tip${position ? ' open' : ''}`} aria-label={`O que é ${help.title}?`} aria-expanded={Boolean(position)} onClick={toggle}><CircleHelp size={13} /></button>
+    {position && createPortal(<div className="help-popover" role="dialog" aria-label={help.title} style={{ left: position.left, width: position.width, ...(position.above ? { bottom: position.bottom } : { top: position.top }) }}><HelpContent help={help} /></div>, document.body)}</>
+}
+
+function HelpGlossary() {
+  return <details className="panel help-glossary"><summary><CircleHelp size={16} /><div><strong>Como ler os números desta aba</strong><span>O que cada métrica significa e quais faixas o sistema usa.</span></div></summary><div className="help-glossary-grid">{CORRELATION_HELP_ORDER.map((id) => <section key={id}><HelpContent help={CORRELATION_HELP[id]} /></section>)}</div></details>
+}
+
 function Overview({ itemReport, areaReport, insights, attention }) {
   const reliability = reliabilityLabel(itemReport?.alpha)
   const reteach = (itemReport?.items || []).filter((item) => !item.cancelled && item.flag !== 'key').sort((a, b) => a.correctRate - b.correctRate).slice(0, 6)
   return <>
     <section className="panel"><div className="research-metrics">
-      <div><span>Média da prova</span><strong>{whole(areaReport.summary.mean)}</strong><small>{areaReport.summary.n} folhas · desvio {Math.round(areaReport.summary.sd || 0)} p.p.</small></div>
-      <div><span>Confiabilidade</span><strong>{itemReport?.alpha === null || itemReport?.alpha === undefined ? '—' : number(itemReport.alpha, 2)}</strong><small><Badge tone={reliability.tone}>{reliability.label}</Badge></small></div>
-      <div><span>Questões para revisar</span><strong>{itemReport?.review.length ?? 0}</strong><small>gabarito, enunciado ou discriminação</small></div>
-      <div><span>Alunos em atenção</span><strong>{attention.length}</strong><small>nota baixa ou muitos brancos</small></div>
+      <div><span>Média da prova <HelpTip id="mean" /></span><strong>{whole(areaReport.summary.mean)}</strong><small>{areaReport.summary.n} folhas · desvio {Math.round(areaReport.summary.sd || 0)} p.p.</small></div>
+      <div><span>Confiabilidade <HelpTip id="alpha" /></span><strong>{itemReport?.alpha === null || itemReport?.alpha === undefined ? '—' : number(itemReport.alpha, 2)}</strong><small><Badge tone={reliability.tone}>{reliability.label}</Badge></small></div>
+      <div><span>Questões para revisar <HelpTip id="review" /></span><strong>{itemReport?.review.length ?? 0}</strong><small>gabarito, enunciado ou discriminação</small></div>
+      <div><span>Alunos em atenção <HelpTip id="attention" /></span><strong>{attention.length}</strong><small>nota baixa ou muitos brancos</small></div>
     </div></section>
     <section className="panel"><header className="panel-header"><div><h3>O que os dados mostram</h3><p>Leitura automática do simulado, da mais para a menos importante.</p></div><Lightbulb size={18} color="#a87345" /></header>
       {insights.length ? <ul className="insight-list">{insights.map((insight) => <li key={insight.title} className={`insight-${insight.tone}`}><strong>{insight.title}</strong><p>{insight.text}</p></li>)}</ul> : <div className="research-empty"><div><strong>Sem dados suficientes</strong><p>Corrija mais folhas para gerar a leitura.</p></div></div>}
     </section>
     <div className="insight-columns">
       <section className="panel"><header className="panel-header"><div><h3>Questões para retomar em sala</h3><p>Menor taxa de acerto, com a alternativa errada mais marcada.</p></div></header>
-        <div className="table-wrap"><table className="insight-table"><thead><tr><th>QUESTÃO</th><th>ÁREA</th><th>ACERTO</th><th>ERRO MAIS COMUM</th></tr></thead><tbody>{reteach.map((item) => <tr key={item.index}><td><strong>Q{item.number}</strong></td><td>{item.area}</td><td><span className={`score-pill ${scoreClass(item.correctRate * 100)}`}>{percent(item.correctRate, 0)}</span></td><td>{item.topDistractor ? `${item.topDistractor.letter} (${percent(item.topDistractor.share, 0)}) · gabarito ${item.key}` : '—'}</td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table className="insight-table"><thead><tr><th>QUESTÃO</th><th>ÁREA</th><th>ACERTO <HelpTip id="correctRate" /></th><th>ERRO MAIS COMUM <HelpTip id="options" /></th></tr></thead><tbody>{reteach.map((item) => <tr key={item.index}><td><strong>Q{item.number}</strong></td><td>{item.area}</td><td><span className={`score-pill ${scoreClass(item.correctRate * 100)}`}>{percent(item.correctRate, 0)}</span></td><td>{item.topDistractor ? `${item.topDistractor.letter} (${percent(item.topDistractor.share, 0)}) · gabarito ${item.key}` : '—'}</td></tr>)}</tbody></table></div>
       </section>
       <section className="panel"><header className="panel-header"><div><h3>Alunos que precisam de atenção</h3><p>Nota abaixo de 40% ou 25% ou mais em branco.</p></div><Badge tone={attention.length ? 'ochre' : 'green'}>{attention.length}</Badge></header>
         {attention.length ? <div className="table-wrap"><table className="insight-table"><thead><tr><th>ALUNO</th><th>NOTA</th><th>ÁREA MAIS FRACA</th><th>MOTIVO</th></tr></thead><tbody>{attention.slice(0, 15).map((row) => <tr key={row.submissionId}><td><strong>{row.name}</strong><small>{row.className}</small></td><td><span className={`score-pill ${scoreClass(row.score)}`}>{row.score}%</span></td><td>{row.weakest ? `${row.weakest.area} (${whole(row.weakest.score)})` : '—'}</td><td>{row.reasons.join('; ')}</td></tr>)}</tbody></table>{attention.length > 15 && <p className="method-note">Mais {attention.length - 15} aluno(s) na planilha exportada.</p>}</div> : <div className="research-empty"><div><strong>Nenhum aluno em alerta</strong><p>Todos tiveram nota de 40% ou mais e responderam a maior parte da prova.</p></div></div>}
@@ -93,10 +124,10 @@ function ItemsView({ itemReport, groupNote }) {
   const letters = Object.keys(itemReport.items[0]?.distribution || {})
   const items = itemReport.items.filter((item) => (area === 'all' || item.area === area) && (filter === 'all' || (filter === 'alerts' ? !['green', 'neutral'].includes(item.diagnosis.tone) : item.diagnosis.tone === 'green')))
     .sort((a, b) => sort === 'easy' ? a.correctRate - b.correctRate : sort === 'discrimination' ? (a.discrimination ?? 9) - (b.discrimination ?? 9) : a.number - b.number)
-  return <section className="panel"><header className="panel-header"><div><h3>Análise das questões</h3><p>Acerto, discriminação e alternativas marcadas em cada questão.</p></div><Badge tone="blue">{itemReport.sheets} folhas</Badge></header>
+  return <section className="panel"><header className="panel-header"><div><h3>Análise das questões <HelpTip id="discrimination" /></h3><p>Acerto, discriminação e alternativas marcadas em cada questão.</p></div><Badge tone="blue">{itemReport.sheets} folhas</Badge></header>
     {groupNote && <p className="method-note">{groupNote}</p>}
     <div className="item-controls"><label><span>Área</span><select value={area} onChange={(event) => setArea(event.target.value)}><option value="all">Todas</option>{areas.map((item) => <option key={item}>{item}</option>)}</select></label><label><span>Mostrar</span><select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">Todas as questões</option><option value="alerts">Só com alerta</option><option value="good">Só boas questões</option></select></label><label><span>Ordenar por</span><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="number">Número</option><option value="easy">Menor acerto</option><option value="discrimination">Menor discriminação</option></select></label></div>
-    <div className="table-wrap"><table className="item-table"><thead><tr><th>Q</th><th>ÁREA</th><th>GAB.</th><th>ACERTO</th><th>DISCRIMINAÇÃO</th><th>ALTERNATIVAS MARCADAS</th><th>DIAGNÓSTICO</th></tr></thead><tbody>{items.map((item) => { const [tone, label] = discriminationLabel(item.discrimination); return <tr key={item.index}>
+    <div className="table-wrap"><table className="item-table"><thead><tr><th>Q</th><th>ÁREA</th><th>GAB.</th><th>ACERTO <HelpTip id="correctRate" /></th><th>DISCRIMINAÇÃO <HelpTip id="discrimination" /></th><th>ALTERNATIVAS MARCADAS <HelpTip id="options" /></th><th>DIAGNÓSTICO <HelpTip id="diagnosis" /></th></tr></thead><tbody>{items.map((item) => { const [tone, label] = discriminationLabel(item.discrimination); return <tr key={item.index}>
       <td><strong>Q{item.number}</strong></td><td>{item.area}</td><td className="mono-cell">{item.cancelled ? '—' : item.key}</td>
       <td>{item.cancelled ? '—' : <span className={`score-pill ${scoreClass(item.correctRate * 100)}`}>{percent(item.correctRate, 0)}</span>}</td>
       <td>{item.cancelled ? '—' : <div className="discrimination-cell"><strong>{signed(item.discrimination)}</strong><Badge tone={tone}>{label}</Badge></div>}</td>
@@ -111,14 +142,14 @@ function AreasView({ areaReport, itemReport, itemLabel }) {
   const names = areaReport.areas.map((area) => area.area)
   if (names.length < 2) return <section className="panel"><div className="research-empty"><Grid3x3 size={25} /><div><strong>Uma única área neste simulado</strong><p>Cadastre as áreas das questões no simulado para comparar o desempenho entre elas.</p></div></div></section>
   return <>
-    <section className="panel"><header className="panel-header"><div><h3>Correlação entre áreas</h3><p>Quanto as notas de duas áreas andam juntas entre os alunos.</p></div><Badge tone="neutral">{areaReport.summary.n} alunos</Badge></header>
+    <section className="panel"><header className="panel-header"><div><h3>Correlação entre áreas <HelpTip id="areaCorrelation" /></h3><p>Quanto as notas de duas áreas andam juntas entre os alunos.</p></div><Badge tone="neutral">{areaReport.summary.n} alunos</Badge></header>
       <div className="table-wrap"><table className="corr-matrix"><thead><tr><th />{names.map((name) => <th key={name} title={name}>{name}</th>)}</tr></thead><tbody>{names.map((first) => <tr key={first}><th>{first}</th>{names.map((second) => { if (first === second) return <td key={second} className="diagonal">—</td>; const pair = pairFor(areaReport.pairs, first, second); return <td key={second} style={correlationColor(pair?.r)} title={pair?.r === null || !pair ? 'Dados insuficientes' : `r = ${number(pair.r, 2)} · ${correlationStrength(pair.r)} · n = ${pair.n} · p ${pair.p < .001 ? '< 0,001' : `= ${number(pair.p, 3)}`}`}><strong>{pair?.r === null || !pair ? '—' : number(pair.r, 2)}</strong>{pair?.r !== null && pair && <small>{correlationStrength(pair.r)}{pair.significant ? '' : ' · incerta'}</small>}</td> })}</tr>)}</tbody></table></div>
       <p className="method-note">Perto de 1: quem vai bem numa área tende a ir bem na outra, então reforçar uma pode ajudar a outra. Perto de 0: são dificuldades independentes e pedem trabalho separado. "Incerta" indica que, com esse número de alunos, a relação pode ser acaso.</p>
     </section>
     <section className="panel"><header className="panel-header"><div><h3>Média e consistência por área</h3><p>O alfa mostra se as questões da área medem a mesma habilidade{itemLabel ? ` (${itemLabel})` : ''}.</p></div></header>
-      <div className="table-wrap"><table className="insight-table"><thead><tr><th>ÁREA</th><th>MÉDIA</th><th>DESVIO</th><th>ALFA DA ÁREA</th></tr></thead><tbody>{areaReport.areas.map((area) => { const alpha = itemReport?.areaAlpha?.[area.area]; const label = reliabilityLabel(alpha); return <tr key={area.area}><td><strong>{area.area}</strong></td><td><span className={`score-pill ${scoreClass(area.mean)}`}>{whole(area.mean)}</span></td><td>{Math.round(area.sd || 0)} p.p.</td><td>{alpha === null || alpha === undefined ? '—' : <div className="discrimination-cell"><strong>{number(alpha, 2)}</strong><Badge tone={label.tone}>{label.label}</Badge></div>}</td></tr> })}</tbody></table></div>
+      <div className="table-wrap"><table className="insight-table"><thead><tr><th>ÁREA</th><th>MÉDIA</th><th>DESVIO <HelpTip id="deviation" /></th><th>ALFA DA ÁREA <HelpTip id="areaAlpha" /></th></tr></thead><tbody>{areaReport.areas.map((area) => { const alpha = itemReport?.areaAlpha?.[area.area]; const label = reliabilityLabel(alpha); return <tr key={area.area}><td><strong>{area.area}</strong></td><td><span className={`score-pill ${scoreClass(area.mean)}`}>{whole(area.mean)}</span></td><td>{Math.round(area.sd || 0)} p.p.</td><td>{alpha === null || alpha === undefined ? '—' : <div className="discrimination-cell"><strong>{number(alpha, 2)}</strong><Badge tone={label.tone}>{label.label}</Badge></div>}</td></tr> })}</tbody></table></div>
     </section>
-    {areaReport.byClass.length > 1 && <section className="panel"><header className="panel-header"><div><h3>Média por turma e área</h3><p>Onde cada turma está mais forte ou mais fraca.</p></div></header>
+    {areaReport.byClass.length > 1 && <section className="panel"><header className="panel-header"><div><h3>Média por turma e área <HelpTip id="classAreas" /></h3><p>Onde cada turma está mais forte ou mais fraca.</p></div></header>
       <div className="table-wrap"><table className="corr-matrix class-matrix"><thead><tr><th>TURMA</th><th>GERAL</th>{names.map((name) => <th key={name}>{name}</th>)}</tr></thead><tbody>{areaReport.byClass.map((row) => <tr key={row.classId}><th>{row.name}<small>{row.n} alunos</small></th><td className={`heat ${scoreClass(row.mean)}`}><strong>{whole(row.mean)}</strong></td>{names.map((name) => <td key={name} className={`heat ${scoreClass(row.areas[name])}`}><strong>{whole(row.areas[name])}</strong></td>)}</tr>)}</tbody></table></div>
     </section>}
   </>
@@ -170,6 +201,7 @@ export function CorrelationPage({ data, notify }) {
     {activeView === 'overview' && <Overview itemReport={itemReport} areaReport={areaReport} insights={insights} attention={attention} />}
     {activeView === 'items' && <ItemsView itemReport={itemReport} groupNote={groupNote} />}
     {activeView === 'areas' && <AreasView areaReport={areaReport} itemReport={itemReport} itemLabel={itemLabel} />}
+    {['overview', 'items', 'areas'].includes(activeView) && <HelpGlossary />}
     {advanced && groups.length > 1 && !['overview', 'items', 'areas'].includes(activeView) && <p className="method-note">As redes usam só as folhas de {group.label}, porque cada versão tem questões em outra ordem.</p>}
     {activeView === 'research' && <section className="panel"><header className="panel-header"><div><h3>Métricas estruturais e centralidade</h3><p>Indicadores normalizados para comparação entre recortes.</p></div><Badge tone="neutral">n = {studentNetwork.nodes.length}</Badge></header><Metrics students={studentNetwork} questions={questionNetwork} /><p className="method-note">{significant.length} de {questionNetwork.edges.length} associações entre questões são significativas com confiança de {(confidence * 100).toFixed(0)}%. Resultados associativos, não causais.</p></section>}
     {activeView === 'students' && <section className="panel"><header className="panel-header"><div><h3>Comunidades de alunos</h3><p>Cores representam comunidades; tamanho reflete centralidade de grau.</p></div><Badge tone="blue">{studentNetwork.communityCount} comunidades</Badge></header><NetworkChart network={studentNetwork} kind="student" /></section>}

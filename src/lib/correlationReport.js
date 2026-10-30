@@ -1,7 +1,8 @@
 import { buildXlsx } from './xlsx.js'
 import { pairFor, reliabilityLabel } from './teacherInsights.js'
+import { CORRELATION_HELP, CORRELATION_HELP_ORDER } from './correlationHelp.js'
 
-// Planilha editável com as leituras da aba de correlação (resumo, questões, áreas e alunos).
+// Planilha editável com as leituras da aba Análise (resumo, questões, áreas e alunos).
 const header = { bold: true, color: 'FFFFFF', fill: '426F62', border: true, align: 'center', wrap: true }
 const cellStyle = { border: true }
 const percentStyle = { border: true, numFmt: 'percent', align: 'center' }
@@ -57,10 +58,18 @@ export function buildCorrelationWorkbook({ assessment, scopeLabel, itemReport, i
     ...attention.map((row) => [{ v: row.name, s: cellStyle }, { v: row.className, s: cellStyle }, { v: row.score, s: { ...cellStyle, align: 'center' } }, { v: round(row.blankRate), s: percentStyle }, { v: row.weakest?.area || '', s: cellStyle }, { v: round(row.weakest?.score, 1), s: decimalStyle }, { v: row.reasons.join('; '), s: cellStyle }]),
   ]
 
+  const legend = [
+    title('Como ler os números'),
+    [],
+    [{ v: 'Métrica', s: header }, { v: 'O que significa', s: header }, { v: 'Faixas', s: header }],
+    ...CORRELATION_HELP_ORDER.map((id) => { const help = CORRELATION_HELP[id]; return [{ v: help.title, s: { ...cellStyle, bold: true, valign: 'top' } }, { v: [help.text, help.note].filter(Boolean).join(' '), s: { ...cellStyle, wrap: true, valign: 'top' } }, { v: (help.ranges || []).map(([, range, meaning]) => `${range}: ${meaning}`).join('\n'), s: { ...cellStyle, wrap: true, valign: 'top' } }] }),
+  ]
+
   return buildXlsx([
     { name: 'Resumo', rows: summary, cols: [26, 110] },
     { name: 'Questões', rows: items, cols: [9, 26, 10, 9, 13, 9, ...letters.map(() => 7), 8, 9, 22, 60], freeze: { rows: 4, columns: 1 } },
     { name: 'Áreas', rows: areas, cols: [26, ...areaNames.map(() => 16)] },
     { name: 'Alunos', rows: students, cols: [34, 16, 10, 11, 24, 15, 34], freeze: { rows: 3, columns: 1 } },
+    { name: 'Legenda', rows: legend, cols: [28, 80, 60] },
   ], { title: assessment.title })
 }

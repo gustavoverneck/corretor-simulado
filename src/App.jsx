@@ -28,7 +28,7 @@ const navigation = [
   { id: 'assessments', label: 'Simulados', icon: ClipboardList },
   { id: 'correction', label: 'Correção', icon: ScanLine },
   { id: 'results', label: 'Resultados', icon: BarChart3 },
-  { id: 'correlation', label: 'Correlação', icon: GitCompare },
+  { id: 'correlation', label: 'Análise', icon: GitCompare },
   { id: 'import', label: 'Importar SEGES', icon: Upload },
 ]
 
@@ -38,7 +38,7 @@ const titles = {
   assessments: ['Simulados', 'Crie, aplique e acompanhe seus instrumentos avaliativos.'],
   correction: ['Central de correção', 'Digitalize folhas e revise marcações com segurança.'],
   results: ['Resultados', 'Transforme respostas em decisões pedagógicas.'],
-  correlation: ['Correlação', 'Compare desempenhos e padrões de resposta entre alunos e simulados.'],
+  correlation: ['Análise', 'Entenda o desempenho das questões, das áreas e dos alunos em cada simulado.'],
   import: ['Importar do SEGES', 'Atualize alunos e turmas a partir de um relatório oficial.'],
   settings: ['Configurações', 'Ajuste a escola, a leitura óptica e o banco de dados local.'],
 }

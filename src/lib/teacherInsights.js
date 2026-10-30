@@ -4,7 +4,7 @@ import { analyzeItems, MIN_RESPONSES, submissionAnswerKey } from './itemAnalysis
 import { calculateSubmissionMetrics } from './resultsMetrics.js'
 import { pearsonWithInference } from './networkAnalysis.js'
 
-// Leituras pedagógicas da aba de correlação: análise de itens (teoria clássica dos testes),
+// Leituras pedagógicas da aba Análise: análise de itens (teoria clássica dos testes),
 // correlação entre áreas e frases-resumo para o professor.
 const GROUP_SHARE = 0.27
 export const LOW_SCORE = 40
