@@ -23,6 +23,7 @@
     "test:omr-photo-conditions": "node scripts/test-omr-photo-conditions.mjs",
     "test:assessment": "node scripts/test-assessment.mjs",
     "test:network": "node scripts/test-network-analysis.mjs",
+    "test:teacher-insights": "node scripts/test-teacher-insights.mjs",
     "test:results-report": "node scripts/test-results-report.mjs",
     "test:full-assessment": "node scripts/test-full-assessment.mjs",
     "test:results-filters": "node scripts/test-results-filters.mjs",
