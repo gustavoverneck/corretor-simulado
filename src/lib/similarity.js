@@ -1,7 +1,9 @@
 // Similaridade entre folhas da mesma versão e da mesma turma. Acertos iguais dizem pouco
-// (dois bons alunos acertam as mesmas questões); o sinal forte é errar com a mesma alternativa.
+// (dois bons alunos acertam as mesmas questões); o sinal forte é errar do mesmo jeito
+// (mesma alternativa errada, mesma marcação múltipla ou branco na mesma questão).
 export const SIMILARITY_LEVELS = { high: { p: 0.001, sameWrong: 5 }, medium: { p: 0.01, sameWrong: 3 } }
 export const HIGH_AGREEMENT = 80
+export const IDENTICAL_MIN_ANSWERS = 10
 
 export function answerSignature(answer) {
   return Array.isArray(answer?.selected) ? [...answer.selected].sort().join('+') : ''
@@ -16,15 +18,18 @@ export function poissonTail(k, lambda) {
   return Math.max(0, Math.min(1, 1 - cumulative))
 }
 
-// Para cada questão, a chance de dois alunos que erraram escolherem a mesma alternativa errada.
+// Respostas que não são acerto: alternativa errada, marcação múltipla ou branco.
+const missed = (answer) => answer && !['correct', 'cancelled'].includes(answer.status)
+
+// Para cada questão, a chance de dois alunos que não acertaram darem a mesma resposta
+// (mesma alternativa errada, mesma marcação múltipla ou os dois em branco).
 export function wrongMatchChances(submissions, questionCount) {
   return Array.from({ length: questionCount }, (_, index) => {
     const counts = new Map(); let total = 0
     submissions.forEach((submission) => {
       const answer = submission.answers?.[index]
-      if (answer?.status !== 'wrong') return
+      if (!missed(answer)) return
       const signature = answerSignature(answer)
-      if (!signature) return
       counts.set(signature, (counts.get(signature) || 0) + 1); total += 1
     })
     if (total < 2) return 0.25
@@ -32,6 +37,16 @@ export function wrongMatchChances(submissions, questionCount) {
     const chance = [...counts.values()].reduce((sum, count) => sum + count * (count - 1), 0) / (total * (total - 1))
     return Math.max(0.05, chance)
   })
+}
+
+const decimal = (value) => value.toFixed(1).replace('.', ',')
+
+// Explica em uma frase por que o par recebeu esse nível.
+function similarityReason(pair) {
+  if (pair.identical && pair.level !== 'low' && pair.p >= SIMILARITY_LEVELS.medium.p) return `Folhas idênticas, inclusive em ${pair.sameWrong} erro(s) ou branco(s). Esses erros são comuns na turma, então confira a folha original.`
+  if (pair.level !== 'low') return `${pair.sameWrong} erro(s) iguais; por acaso seriam cerca de ${decimal(pair.expectedWrong)}.`
+  if (pair.sameWrong < SIMILARITY_LEVELS.medium.sameWrong) return pair.agreement >= HIGH_AGREEMENT ? `Iguais porque acertaram quase as mesmas questões: só ${pair.sameWrong} erro(s) em comum, pouco para indicar cópia.` : 'Poucos erros iguais.'
+  return `Os erros iguais são os mais comuns da turma: por acaso seriam cerca de ${decimal(pair.expectedWrong)}.`
 }
 
 export function compareSubmissions(first, second, { questionCount, answerKey = [], chances = [] }) {
@@ -44,12 +59,12 @@ export function compareSubmissions(first, second, { questionCount, answerKey = [
     let kind = 'different'
     if (!firstSignature && !secondSignature) { kind = 'blank'; sameBlank += 1 } else {
       comparable += 1
-      if (same) { sameAnswers += 1; kind = a?.status === 'correct' ? 'correct' : 'same' }
+      if (same) { sameAnswers += 1; kind = a?.status === 'correct' ? 'correct' : 'wrong' }
       if (a?.status === 'correct' && same) sameCorrect += 1
-      if (a?.status === 'wrong' && b?.status === 'wrong' && firstSignature && secondSignature) {
-        bothWrong += 1; expectedWrong += chances[index] ?? 0.25
-        if (same) { sameWrong += 1; kind = 'wrong' }
-      }
+    }
+    if (missed(a) && missed(b)) {
+      bothWrong += 1; expectedWrong += chances[index] ?? 0.25
+      if (same) sameWrong += 1
     }
     // Sequência de respostas marcadas idênticas (brancos interrompem).
     run = same && firstSignature ? run + 1 : 0
@@ -57,8 +72,13 @@ export function compareSubmissions(first, second, { questionCount, answerKey = [
     return { number: index + 1, key: answerKey[index] || '', first: firstSignature || '—', second: secondSignature || '—', kind }
   })
   const p = poissonTail(sameWrong, expectedWrong)
-  const level = sameWrong >= SIMILARITY_LEVELS.high.sameWrong && p < SIMILARITY_LEVELS.high.p ? 'high' : sameWrong >= SIMILARITY_LEVELS.medium.sameWrong && p < SIMILARITY_LEVELS.medium.p ? 'medium' : 'low'
-  return { questions, comparable, sameAnswers, agreement: comparable ? sameAnswers / comparable * 100 : 0, sameWrong, bothWrong, sameCorrect, sameBlank, expectedWrong, p, longestRun, level }
+  const agreement = comparable ? sameAnswers / comparable * 100 : 0
+  // Folhas inteiras iguais com erros em comum sempre pedem conferência, mesmo que os erros sejam os mais comuns.
+  const identical = agreement === 100 && comparable >= IDENTICAL_MIN_ANSWERS
+  const byChance = sameWrong >= SIMILARITY_LEVELS.high.sameWrong && p < SIMILARITY_LEVELS.high.p ? 'high' : sameWrong >= SIMILARITY_LEVELS.medium.sameWrong && p < SIMILARITY_LEVELS.medium.p ? 'medium' : 'low'
+  const level = byChance === 'low' && identical && sameWrong >= SIMILARITY_LEVELS.medium.sameWrong ? 'medium' : byChance
+  const pair = { questions, comparable, sameAnswers, agreement, sameWrong, bothWrong, sameCorrect, sameBlank, expectedWrong, p, longestRun, level, identical }
+  return { ...pair, reason: similarityReason(pair) }
 }
 
 // Pares na mesma turma, para todas as folhas de uma mesma versão.

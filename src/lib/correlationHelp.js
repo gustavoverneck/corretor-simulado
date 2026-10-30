@@ -1,6 +1,6 @@
 import { MIN_RESPONSES } from './itemAnalysis.js'
 import { HIGH_BLANK_RATE, LOW_SCORE } from './teacherInsights.js'
-import { HIGH_AGREEMENT, SIMILARITY_LEVELS } from './similarity.js'
+import { HIGH_AGREEMENT, IDENTICAL_MIN_ANSWERS, SIMILARITY_LEVELS } from './similarity.js'
 
 // Explicações das métricas da aba Análise, com as mesmas faixas usadas nos cálculos.
 export const CORRELATION_HELP = {
@@ -68,12 +68,12 @@ export const CORRELATION_HELP = {
   similarity: {
     title: 'Similaridade entre alunos',
     text: 'Compara as folhas de cada par de alunos da mesma turma e da mesma versão. Acertar as mesmas questões é normal entre bons alunos; o sinal que chama atenção é errar com a mesma alternativa errada muitas vezes.',
-    ranges: [['red', 'Alta', `${SIMILARITY_LEVELS.high.sameWrong} ou mais erros iguais e chance de coincidência abaixo de 0,1%`], ['ochre', 'Atenção', `${SIMILARITY_LEVELS.medium.sameWrong} ou mais erros iguais e chance de coincidência abaixo de 1%`], ['neutral', 'Baixa', 'padrão compatível com acaso']],
+    ranges: [['red', 'Alta', `${SIMILARITY_LEVELS.high.sameWrong} ou mais erros iguais e chance de coincidência abaixo de 0,1%`], ['ochre', 'Atenção', `${SIMILARITY_LEVELS.medium.sameWrong} ou mais erros iguais e chance de coincidência abaixo de 1%, ou folhas 100% iguais (${IDENTICAL_MIN_ANSWERS} ou mais respostas) com ${SIMILARITY_LEVELS.medium.sameWrong} ou mais erros em comum`], ['neutral', 'Baixa', 'padrão compatível com acaso']],
     note: 'É um indicador para conferir a folha original e o mapa de sala, não uma prova de cola.',
   },
   sameWrong: {
     title: 'Erros iguais',
-    text: 'Questões em que os dois erraram e marcaram a mesma alternativa errada, de um total de questões que os dois erraram. Ao lado, quantos erros iguais seriam esperados se cada um tivesse errado por conta própria, calculado com as alternativas erradas que a turma mais escolheu em cada questão.',
+    text: 'Questões em que nenhum dos dois acertou e os dois responderam igual (mesma alternativa errada, mesma marcação múltipla ou os dois em branco), de um total de questões que os dois erraram. Ao lado, quantos erros iguais seriam esperados se cada um tivesse errado por conta própria, calculado com as alternativas erradas que a turma mais escolheu em cada questão.',
     note: 'Errar igual numa questão em que quase todos erram com a mesma letra pesa pouco; errar igual numa alternativa rara pesa muito.',
   },
   coincidence: {
@@ -83,7 +83,7 @@ export const CORRELATION_HELP = {
   },
   agreement: {
     title: 'Respostas iguais',
-    text: `Parte das questões respondidas em que os dois marcaram exatamente o mesmo, contando acertos e erros. A sequência mostra o maior trecho seguido de respostas idênticas. Acima de ${HIGH_AGREEMENT}% é comum entre dois alunos que vão muito bem, por isso sozinho não indica cola.`,
+    text: `Parte das questões respondidas em que os dois marcaram exatamente o mesmo, contando acertos e erros. A sequência mostra o maior trecho seguido de respostas idênticas. Acima de ${HIGH_AGREEMENT}% é comum entre dois alunos que vão muito bem: se os dois acertaram quase tudo, as respostas são iguais porque são as certas, e isso sozinho não indica cola. Por isso um par com 100% de respostas iguais pode ficar como Baixa; o motivo aparece abaixo do nível.`,
   },
   dIndex: {
     title: 'Índice D',
