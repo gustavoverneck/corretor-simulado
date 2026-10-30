@@ -8,7 +8,7 @@ import {
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { CorrectedSheetPreview } from '../components/CorrectedSheetPreview'
 import { analyzeAnswerSheet } from '../lib/omr'
-import { withVersionQuestionAreas, getAssessmentForStudent, getAssessmentForVersion, getAssessmentForSubmission, CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
+import { summarizeAnswers, withVersionQuestionAreas, getAssessmentForStudent, getAssessmentForVersion, getAssessmentForSubmission, CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAreas'
 import { analyzeItems, countAnswerKeyAlerts, MIN_RESPONSES, submissionsForAnswerKey, suspiciousItems } from '../lib/itemAnalysis'
 import { cn, downloadBlob, formatDateTime, nextStudentRegistration, normalize, uid } from '../lib/utils'
@@ -18,7 +18,7 @@ const answerStatuses = {
   correct: { label: 'Correta', tone: 'green' },
   wrong: { label: 'Incorreta', tone: 'red' },
   blank: { label: 'Em branco', tone: 'neutral' },
-  multiple: { label: 'Múltipla', tone: 'red' },
+  multiple: { label: 'Múltipla', tone: 'orange' },
   uncertain: { label: 'Revisar', tone: 'ochre' },
   cancelled: { label: 'Cancelada', tone: 'neutral' },
 }
@@ -55,6 +55,25 @@ function ResultBreakdown({ result, compact = false }) {
     <div className={cn('result-breakdown', compact && 'is-compact')}>
       <div className="result-breakdown-score"><small>APROVEITAMENTO</small><strong>{score}%</strong><span>{result?.correct || 0} de {total} questões válidas</span></div>
       {metrics.map((metric) => <div className={`result-breakdown-metric metric-${metric.tone}`} key={metric.key}><i /><p><small>{metric.label}</small><strong>{metric.value}</strong></p></div>)}
+    </div>
+  )
+}
+
+const answerFilterOptions = [
+  { key: 'all', label: 'Todas' },
+  { key: 'correct', label: 'Acertos' },
+  { key: 'wrong', label: 'Erros' },
+  { key: 'blank', label: 'Em branco' },
+  { key: 'multiple', label: 'Múltiplas' },
+  { key: 'uncertain', label: 'Incertas' },
+  { key: 'cancelled', label: 'Canceladas' },
+]
+
+function AnswerFilters({ answers, value, onChange }) {
+  const counts = answers.reduce((summary, answer) => ({ ...summary, [answer.status]: (summary[answer.status] || 0) + 1 }), { all: answers.length })
+  return (
+    <div className="answer-filters" role="group" aria-label="Filtrar questões">
+      {answerFilterOptions.map((option) => <button type="button" key={option.key} className={cn(value === option.key && 'active', `filter-${option.key}`)} onClick={() => onChange(option.key)}>{option.label} <span>{counts[option.key] || 0}</span></button>)}
     </div>
   )
 }
@@ -312,12 +331,22 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
 function ReviewQueue({ data, setData, notify }) {
   const [selectedId, setSelectedId] = useState(null)
   const [draftAnswers, setDraftAnswers] = useState([])
+  const [reviewFilter, setReviewFilter] = useState('all')
+  const [touchedQuestions, setTouchedQuestions] = useState([])
   const pending = getPendingReviewSubmissions(data.submissions, data.assessments)
   const selected = data.submissions.find((item) => item.id === selectedId)
   const student = data.students.find((item) => item.id === selected?.studentId)
   const assessment = getAssessmentForSubmission(data.assessments.find((item) => item.id === selected?.assessmentId), selected)
   const classroom = data.classes.find((item) => item.id === student?.classId)
   const answerKey = getAnswerKeyForStudent(assessment, student)
+  const draftSummary = summarizeAnswers(draftAnswers)
+  // Questões alteradas continuam visíveis no filtro atual, mesmo que mudem de status.
+  const visibleDraftAnswers = draftAnswers.filter((answer) => reviewFilter === 'all' || answer.status === reviewFilter || touchedQuestions.includes(answer.question))
+
+  function selectReviewFilter(filter) {
+    setReviewFilter(filter)
+    setTouchedQuestions([])
+  }
 
   function openReview(submission) {
     if (!Array.isArray(submission.answers)) {
@@ -329,9 +358,12 @@ function ReviewQueue({ data, setData, notify }) {
     }
     setSelectedId(submission.id)
     setDraftAnswers(submission.answers.map((answer) => ({ ...answer, selected: [...answer.selected] })))
+    setReviewFilter(submission.answers.some((answer) => answer.status === 'uncertain') ? 'uncertain' : submission.answers.some((answer) => answer.status === 'multiple') ? 'multiple' : 'all')
+    setTouchedQuestions([])
   }
 
   function changeDraftAnswer(questionIndex, letter) {
+    setTouchedQuestions((current) => current.includes(questionIndex + 1) ? current : [...current, questionIndex + 1])
     setDraftAnswers((current) => current.map((answer, index) => {
       if (index !== questionIndex) return answer
       const selectedAnswers = letter
@@ -363,11 +395,11 @@ function ReviewQueue({ data, setData, notify }) {
     <>
       <section className="panel review-queue-panel">
         <header className="panel-header"><div><h3>Fila de revisões</h3><p>Folhas com marcação múltipla ou leitura incerta</p></div><Badge tone={pending.length ? 'ochre' : 'green'}>{pending.length} pendente{pending.length !== 1 ? 's' : ''}</Badge></header>
-        {pending.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>SIMULADO</th><th>OCORRÊNCIAS</th><th>RESULTADO ATUAL</th><th /></tr></thead><tbody>{pending.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span></td><td>{itemAssessment?.title}</td><td><div className="issue-badges">{submission.multiple > 0 && <Badge tone="red">{submission.multiple} múltipla(s)</Badge>}{submission.uncertain > 0 && <Badge tone="ochre">{submission.uncertain} incerta(s)</Badge>}{!submission.uncertain && !submission.multiple && <Badge tone="ochre">Revisão manual</Badge>}</div></td><td><strong>{submission.score}%</strong><small className="cell-subtitle">{submission.correct}/{validTotal} acertos</small></td><td><Button size="sm" variant="secondary" icon={Eye} onClick={() => openReview(submission)}>Revisar</Button></td></tr> })}</tbody></table></div> : <EmptyState icon={CheckCircle2} title="Tudo revisado" description="Não há marcações ambíguas aguardando conferência." />}
+        {pending.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>SIMULADO</th><th>OCORRÊNCIAS</th><th>RESULTADO ATUAL</th><th /></tr></thead><tbody>{pending.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span></td><td>{itemAssessment?.title}</td><td><div className="issue-badges">{submission.multiple > 0 && <Badge tone="orange">{submission.multiple} múltipla(s)</Badge>}{submission.uncertain > 0 && <Badge tone="ochre">{submission.uncertain} incerta(s)</Badge>}{!submission.uncertain && !submission.multiple && <Badge tone="ochre">Revisão manual</Badge>}</div></td><td><strong>{submission.score}%</strong><small className="cell-subtitle">{submission.correct}/{validTotal} acertos</small></td><td><Button size="sm" variant="secondary" icon={Eye} onClick={() => openReview(submission)}>Revisar</Button></td></tr> })}</tbody></table></div> : <EmptyState icon={CheckCircle2} title="Tudo revisado" description="Não há marcações ambíguas aguardando conferência." />}
       </section>
 
       <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title="Revisar respostas" subtitle={`${student?.name || ''} · ${classroom?.name || ''} · ${assessment?.title || ''}`} size="lg" footer={<><Button variant="ghost" onClick={() => setSelectedId(null)}>Cancelar</Button><Button icon={Check} onClick={saveReview}>Concluir revisão</Button></>}>
-        {selected && <div className="saved-review"><div className="saved-review-summary"><Badge tone="blue">Gabarito {classroom?.name}</Badge><span>Clique nas alternativas para marcar ou desmarcar. Questões anuladas ou canceladas mantêm a regra definida no gabarito.</span></div><DetailedAnswerList answers={draftAnswers} assessment={assessment} questionAreas={getQuestionAreas(assessment)} onChange={changeDraftAnswer} /></div>}
+        {selected && <div className="saved-review"><div className="saved-review-summary"><Badge tone="blue">Gabarito {classroom?.name}</Badge><span>Clique nas alternativas para marcar ou desmarcar. Questões anuladas ou canceladas mantêm a regra definida no gabarito.</span></div><ResultBreakdown result={{ ...draftSummary, total: draftAnswers.length }} /><section className="answer-review-panel response-answer-view review-answer-view"><header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>Filtre por situação para conferir primeiro o que precisa de atenção.</p></div><Badge tone={draftSummary.uncertain ? 'ochre' : 'green'}>{draftSummary.uncertain ? `${draftSummary.uncertain} incerta(s)` : 'Sem incertas'}</Badge></header><AnswerFilters answers={draftAnswers} value={reviewFilter} onChange={selectReviewFilter} /><DetailedAnswerList answers={visibleDraftAnswers} assessment={assessment} questionAreas={getQuestionAreas(assessment)} onChange={changeDraftAnswer} /></section></div>}
       </Modal>
     </>
   )
@@ -490,7 +522,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
 
           {selectedAnswers.length ? <section className="answer-review-panel response-answer-view">
             <header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>A alternativa marcada aparece preenchida; o contorno indica o gabarito.</p></div><Badge tone={selected.status === 'Revisar' ? selectedAssessmentClosed ? 'neutral' : 'ochre' : 'green'}>{selected.status === 'Revisar' && selectedAssessmentClosed ? 'Encerrado com ressalva' : selected.status}</Badge></header>
-            <div className="answer-filters"><button className={answerFilter === 'all' ? 'active' : ''} onClick={() => setAnswerFilter('all')}>Todas <span>{selectedAnswers.length}</span></button><button className={answerFilter === 'correct' ? 'active' : ''} onClick={() => setAnswerFilter('correct')}>Acertos <span>{selected.correct || 0}</span></button><button className={answerFilter === 'wrong' ? 'active' : ''} onClick={() => setAnswerFilter('wrong')}>Erros <span>{selected.wrong || 0}</span></button><button className={answerFilter === 'blank' ? 'active' : ''} onClick={() => setAnswerFilter('blank')}>Em branco <span>{selected.blank || 0}</span></button><button className={answerFilter === 'multiple' ? 'active' : ''} onClick={() => setAnswerFilter('multiple')}>Múltiplas <span>{selected.multiple || 0}</span></button><button className={answerFilter === 'uncertain' ? 'active' : ''} onClick={() => setAnswerFilter('uncertain')}>Incertas <span>{selected.uncertain || 0}</span></button><button className={answerFilter === 'cancelled' ? 'active' : ''} onClick={() => setAnswerFilter('cancelled')}>Canceladas <span>{selected.cancelled || 0}</span></button></div>
+            <AnswerFilters answers={selectedAnswers} value={answerFilter} onChange={setAnswerFilter} />
             <DetailedAnswerList answers={visibleAnswers} assessment={selectedAssessment} questionAreas={selectedQuestionAreas} readOnly />
           </section> : <EmptyState icon={FileText} title="Detalhamento indisponível" description="Esta correção antiga possui apenas o resumo do resultado." />}
         </div>}
@@ -1200,7 +1232,7 @@ export function CorrectionPage({ data, setData, notify }) {
               {resultAssessmentClosed && <div className="scan-notice is-warning"><LockKeyhole size={17} /><p><strong>Simulado encerrado.</strong> Reabra-o na área de Simulados para registrar esta correção.</p></div>}
               {detectedStudent && !resultClassCompatible && <div className="scan-notice is-error"><AlertTriangle size={17} /><p><strong>Turma incompatível.</strong> Este aluno não pertence às turmas do simulado.</p></div>}
               {result.markersFound < 4 && <div className="scan-notice is-warning"><Focus size={17} /><p><strong>Enquadramento estimado.</strong> {result.markersFound} de 4 marcadores encontrados.</p></div>}
-              {result.multiple > 0 && <div className="scan-notice is-error"><CircleDot size={17} /><p><strong>{result.multiple} múltipla(s).</strong> Mais de uma alternativa detectada.</p></div>}
+              {result.multiple > 0 && <div className="scan-notice is-multiple"><CircleDot size={17} /><p><strong>{result.multiple} múltipla(s).</strong> Mais de uma alternativa detectada.</p></div>}
               {result.uncertain > 0 && <div className="scan-notice is-warning"><AlertTriangle size={17} /><p><strong>{result.uncertain} incerta(s).</strong> Confira as marcações destacadas.</p></div>}
               {existingResultSubmission && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>Já existe uma correção.</strong> O resultado anterior será substituído.</p></div>}
               {!resultNoticeCount && <div className="scan-notice is-success"><CheckCircle2 size={17} /><p><strong>Nenhuma inconsistência encontrada.</strong></p></div>}
@@ -1212,7 +1244,7 @@ export function CorrectionPage({ data, setData, notify }) {
 
         <div className="answer-review-panel panel scan-answer-review">
           <header className="answer-review-heading"><div><h3>Respostas encontradas</h3><p>Filtre os resultados ou clique em uma alternativa para corrigir a leitura.</p></div><Badge tone={result.multiple + result.uncertain ? 'ochre' : 'green'}>{result.answers.length} questões</Badge></header>
-          <div className="answer-filters"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todas <span>{result.answers.length}</span></button><button className={filter === 'correct' ? 'active' : ''} onClick={() => setFilter('correct')}>Acertos <span>{result.correct}</span></button><button className={filter === 'wrong' ? 'active' : ''} onClick={() => setFilter('wrong')}>Erros <span>{result.wrong}</span></button><button className={filter === 'blank' ? 'active' : ''} onClick={() => setFilter('blank')}>Em branco <span>{result.blank}</span></button><button className={filter === 'multiple' ? 'active' : ''} onClick={() => setFilter('multiple')}>Múltiplas <span>{result.multiple}</span></button><button className={filter === 'uncertain' ? 'active' : ''} onClick={() => setFilter('uncertain')}>Incertas <span>{result.uncertain}</span></button><button className={filter === 'cancelled' ? 'active' : ''} onClick={() => setFilter('cancelled')}>Canceladas <span>{result.cancelled || 0}</span></button></div>
+          <AnswerFilters answers={result.answers} value={filter} onChange={setFilter} />
           <DetailedAnswerList answers={visibleAnswers} assessment={resultAssessment} questionAreas={resultQuestionAreas} onChange={changeAnswer} />
         </div>
       </section>}
@@ -1236,7 +1268,7 @@ export function CorrectionPage({ data, setData, notify }) {
             <div className="batch-preview-image"><CorrectedSheetPreview key={batchPreview.index} result={batchPreview.item} label={batch?.sourceType === 'images' ? batchPreview.item.pageFilename : `Página ${batchPreview.item.pageNumber} do PDF`} /></div>
             {batchPreview.item.answers && batchPreview.assessment && <div className="answer-review-panel panel">
               <header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>Você pode ajustar a alternativa antes de fechar.</p></div><Badge tone={batchPreview.needsReview ? 'ochre' : 'green'}>{batchPreview.item.answers.length} questões</Badge></header>
-              <div className="answer-filters"><button className={batchFilter === 'all' ? 'active' : ''} onClick={() => setBatchFilter('all')}>Todas <span>{batchPreview.item.answers.length}</span></button><button className={batchFilter === 'correct' ? 'active' : ''} onClick={() => setBatchFilter('correct')}>Acertos <span>{batchPreview.item.correct}</span></button><button className={batchFilter === 'wrong' ? 'active' : ''} onClick={() => setBatchFilter('wrong')}>Erros <span>{batchPreview.item.wrong}</span></button><button className={batchFilter === 'blank' ? 'active' : ''} onClick={() => setBatchFilter('blank')}>Brancos <span>{batchPreview.item.blank}</span></button><button className={batchFilter === 'multiple' ? 'active' : ''} onClick={() => setBatchFilter('multiple')}>Múltiplas <span>{batchPreview.item.multiple}</span></button><button className={batchFilter === 'uncertain' ? 'active' : ''} onClick={() => setBatchFilter('uncertain')}>Incertas <span>{batchPreview.item.uncertain}</span></button><button className={batchFilter === 'cancelled' ? 'active' : ''} onClick={() => setBatchFilter('cancelled')}>Canceladas <span>{batchPreview.item.cancelled || 0}</span></button></div>
+              <AnswerFilters answers={batchPreview.item.answers} value={batchFilter} onChange={setBatchFilter} />
               <DetailedAnswerList answers={visibleBatchAnswers} assessment={batchPreview.assessment} questionAreas={batchPreviewAreas} onChange={(questionIndex, letter) => changeBatchAnswer(batchPreview.index, questionIndex, letter)} />
             </div>}
           </div>
