@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  LayoutDashboard, UsersRound, ClipboardList, ScanLine, BarChart3, Upload,
+  LayoutDashboard, UsersRound, ClipboardList, ScanLine, BarChart3,
   Settings, Search, ChevronDown, GraduationCap, Menu, X, HelpCircle, HardDrive,
   PanelLeftClose, PanelLeftOpen, GitCompare, AlertTriangle, Download,
 } from 'lucide-react'
@@ -29,8 +29,10 @@ const navigation = [
   { id: 'correction', label: 'Correção', icon: ScanLine },
   { id: 'results', label: 'Resultados', icon: BarChart3 },
   { id: 'correlation', label: 'Análise', icon: GitCompare },
-  { id: 'import', label: 'Importar SEGES', icon: Upload },
 ]
+
+// A importação do SEGES é acessada apenas por Turmas e alunos, que fica destacada no menu.
+const navigationParent = { import: 'people' }
 
 const titles = {
   dashboard: ['Visão geral', 'Acompanhe suas aplicações e resultados em um só lugar.'],
@@ -181,7 +183,7 @@ function Workspace({ initialData, backend }) {
               ? pendingReviewCount
               : null
             return (
-              <button key={item.id} className={cn(page === item.id && 'active')} onClick={() => context.setPage(item.id)}>
+              <button key={item.id} className={cn((navigationParent[page] || page) === item.id && 'active')} onClick={() => context.setPage(item.id)}>
                 <item.icon size={18} strokeWidth={1.9} />
                 <span>{item.label}</span>
                 {badge > 0 && <em>{badge}</em>}
