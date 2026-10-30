@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import {
   UploadCloud, Camera, ScanLine, CheckCircle2, AlertTriangle, FileImage, RotateCcw,
   Save, MoreHorizontal, QrCode, Focus, CircleDot, ChevronRight, X, ClipboardList,
-  ListChecks, PencilLine, UsersRound, UserRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff, LockKeyhole, GitCompare,
+  ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff, LockKeyhole,
   ArrowUp, ArrowDown, ArrowUpDown, ShieldCheck, UserX, Download,
 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
@@ -535,111 +535,6 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
   )
 }
 
-function answerSignature(answer) {
-  const selected = Array.isArray(answer?.selected) ? [...answer.selected].sort() : []
-  return selected.join('+')
-}
-
-function compareResponsePair(first, second, questionCount) {
-  const firstAnswers = Array.isArray(first.submission.answers) ? first.submission.answers : []
-  const secondAnswers = Array.isArray(second.submission.answers) ? second.submission.answers : []
-  const questions = Array.from({ length: questionCount }, (_, index) => {
-    const firstAnswer = firstAnswers[index]
-    const secondAnswer = secondAnswers[index]
-    const firstSignature = answerSignature(firstAnswer)
-    const secondSignature = answerSignature(secondAnswer)
-    const markedByBoth = firstSignature && secondSignature
-    return { question: index + 1, first: firstSignature || 'Em branco', second: secondSignature || 'Em branco', same: firstSignature === secondSignature, markedByBoth, markedSame: markedByBoth && firstSignature === secondSignature }
-  })
-  const comparableQuestions = questions.filter((item) => item.first !== 'Em branco' || item.second !== 'Em branco')
-  const sameAnswers = comparableQuestions.filter((item) => item.same).length
-  const sameMarkedAnswers = questions.filter((item) => item.markedSame).length
-  const markedQuestions = questions.filter((item) => item.markedByBoth).length
-  return { questions, sameAnswers, sameMarkedAnswers, markedQuestions, comparableQuestions: comparableQuestions.length, similarity: comparableQuestions.length ? Math.round((sameAnswers / comparableQuestions.length) * 100) : 0 }
-}
-
-const attendanceStatuses = {
-  corrected: { label: 'Folha corrigida', tone: 'green' },
-  absent: { label: 'Faltou', tone: 'red' },
-  pending: { label: 'Sem folha', tone: 'ochre' },
-}
-
-function AttendancePanel({ data, setData, notify, initialAssessmentId }) {
-  const [assessmentId, setAssessmentId] = useState(initialAssessmentId || data.assessments[0]?.id || '')
-  const [classId, setClassId] = useState('all')
-  const [filter, setFilter] = useState('open')
-  const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
-  const classOptions = assessment?.classIds.map((id) => data.classes.find((item) => item.id === id)).filter(Boolean) || []
-  const attendance = getAttendance(assessment, data.students, data.submissions, classId)
-  const visibleRows = attendance.rows.filter((row) => filter === 'all' || (filter === 'open' ? row.status !== 'corrected' : row.status === filter))
-  const assessmentClosed = isAssessmentClosed(assessment)
-
-  function markAbsent(studentIds, absent) {
-    if (!studentIds.length) return
-    setData((current) => ({ ...current, assessments: current.assessments.map((item) => item.id === assessment.id ? setStudentsAbsent(item, studentIds, absent) : item) }))
-    notify(absent ? 'Ausência registrada' : 'Ausência removida', `${studentIds.length} aluno${studentIds.length === 1 ? '' : 's'} ${absent ? 'marcado(s) como ausente(s)' : 'voltou(aram) para sem folha'}.`)
-  }
-
-  function exportList() {
-    const rows = attendance.rows.filter((row) => row.status !== 'corrected')
-    const lines = [['Aluno', 'Matrícula', 'Turma', 'Situação'], ...rows.map((row) => [row.student.name, row.student.registration, data.classes.find((item) => item.id === row.student.classId)?.name, attendanceStatuses[row.status].label])]
-    const csv = lines.map((line) => line.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';')).join('\n')
-    downloadBlob(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }), `ausentes-${assessment.code || assessment.id}.csv`)
-  }
-
-  if (!assessment) return <EmptyState icon={UserX} title="Nenhum simulado" description="Crie um simulado antes de acompanhar a presença." />
-
-  const pendingIds = attendance.rows.filter((row) => row.status === 'pending').map((row) => row.student.id)
-  return <section className="panel attendance-panel">
-    <header className="panel-header"><div><h3>Presença e folhas faltantes</h3><p>Veja quem ainda não teve a folha corrigida e registre quem faltou ao simulado.</p></div><Button size="sm" variant="secondary" icon={Download} disabled={!attendance.absent && !attendance.pending} onClick={exportList}>Exportar lista</Button></header>
-    <div className="plagiarism-toolbar"><label><span>Simulado</span><select value={assessment.id} onChange={(event) => { setAssessmentId(event.target.value); setClassId('all') }}>{data.assessments.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label><span>Turma</span><select value={classId} onChange={(event) => setClassId(event.target.value)}><option value="all">Todas as turmas</option>{classOptions.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><div className="plagiarism-mode" role="group" aria-label="Filtrar alunos"><button className={filter === 'open' ? 'active' : ''} onClick={() => setFilter('open')}>Sem folha e ausentes</button><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todos</button></div></div>
-    <div className="plagiarism-summary attendance-summary"><div><strong>{attendance.corrected}</strong><span>com folha corrigida</span></div><div><strong>{attendance.pending}</strong><span>sem folha e sem registro</span></div><div><strong>{attendance.absent}</strong><span>marcados como ausentes</span></div><div><strong>{attendance.total ? Math.round(((attendance.corrected) / (attendance.total - attendance.absent || 1)) * 100) : 0}%</strong><span>dos presentes já corrigidos</span></div></div>
-    {pendingIds.length > 0 && <div className="attendance-bulk"><p>Terminou de corrigir {classId === 'all' ? 'todas as turmas' : 'esta turma'}? Os {pendingIds.length} alunos restantes podem ser registrados como ausentes de uma vez.</p><Button size="sm" variant="secondary" icon={UserX} disabled={assessmentClosed} onClick={() => { if (window.confirm(`Marcar ${pendingIds.length} aluno(s) sem folha como ausente(s)?`)) markAbsent(pendingIds, true) }}>Marcar restantes como ausentes</Button></div>}
-    {visibleRows.length ? <div className="table-wrap"><table className="attendance-table"><thead><tr><th>ALUNO</th><th>TURMA</th><th>SITUAÇÃO</th><th /></tr></thead><tbody>{visibleRows.map((row) => { const itemClass = data.classes.find((item) => item.id === row.student.classId); return <tr key={row.student.id}><td><strong>{row.student.name}</strong><small className="cell-subtitle">{row.student.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span></td><td><Badge tone={attendanceStatuses[row.status].tone}>{attendanceStatuses[row.status].label}</Badge></td><td>{row.status === 'pending' && <Button size="sm" variant="ghost" icon={UserX} disabled={assessmentClosed} onClick={() => markAbsent([row.student.id], true)}>Faltou</Button>}{row.status === 'absent' && <Button size="sm" variant="ghost" icon={RotateCcw} disabled={assessmentClosed} onClick={() => markAbsent([row.student.id], false)}>Desfazer</Button>}</td></tr> })}</tbody></table></div> : <EmptyState icon={CheckCircle2} title="Nenhum aluno pendente" description="Todos os alunos desta seleção têm folha corrigida ou ausência registrada." />}
-  </section>
-}
-
-function PlagiarismPanel({ data, initialAssessmentId }) {
-  const [assessmentId, setAssessmentId] = useState(initialAssessmentId || data.assessments[0]?.id || '')
-  const [classId, setClassId] = useState('all')
-  const [mode, setMode] = useState('class')
-  const [firstStudentId, setFirstStudentId] = useState('')
-  const [secondStudentId, setSecondStudentId] = useState('')
-  const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
-  const classOptions = assessment?.classIds.map((id) => data.classes.find((item) => item.id === id)).filter(Boolean) || []
-  const rows = useMemo(() => data.submissions
-    .filter((submission) => submission.assessmentId === assessment?.id && Array.isArray(submission.answers))
-    .map((submission) => ({ submission, student: data.students.find((item) => item.id === submission.studentId), classroom: data.classes.find((item) => item.id === submission.classId || item.id === data.students.find((student) => student.id === submission.studentId)?.classId) }))
-    .filter((row) => row.student && (classId === 'all' || row.student.classId === classId)), [assessment?.id, classId, data])
-  const pairRows = useMemo(() => rows.flatMap((first, firstIndex) => rows.slice(firstIndex + 1).filter((second) => second.student.classId === first.student.classId).map((second) => ({ first, second, ...compareResponsePair(first, second, assessment?.questionCount || 0) }))).sort((first, second) => second.similarity - first.similarity || second.sameMarkedAnswers - first.sameMarkedAnswers), [assessment?.questionCount, rows])
-  const studentsWithResponses = rows.map((row) => row.student)
-  const first = rows.find((row) => row.student.id === firstStudentId)
-  const second = rows.find((row) => row.student.id === secondStudentId)
-  const selectedPair = first && second && first.student.id !== second.student.id ? compareResponsePair(first, second, assessment?.questionCount || 0) : null
-
-  function chooseAssessment(nextId) {
-    setAssessmentId(nextId)
-    setClassId('all')
-    setFirstStudentId('')
-    setSecondStudentId('')
-  }
-
-  function chooseClass(nextId) {
-    setClassId(nextId)
-    setFirstStudentId('')
-    setSecondStudentId('')
-  }
-
-  if (!assessment) return <EmptyState icon={GitCompare} title="Nenhum simulado" description="Crie um simulado antes de verificar a similaridade das respostas." />
-
-  return <section className="panel plagiarism-panel">
-    <header className="panel-header"><div><h3>Verificação de similaridade</h3><p>Compare respostas marcadas para identificar padrões que merecem conferência pedagógica.</p></div><Badge tone="blue">{rows.length} folha{rows.length !== 1 ? 's' : ''} detalhada{rows.length !== 1 ? 's' : ''}</Badge></header>
-    <div className="plagiarism-toolbar"><label><span>Simulado</span><select value={assessment.id} onChange={(event) => chooseAssessment(event.target.value)}>{data.assessments.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><label><span>Turma</span><select value={classId} onChange={(event) => chooseClass(event.target.value)}><option value="all">Todas as turmas</option>{classOptions.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><div className="plagiarism-mode" role="group" aria-label="Modo de comparação"><button className={mode === 'class' ? 'active' : ''} onClick={() => setMode('class')}>Pares da seleção</button><button className={mode === 'students' ? 'active' : ''} onClick={() => setMode('students')}>Dois estudantes</button></div></div>
-    <div className="plagiarism-notice"><GitCompare size={17} /><p><strong>Indicador de similaridade, não prova de plágio.</strong> A análise considera respostas iguais na mesma posição. Duas respostas em branco não entram como coincidência marcada; confirme o contexto, a aplicação e a folha original antes de tomar qualquer decisão.</p></div>
-    {mode === 'class' ? <div className="plagiarism-results"><div className="plagiarism-summary"><div><strong>{pairRows.length}</strong><span>pares comparados na mesma turma</span></div><div><strong>{pairRows.filter((pair) => pair.similarity >= 80).length}</strong><span>com 80% ou mais de coincidência</span></div><div><strong>{rows.length}</strong><span>estudantes com respostas</span></div></div>{pairRows.length ? <div className="table-wrap"><table className="plagiarism-table"><thead><tr><th>ESTUDANTES</th><th>TURMA</th><th>RESPOSTAS IGUAIS</th><th>MARCADAS IGUAIS</th><th>SIMILARIDADE</th></tr></thead><tbody>{pairRows.map((pair) => <tr key={`${pair.first.student.id}-${pair.second.student.id}`}><td><strong>{pair.first.student.name}</strong><small className="cell-subtitle">{pair.second.student.name}</small></td><td>{pair.first.classroom?.name || '—'}</td><td>{pair.sameAnswers} de {pair.comparableQuestions} consideradas</td><td>{pair.sameMarkedAnswers}</td><td><span className={cn('plagiarism-score', pair.similarity >= 80 && 'high')}>{pair.similarity}%</span></td></tr>)}</tbody></table></div> : <EmptyState icon={GitCompare} title="Não há pares para comparar" description="É necessário ter pelo menos duas folhas corrigidas na mesma turma e com respostas detalhadas." />}</div> : <div className="plagiarism-student-compare"><label><span>Primeiro estudante</span><select value={firstStudentId} onChange={(event) => { setFirstStudentId(event.target.value); setSecondStudentId('') }}><option value="">Selecione...</option>{studentsWithResponses.map((student) => <option value={student.id} key={student.id}>{student.name} · {data.classes.find((item) => item.id === student.classId)?.name}</option>)}</select></label><label><span>Segundo estudante</span><select value={secondStudentId} onChange={(event) => setSecondStudentId(event.target.value)}><option value="">Selecione...</option>{studentsWithResponses.filter((student) => student.id !== firstStudentId && (!first || student.classId === first.student.classId)).map((student) => <option value={student.id} key={student.id}>{student.name} · {data.classes.find((item) => item.id === student.classId)?.name}</option>)}</select></label>{selectedPair ? <><div className="plagiarism-pair-summary"><strong>{selectedPair.similarity}%</strong><span>{selectedPair.sameAnswers} de {selectedPair.comparableQuestions} respostas consideradas · {selectedPair.sameMarkedAnswers} marcações iguais</span></div><div className="table-wrap"><table className="plagiarism-detail-table"><thead><tr><th>QUESTÃO</th><th>{first.student.name}</th><th>{second.student.name}</th><th>COMPARAÇÃO</th></tr></thead><tbody>{selectedPair.questions.map((question) => <tr key={question.question} className={question.markedSame ? 'same-marked' : ''}><td>{String(question.question).padStart(2, '0')}</td><td>{question.first}</td><td>{question.second}</td><td><Badge tone={question.markedSame ? 'ochre' : question.same ? 'neutral' : 'green'}>{question.markedSame ? 'Marcadas iguais' : question.same ? 'Ambas em branco' : 'Diferentes'}</Badge></td></tr>)}</tbody></table></div></> : <EmptyState icon={UserRound} title="Selecione dois estudantes" description="Escolha dois estudantes com folhas corrigidas para ver a comparação questão a questão." />}</div>}
-  </section>
-}
-
 export function CorrectionPage({ data, setData, notify }) {
   const fileInput = useRef(null)
   const cameraInput = useRef(null)
@@ -649,7 +544,7 @@ export function CorrectionPage({ data, setData, notify }) {
     || data.assessments[0]
   const [tab, setTab] = useState(() => {
     const requested = new URLSearchParams(window.location.search).get('tab')
-    return ['scan', 'responses', 'keys', 'reviews', 'attendance', 'plagiarism'].includes(requested) ? requested : 'scan'
+    return ['scan', 'responses', 'keys', 'reviews', 'attendance'].includes(requested) ? requested : 'scan'
   })
   const [assessmentId, setAssessmentId] = useState(initialAssessment?.id)
   const [classId, setClassId] = useState(initialAssessment?.classIds[0] || '')
@@ -1134,13 +1029,12 @@ export function CorrectionPage({ data, setData, notify }) {
 
   return (
     <div className="page-stack correction-page">
-      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagens ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>{answerKeyAlerts ? `${answerKeyAlerts} ${answerKeyAlerts === 1 ? 'alerta' : 'alertas'} para conferir` : 'Visualizar e editar'}</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{pendingReviews.length} pendentes</small></span></button><button className={tab === 'attendance' ? 'active' : ''} onClick={() => setTab('attendance')}><UserX size={17} /><span>Presença<small>{attendanceOpen} sem folha</small></span></button><button className={tab === 'plagiarism' ? 'active' : ''} onClick={() => setTab('plagiarism')}><GitCompare size={17} /><span>Verificar similaridade<small>Comparar respostas</small></span></button></div>}
+      {!result && !batch && <div className="correction-tabs"><button className={tab === 'scan' ? 'active' : ''} onClick={() => setTab('scan')}><ScanLine size={17} /><span>Corrigir folhas<small>Imagens ou PDF em lote</small></span></button><button className={tab === 'responses' ? 'active' : ''} onClick={() => setTab('responses')}><FileText size={17} /><span>Respostas<small>Folhas já corrigidas</small></span></button><button className={tab === 'keys' ? 'active' : ''} onClick={() => setTab('keys')}><ClipboardList size={17} /><span>Gabaritos por turma<small>{answerKeyAlerts ? `${answerKeyAlerts} ${answerKeyAlerts === 1 ? 'alerta' : 'alertas'} para conferir` : 'Visualizar e editar'}</small></span></button><button className={tab === 'reviews' ? 'active' : ''} onClick={() => setTab('reviews')}><ListChecks size={17} /><span>Revisões<small>{pendingReviews.length} pendentes</small></span></button><button className={tab === 'attendance' ? 'active' : ''} onClick={() => setTab('attendance')}><UserX size={17} /><span>Presença<small>{attendanceOpen} sem folha</small></span></button></div>}
 
       {!result && !batch && tab === 'responses' && <ResponsesPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'keys' && <AnswerKeysPanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
       {!result && !batch && tab === 'reviews' && <ReviewQueue data={data} setData={setData} notify={notify} />}
       {!result && !batch && tab === 'attendance' && <AttendancePanel data={data} setData={setData} notify={notify} initialAssessmentId={assessmentId} />}
-      {!result && !batch && tab === 'plagiarism' && <PlagiarismPanel data={data} initialAssessmentId={assessmentId} />}
 
       {!result && !batch && tab === 'scan' && <>
         <div className="correction-layout">

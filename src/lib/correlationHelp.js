@@ -1,5 +1,6 @@
 import { MIN_RESPONSES } from './itemAnalysis.js'
 import { HIGH_BLANK_RATE, LOW_SCORE } from './teacherInsights.js'
+import { HIGH_AGREEMENT, SIMILARITY_LEVELS } from './similarity.js'
 
 // Explicações das métricas da aba Análise, com as mesmas faixas usadas nos cálculos.
 export const CORRELATION_HELP = {
@@ -64,10 +65,30 @@ export const CORRELATION_HELP = {
     text: 'Porcentagem média de acertos de cada turma em cada área.',
     ranges: [['red', 'abaixo de 40%', 'Crítico'], ['ochre', '40% a 59%', 'Atenção'], ['green', '60% a 79%', 'Bom'], ['green', '80% ou mais', 'Muito bom']],
   },
+  similarity: {
+    title: 'Similaridade entre alunos',
+    text: 'Compara as folhas de cada par de alunos da mesma turma e da mesma versão. Acertar as mesmas questões é normal entre bons alunos; o sinal que chama atenção é errar com a mesma alternativa errada muitas vezes.',
+    ranges: [['red', 'Alta', `${SIMILARITY_LEVELS.high.sameWrong} ou mais erros iguais e chance de coincidência abaixo de 0,1%`], ['ochre', 'Atenção', `${SIMILARITY_LEVELS.medium.sameWrong} ou mais erros iguais e chance de coincidência abaixo de 1%`], ['neutral', 'Baixa', 'padrão compatível com acaso']],
+    note: 'É um indicador para conferir a folha original e o mapa de sala, não uma prova de cola.',
+  },
+  sameWrong: {
+    title: 'Erros iguais',
+    text: 'Questões em que os dois erraram e marcaram a mesma alternativa errada, de um total de questões que os dois erraram. Ao lado, quantos erros iguais seriam esperados se cada um tivesse errado por conta própria, calculado com as alternativas erradas que a turma mais escolheu em cada questão.',
+    note: 'Errar igual numa questão em que quase todos erram com a mesma letra pesa pouco; errar igual numa alternativa rara pesa muito.',
+  },
+  coincidence: {
+    title: 'Chance de coincidência',
+    text: 'Probabilidade de dois alunos que erram de forma independente terem pelo menos esse número de erros iguais (modelo de Poisson). Quanto menor, menos provável que seja acaso.',
+    ranges: [['red', 'abaixo de 0,1%', 'muito improvável por acaso'], ['ochre', '0,1% a 0,9%', 'improvável'], ['neutral', '1% ou mais', 'pode ser acaso']],
+  },
+  agreement: {
+    title: 'Respostas iguais',
+    text: `Parte das questões respondidas em que os dois marcaram exatamente o mesmo, contando acertos e erros. A sequência mostra o maior trecho seguido de respostas idênticas. Acima de ${HIGH_AGREEMENT}% é comum entre dois alunos que vão muito bem, por isso sozinho não indica cola.`,
+  },
   dIndex: {
     title: 'Índice D',
     text: 'Diferença entre o acerto dos 27% melhores alunos e o dos 27% piores. Vai de −1 a 1; 0,30 ou mais indica que a questão separa bem os dois grupos. Aparece só na planilha exportada.',
   },
 }
 
-export const CORRELATION_HELP_ORDER = ['mean', 'alpha', 'correctRate', 'discrimination', 'options', 'diagnosis', 'areaCorrelation', 'areaAlpha', 'deviation', 'review', 'attention', 'classAreas', 'dIndex']
+export const CORRELATION_HELP_ORDER = ['mean', 'alpha', 'correctRate', 'discrimination', 'options', 'diagnosis', 'areaCorrelation', 'areaAlpha', 'deviation', 'review', 'attention', 'classAreas', 'similarity', 'sameWrong', 'coincidence', 'agreement', 'dIndex']

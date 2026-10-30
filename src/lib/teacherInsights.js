@@ -212,7 +212,7 @@ export function studentsNeedingAttention(areaReport) {
 }
 
 // Frases curtas, em ordem de importância, a partir das análises acima.
-export function buildTeacherInsights({ itemReport, areaReport, attention = studentsNeedingAttention(areaReport), versionLabel = '' }) {
+export function buildTeacherInsights({ itemReport, areaReport, attention = studentsNeedingAttention(areaReport), versionLabel = '', similarity = null }) {
   const insights = []
   const { summary } = areaReport
   if (summary.n) insights.push({ tone: 'blue', title: 'Desempenho geral', text: `Média de ${Math.round(summary.mean)}% e mediana de ${Math.round(summary.median)}%. Metade dos alunos ficou entre ${Math.round(summary.q1)}% e ${Math.round(summary.q3)}%.` })
@@ -255,6 +255,11 @@ export function buildTeacherInsights({ itemReport, areaReport, attention = stude
     })
     const close = sorted[0].mean - sorted.at(-1).mean < 3
     insights.push({ tone: 'blue', title: 'Turmas', text: `${close ? `As turmas tiveram médias parecidas (entre ${Math.round(sorted.at(-1).mean)}% e ${Math.round(sorted[0].mean)}%).` : `${sorted[0].name} teve a maior média (${Math.round(sorted[0].mean)}%) e ${sorted.at(-1).name} a menor (${Math.round(sorted.at(-1).mean)}%).`}${gap && gap.diff >= 10 ? ` A maior diferença está em ${gap.area}: ${Math.round(gap.best[1])}% em ${gap.best[0]} contra ${Math.round(gap.worst[1])}% em ${gap.worst[0]}.` : ''}` })
+  }
+
+  if (similarity?.flagged.length) {
+    const top = similarity.flagged[0]
+    insights.push({ tone: similarity.high ? 'red' : 'ochre', title: 'Respostas muito parecidas', text: `${similarity.flagged.length} par(es) de alunos com erros iguais demais para ser acaso${similarity.high ? ` (${similarity.high} em nível alto)` : ''}. O mais forte: ${top.first.name} e ${top.second.name}, ${top.sameWrong} erros iguais de ${top.bothWrong} em comum. Confira as folhas na aba Similaridade.` })
   }
 
   if (attention.length) {
