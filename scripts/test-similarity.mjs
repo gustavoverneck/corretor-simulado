@@ -44,4 +44,20 @@ const twins = compareSubmissions({ answers: perfect }, { answers: perfect }, { q
 assert.equal(twins.agreement, 100)
 assert.equal(twins.sameWrong, 0)
 assert.equal(twins.level, 'low')
+assert.match(twins.reason, /acertaram quase as mesmas/)
+
+// Folhas idênticas em que os erros são os mais comuns da turma ainda pedem conferência.
+const common = Array.from({ length: 12 }, (_, index) => ({ answers: regradeAnswers(answerKey.map((letter, question) => ({ question: question + 1, selected: [question < 4 ? letters[(letters.indexOf(letter) + 1) % 5] : letter], status: 'wrong' })), answerKey).answers }))
+const commonReport = buildSimilarityReport({ submissions: common.map((sheet, index) => ({ ...sheet, id: `c${index}`, studentId: `c${index}`, classId: 'c1' })), questionCount: 40, answerKey })
+const sameSheets = commonReport.pairs[0]
+assert.equal(sameSheets.agreement, 100)
+assert.ok(sameSheets.p > 0.01, 'os erros sozinhos parecem acaso')
+assert.equal(sameSheets.level, 'medium', 'folhas idênticas com erros em comum ficam em atenção')
+assert.match(sameSheets.reason, /Folhas idênticas/)
+
+// Brancos na mesma questão também contam como resposta igual.
+const blanks = regradeAnswers(answerKey.map((letter, question) => ({ question: question + 1, selected: question >= 30 ? [] : [letter], status: 'wrong' })), answerKey).answers
+const blankPair = compareSubmissions({ answers: blanks }, { answers: blanks }, { questionCount: 40, answerKey })
+assert.equal(blankPair.sameWrong, 10)
+assert.equal(blankPair.sameBlank, 10)
 console.log('Similarity tests passed.')
