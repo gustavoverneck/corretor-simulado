@@ -2,6 +2,7 @@ import { calculateSubmissionMetrics } from './resultsMetrics.js'
 import { uniqueQuestionAreas } from './knowledgeAreas.js'
 import { buildXlsx, cellRef } from './xlsx.js'
 import { describeVoid, isSubmissionVoided } from './voidedSubmission.js'
+import { ENEM_AREA_SHORT, ENEM_AREAS } from './enemTri.js'
 import { DEFAULT_ROUNDING, gradeScaleLabel, normalizeRounding, roundingDescription, roundingFormula, scaleGrade } from './gradeScale.js'
 
 const assessmentColors = ['2F6B5B', '9A5B2B', '3E5F7D', '5E5683', '8F4440', '5C7542', '7A5A33', '4B5F6E']
@@ -10,6 +11,11 @@ const areaColors = ['47776A', 'C0843F', '52718A', '7D6BA8', 'B35F59', '6E9150', 
 function submissionDate(row) {
   const timestamp = Date.parse(row.regradedAt || row.correctedAt || '')
   return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function triAreaLabel(area) {
+  const code = Object.keys(ENEM_AREAS).find((key) => ENEM_AREAS[key] === area)
+  return `TRI ${code ? ENEM_AREA_SHORT[code] : area}`
 }
 
 function byName(first, second) {
@@ -28,7 +34,9 @@ function latestRows(rows) {
 }
 
 // Provas anuladas (voidedRows) entram na lista com nota zero e marcadas com †.
-export function buildGradeList({ school, assessments, rows, voidedRows = [], selectedAreas = [], title = 'Notas por turma', maxGrade = 10, rounding = DEFAULT_ROUNDING, generatedAt = new Date() }) {
+// triScores (Map simulado → computeTriScores) acrescenta as notas TRI dos
+// simulados com TRI ligada.
+export function buildGradeList({ school, assessments, rows, voidedRows = [], selectedAreas = [], triScores = new Map(), title = 'Notas por turma', maxGrade = 10, rounding = DEFAULT_ROUNDING, generatedAt = new Date() }) {
   if (!rows.length && !voidedRows.length) throw new Error('Não há resultados no recorte selecionado. Ajuste os filtros antes de gerar a lista de notas.')
   const uniqueRows = latestRows([...rows, ...voidedRows])
   const classMap = new Map()
@@ -69,14 +77,18 @@ export function buildGradeList({ school, assessments, rows, voidedRows = [], sel
         score: row.score,
         grade: scaleGrade(row.correct, row.total, maxGrade, rounding),
         review: row.review,
+        tri: triScores.get(assessment.id)?.scores.get(row.id) || null,
       })).sort((first, second) => byName(first.name, second.name))
+      const triAreas = [...new Set(students.flatMap((student) => Object.keys(student.tri?.areas || {})))]
+        .sort((first, second) => (areas.indexOf(first) + 1 || 99) - (areas.indexOf(second) + 1 || 99))
+      const triScale = students.find((student) => student.tri)?.tri.scale === 'enem' ? 'enem' : triAreas.length ? 'grupo' : null
       const areaAverages = areas.map((_, index) => {
         const cells = students.map((student) => student.areas[index]).filter(Boolean)
         const total = cells.reduce((sum, cell) => sum + cell.total, 0)
         return total ? Math.round(cells.reduce((sum, cell) => sum + cell.correct, 0) / total * 100) : null
       })
       const average = Math.round(students.reduce((sum, student) => sum + student.score, 0) / students.length)
-      return { id: assessment.id, title: assessment.title, code: assessment.code, areas, students, areaAverages, average }
+      return { id: assessment.id, title: assessment.title, code: assessment.code, areas, students, areaAverages, average, triAreas, triScale }
     }).filter(Boolean),
   }))
 
@@ -96,6 +108,11 @@ function tint(hex, amount) {
   return hex.match(/../g).map((part) => Math.round(parseInt(part, 16) + (255 - parseInt(part, 16)) * amount).toString(16).padStart(2, '0')).join('').toUpperCase()
 }
 
+// Colunas de TRI no fim do bloco: uma por área e a nota geral.
+function triColumns(assessment) {
+  return assessment.triAreas?.length ? assessment.triAreas.length + 1 : 0
+}
+
 export function generateGradeListWorkbook(list) {
   const maxGrade = list.maxGrade || 10
   const rounding = normalizeRounding(list.rounding)
@@ -108,6 +125,8 @@ export function generateGradeListWorkbook(list) {
     if (!assessmentColor.has(assessment.id)) assessmentColor.set(assessment.id, assessmentColors[assessmentColor.size % assessmentColors.length])
   }))
 
+  const triScales = new Set(list.classes.flatMap((group) => group.assessments.map((assessment) => assessment.triScale).filter(Boolean)))
+  const triNote = !triScales.size ? '' : ` TRI: nota pela Teoria de Resposta ao Item, por área e geral (média das áreas)${triScales.has('enem') && triScales.has('grupo') ? '; escala do ENEM nos simulados com parâmetros oficiais, nos demais 500 = média de quem fez a prova' : triScales.has('enem') ? ', na escala do ENEM' : ', na escala do grupo (500 = média de quem fez a prova)'}; vazia para turmas sem TRI.`
   const head = { bold: true, color: 'FFFFFF', fill: '203B32', align: 'center', border: true, wrap: true }
   const sheets = list.classes.map((group) => {
     const studentMap = new Map()
@@ -120,7 +139,7 @@ export function generateGradeListWorkbook(list) {
     let column = 3
     group.assessments.forEach((assessment) => {
       blocks.push({ assessment, start: column, color: assessmentColor.get(assessment.id) })
-      column += assessment.areas.length + 4
+      column += assessment.areas.length + 4 + triColumns(assessment)
     })
     const lastColumn = column - 1
     const headerRow = 4
@@ -128,14 +147,14 @@ export function generateGradeListWorkbook(list) {
     const rows = [
       [{ v: `Turma ${group.label}`, s: { bold: true, size: 15, color: '203B32' } }],
       [{ v: [list.title, list.school, list.date].filter(Boolean).join(' · '), s: { color: '667A71' } }],
-      [{ v: `Áreas: número de acertos. Acertos: soma das áreas. %: acertos ÷ questões válidas (canceladas não contam). ${gradeScaleLabel(maxGrade)}: % × ${String(maxGrade).replace('.', ',')}, ${roundingDescription(rounding)}. * = marcações pendentes de revisão. † = prova anulada (nota zero).`, s: { italic: true, size: 9, color: '667A71' } }],
+      [{ v: `Áreas: número de acertos. Acertos: soma das áreas. %: acertos ÷ questões válidas (canceladas não contam). ${gradeScaleLabel(maxGrade)}: % × ${String(maxGrade).replace('.', ',')}, ${roundingDescription(rounding)}. * = marcações pendentes de revisão. † = prova anulada (nota zero).${triNote}`, s: { italic: true, size: 9, color: '667A71' } }],
       [],
       [{ v: 'Nº', s: head }, { v: 'Aluno', s: { ...head, align: 'left' } }, { v: 'Matrícula', s: head }],
       [{ v: '', s: head }, { v: '', s: head }, { v: '', s: head }],
     ]
     const merges = [`A1:${cellRef(0, Math.max(lastColumn, 5))}`, `A2:${cellRef(1, Math.max(lastColumn, 5))}`, `A3:${cellRef(2, Math.max(lastColumn, 5))}`, 'A5:A6', 'B5:B6', 'C5:C6']
     blocks.forEach(({ assessment, start, color }) => {
-      const blockEnd = start + assessment.areas.length + 3
+      const blockEnd = start + assessment.areas.length + 3 + triColumns(assessment)
       rows[headerRow][start] = { v: assessment.title, s: { bold: true, color: 'FFFFFF', fill: color, align: 'center', border: 'strong', borderColor: color, wrap: true } }
       for (let index = start + 1; index <= blockEnd; index += 1) rows[headerRow][index] = { v: '', s: { fill: color, border: true } }
       if (blockEnd > start) merges.push(`${cellRef(headerRow, start)}:${cellRef(headerRow, blockEnd)}`)
@@ -150,6 +169,8 @@ export function generateGradeListWorkbook(list) {
       rows[headerRow + 1][offset + 1] = { v: 'Questões válidas', s: totalHead }
       rows[headerRow + 1][offset + 2] = { v: '%', s: totalHead }
       rows[headerRow + 1][offset + 3] = { v: gradeScaleLabel(maxGrade), s: totalHead }
+      assessment.triAreas.forEach((area, index) => { rows[headerRow + 1][offset + 4 + index] = { v: triAreaLabel(area), s: { ...totalHead, fill: tint(areaColor.get(area) || color, 0.6) } } })
+      if (assessment.triAreas.length) rows[headerRow + 1][offset + 4 + assessment.triAreas.length] = { v: 'TRI geral', s: totalHead }
     })
 
     students.forEach((student, studentIndex) => {
@@ -188,6 +209,9 @@ export function generateGradeListWorkbook(list) {
         row[offset + 3] = result
           ? { f: `IFERROR(${roundingFormula(`${correctRef}/${validRef}*${maxGrade}`, rounding)},"")`, v: result.grade ?? '', s: { ...totalStyle, numFmt: 'decimal' } }
           : { v: null, s: { ...totalStyle, numFmt: 'decimal' } }
+        const triStyle = { ...totalStyle, bold: false, numFmt: 'decimal' }
+        assessment.triAreas.forEach((area, index) => { row[offset + 4 + index] = { v: result?.tri?.areas?.[area] ?? null, s: triStyle } })
+        if (assessment.triAreas.length) row[offset + 4 + assessment.triAreas.length] = { v: result?.tri?.score ?? null, s: { ...triStyle, bold: true } }
       })
       row[1] = { v: `${student.name}${review ? ' *' : ''}${voided ? ' †' : ''}`, s: { border: true } }
       rows.push(row)
@@ -206,11 +230,14 @@ export function generateGradeListWorkbook(list) {
         mean(scored.map((student) => student.total)),
         mean(scored.filter((student) => student.total).map((student) => student.correct / student.total)),
         mean(scored.map((student) => student.grade).filter(Number.isFinite)),
+        ...assessment.triAreas.map((area) => mean(scored.map((student) => student.tri?.areas?.[area]).filter(Number.isFinite))),
+        ...(assessment.triAreas.length ? [mean(scored.map((student) => student.tri?.score).filter(Number.isFinite))] : []),
       ]
+      const percentIndex = assessment.areas.length + 2
       columns.forEach((value, index) => {
         const col = start + index
         const range = `${cellRef(firstDataRow, col)}:${cellRef(lastDataRow, col)}`
-        const isPercent = index === columns.length - 2
+        const isPercent = index === percentIndex
         averageRow[col] = { f: `IFERROR(AVERAGE(${range}),"")`, v: value, s: { ...averageStyle, numFmt: isPercent ? 'percent' : 'decimal', border: index ? true : 'strong', borderColor: color } }
       })
     })
@@ -223,6 +250,7 @@ export function generateGradeListWorkbook(list) {
       cols[start + assessment.areas.length + 1] = 10
       cols[start + assessment.areas.length + 2] = 8
       cols[start + assessment.areas.length + 3] = 10
+      for (let index = 0; index < triColumns(assessment); index += 1) cols[start + assessment.areas.length + 4 + index] = 11
     })
     const heights = { 0: 22, [headerRow]: 32, [headerRow + 1]: 48 }
     return { name: group.label, rows, merges, cols, heights, freeze: { rows: firstDataRow, columns: 2 } }

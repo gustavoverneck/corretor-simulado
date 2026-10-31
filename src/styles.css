@@ -1289,6 +1289,8 @@ tr.clickable-row:focus-visible { outline: 3px solid rgba(65, 111, 98, .2); outli
 .student-area-bar em { position: absolute; top: -3px; width: 2px; height: 14px; margin-left: -1px; background: #33453e; border-radius: 1px; }
 .student-area-bar > strong { width: 32px; color: #465850; font-size: 9.5px; }
 .student-area-class { color: #87928e; font-size: 7.5px; text-align: right; }
+.student-area-class b { display: block; margin-top: 2px; color: #3f655a; font-size: 9px; }
+.student-result-tri { padding-left: 10px; border-left: 2px solid #c9dad3; }
 .student-question-legend { margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
 .student-question-legend span { padding: 2px 7px; border: 1px solid; border-radius: 999px; font-size: 7.5px; font-weight: 600; }
 .student-question-scope { margin: 0 0 8px; color: #69746f; font-size: 8.5px; }
