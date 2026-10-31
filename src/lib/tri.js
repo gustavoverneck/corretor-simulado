@@ -9,9 +9,15 @@
 //   só as folhas com o mesmo gabarito.
 // - A escala é a do grupo: 500 é a média dos alunos que fizeram aquela prova e
 //   cada 100 pontos é um desvio-padrão. Não é a escala oficial do INEP.
+//
+// No modo `enem` (simulado montado com a prova do ENEM), os parâmetros são os
+// oficiais do INEP gravados em `tri.enem` (ver enemTri.js) e a nota sai na
+// escala do ENEM, para qualquer número de alunos. `tri.classIds` limita a
+// nota a algumas turmas.
 import { getQuestionAreas } from './knowledgeAreas.js'
 import { answerKeyGroups } from './teacherInsights.js'
-import { CANCELLED_ANSWER } from './assessment.js'
+import { CANCELLED_ANSWER, getAnswerKeyVersions } from './assessment.js'
+import { enemScore, ENEM_AREAS } from './enemTri.js'
 
 export const TRI_MIN_SHEETS = 30
 export const TRI_RELIABLE_SHEETS = 100
@@ -23,6 +29,48 @@ export function isTriEnabled(assessment) {
 
 export function setTriEnabled(assessment, enabled) {
   return { ...assessment, tri: { ...(assessment?.tri || {}), enabled: Boolean(enabled) } }
+}
+
+export function triMode(assessment) {
+  return assessment?.tri?.mode === 'enem' ? 'enem' : 'estimated'
+}
+
+export function updateTri(assessment, changes) {
+  return { ...assessment, tri: { ...(assessment?.tri || {}), ...changes } }
+}
+
+// Turmas que recebem a nota TRI; vazio = todas as turmas do simulado.
+export function triClassIds(assessment) {
+  const selected = Array.isArray(assessment?.tri?.classIds) ? assessment.tri.classIds.filter((id) => assessment.classIds?.includes(id)) : []
+  return selected.length ? selected : assessment?.classIds || []
+}
+
+// Parâmetros oficiais gravados para a versão usada na folha.
+export function enemTriForSubmission(assessment, submission) {
+  const versions = assessment?.tri?.enem?.versions || []
+  const byId = versions.find((item) => item.versionId && item.versionId === submission.answerKeyVersionId)
+  if (byId) return byId
+  const signature = JSON.stringify(submission.answerKeySnapshot || [])
+  return versions.find((item) => item.keySignature === signature) || (versions.length === 1 && getAnswerKeyVersions(assessment).length === 1 ? versions[0] : null)
+}
+
+function computeEnemScores(assessment, valid) {
+  const scores = new Map()
+  const counts = new Map()
+  valid.forEach((submission) => {
+    const version = enemTriForSubmission(assessment, submission)
+    const key = version?.versionId || 'sem-versao'
+    if (!counts.has(key)) counts.set(key, { id: key, label: version?.label || 'Versão sem parâmetros do ENEM', sheets: 0, scored: 0, status: version ? 'ok' : 'unmatched', mode: 'enem', areas: [] })
+    const info = counts.get(key)
+    info.sheets += 1
+    const result = version ? enemScore(submission.answers, version) : null
+    if (!result) return
+    info.scored += 1
+    const areas = Object.fromEntries(Object.entries(result.areas).map(([code, value]) => [ENEM_AREAS[code] || code, value]))
+    info.areas = Object.keys(areas).map((area) => ({ area, status: 'ok' }))
+    scores.set(submission.id, { areas, score: result.score, scale: 'enem' })
+  })
+  return { scores, groups: [...counts.values()] }
 }
 
 const QUADRATURE = (() => {
@@ -152,7 +200,9 @@ export function computeTriScores(assessment, submissions) {
   const scores = new Map()
   const groups = []
   if (!isTriEnabled(assessment)) return { scores, groups }
-  const valid = submissions.filter((submission) => submission.assessmentId === assessment.id && !submission.voided && Array.isArray(submission.answers))
+  const classIds = new Set(triClassIds(assessment))
+  const valid = submissions.filter((submission) => submission.assessmentId === assessment.id && !submission.voided && Array.isArray(submission.answers) && (!submission.classId || classIds.has(submission.classId)))
+  if (triMode(assessment) === 'enem') return computeEnemScores(assessment, valid)
   answerKeyGroups(assessment, valid).forEach((group) => {
     const questionAreas = getQuestionAreas(group.assessment)
     const areas = [...new Set(questionAreas)]
@@ -183,6 +233,8 @@ export function computeTriScores(assessment, submissions) {
 }
 
 export function triGroupMessage(group) {
+  if (group.mode === 'enem' && group.status === 'ok') return ''
+  if (group.status === 'unmatched') return `${group.sheets} folha(s) com um gabarito que não foi reconhecido como caderno do ENEM. Confira os parâmetros das versões.`
   if (group.status === 'small') return `${group.label}: ${group.sheets} folhas. A TRI precisa de pelo menos ${TRI_MIN_SHEETS} folhas com o mesmo gabarito.`
   if (group.status === 'few-items') return `${group.label}: as áreas têm menos de ${TRI_MIN_ITEMS} questões válidas, poucas para a TRI.`
   if (group.sheets < TRI_RELIABLE_SHEETS) return `${group.label}: ${group.sheets} folhas. A nota TRI já é calculada, mas ainda oscila; fica mais estável a partir de ${TRI_RELIABLE_SHEETS}.`
