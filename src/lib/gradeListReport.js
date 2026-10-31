@@ -1,6 +1,7 @@
 import { calculateSubmissionMetrics } from './resultsMetrics.js'
 import { uniqueQuestionAreas } from './knowledgeAreas.js'
 import { buildXlsx, cellRef } from './xlsx.js'
+import { describeVoid, isSubmissionVoided } from './voidedSubmission.js'
 import { DEFAULT_ROUNDING, gradeScaleLabel, normalizeRounding, roundingDescription, roundingFormula, scaleGrade } from './gradeScale.js'
 
 const assessmentColors = ['2F6B5B', '9A5B2B', '3E5F7D', '5E5683', '8F4440', '5C7542', '7A5A33', '4B5F6E']
@@ -26,9 +27,10 @@ function latestRows(rows) {
   return [...latest.values()]
 }
 
-export function buildGradeList({ school, assessments, rows, selectedAreas = [], title = 'Notas por turma', maxGrade = 10, rounding = DEFAULT_ROUNDING, generatedAt = new Date() }) {
-  if (!rows.length) throw new Error('Não há resultados no recorte selecionado. Ajuste os filtros antes de gerar a lista de notas.')
-  const uniqueRows = latestRows(rows)
+// Provas anuladas (voidedRows) entram na lista marcadas como "Anulada", sem nota e fora das médias.
+export function buildGradeList({ school, assessments, rows, voidedRows = [], selectedAreas = [], title = 'Notas por turma', maxGrade = 10, rounding = DEFAULT_ROUNDING, generatedAt = new Date() }) {
+  if (!rows.length && !voidedRows.length) throw new Error('Não há resultados no recorte selecionado. Ajuste os filtros antes de gerar a lista de notas.')
+  const uniqueRows = latestRows([...rows, ...voidedRows])
   const classMap = new Map()
   uniqueRows.forEach((row) => {
     const key = row.classId || 'sem-turma'
@@ -43,7 +45,18 @@ export function buildGradeList({ school, assessments, rows, selectedAreas = [], 
       const assessmentRows = group.rows.filter((row) => row.assessmentId === assessment.id)
       if (!assessmentRows.length) return null
       const areas = uniqueQuestionAreas(assessment).filter((area) => !selectedAreas.length || selectedAreas.includes(area))
-      const students = assessmentRows.map((row) => ({
+      const students = assessmentRows.map((row) => isSubmissionVoided(row) ? {
+        id: row.studentId || row.id,
+        name: row.student?.name || 'Aluno não identificado',
+        registration: row.student?.registration || '',
+        areas: areas.map(() => null),
+        correct: null,
+        total: null,
+        score: null,
+        grade: null,
+        review: 0,
+        voided: describeVoid(row.voided) || 'Anulada',
+      } : ({
         id: row.studentId || row.id,
         name: row.student?.name || 'Aluno não identificado',
         registration: row.student?.registration || '',
@@ -57,12 +70,13 @@ export function buildGradeList({ school, assessments, rows, selectedAreas = [], 
         grade: scaleGrade(row.correct, row.total, maxGrade, rounding),
         review: row.review,
       })).sort((first, second) => byName(first.name, second.name))
+      const scored = students.filter((student) => !student.voided)
       const areaAverages = areas.map((_, index) => {
-        const cells = students.map((student) => student.areas[index]).filter(Boolean)
+        const cells = scored.map((student) => student.areas[index]).filter(Boolean)
         const total = cells.reduce((sum, cell) => sum + cell.total, 0)
         return total ? Math.round(cells.reduce((sum, cell) => sum + cell.correct, 0) / total * 100) : null
       })
-      const average = Math.round(students.reduce((sum, student) => sum + student.score, 0) / students.length)
+      const average = scored.length ? Math.round(scored.reduce((sum, student) => sum + student.score, 0) / scored.length) : null
       return { id: assessment.id, title: assessment.title, code: assessment.code, areas, students, areaAverages, average }
     }).filter(Boolean),
   }))
@@ -115,7 +129,7 @@ export function generateGradeListWorkbook(list) {
     const rows = [
       [{ v: `Turma ${group.label}`, s: { bold: true, size: 15, color: '203B32' } }],
       [{ v: [list.title, list.school, list.date].filter(Boolean).join(' · '), s: { color: '667A71' } }],
-      [{ v: `Áreas: número de acertos. Acertos: soma das áreas. %: acertos ÷ questões válidas (canceladas não contam). ${gradeScaleLabel(maxGrade)}: % × ${String(maxGrade).replace('.', ',')}, ${roundingDescription(rounding)}. * = marcações pendentes de revisão.`, s: { italic: true, size: 9, color: '667A71' } }],
+      [{ v: `Áreas: número de acertos. Acertos: soma das áreas. %: acertos ÷ questões válidas (canceladas não contam). ${gradeScaleLabel(maxGrade)}: % × ${String(maxGrade).replace('.', ',')}, ${roundingDescription(rounding)}. * = marcações pendentes de revisão. Anulada = prova anulada, sem nota e fora das médias.`, s: { italic: true, size: 9, color: '667A71' } }],
       [],
       [{ v: 'Nº', s: head }, { v: 'Aluno', s: { ...head, align: 'left' } }, { v: 'Matrícula', s: head }],
       [{ v: '', s: head }, { v: '', s: head }, { v: '', s: head }],
@@ -157,6 +171,14 @@ export function generateGradeListWorkbook(list) {
         })
         const offset = start + assessment.areas.length
         const totalStyle = { bold: true, fill: tint(color, zebra - 0.1), align: 'center', border: true }
+        if (result?.voided) {
+          const voidedStyle = { ...totalStyle, color: 'A5504A', fill: 'F7E6E4' }
+          row[offset] = { v: null, s: { ...voidedStyle, border: assessment.areas.length ? true : 'strong', borderColor: color } }
+          row[offset + 1] = { v: null, s: { ...voidedStyle, bold: false } }
+          row[offset + 2] = { v: 'Anulada', s: voidedStyle }
+          row[offset + 3] = { v: 'Anulada', s: voidedStyle }
+          return
+        }
         const hasAreas = result && assessment.areas.length && result.areas.every(Boolean)
         const correctRef = cellRef(rowIndex, offset)
         const validRef = cellRef(rowIndex, offset + 1)
@@ -183,12 +205,13 @@ export function generateGradeListWorkbook(list) {
     const averageRow = [{ v: '', s: averageStyle }, { v: 'Média da turma', s: { ...averageStyle, align: 'left' } }, { v: '', s: averageStyle }]
     const mean = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : ''
     blocks.forEach(({ assessment, start, color }) => {
+      const scored = assessment.students.filter((student) => !student.voided)
       const columns = [
-        ...assessment.areas.map((_, index) => mean(assessment.students.map((student) => student.areas[index]?.correct).filter(Number.isFinite))),
-        mean(assessment.students.map((student) => student.correct)),
-        mean(assessment.students.map((student) => student.total)),
-        mean(assessment.students.filter((student) => student.total).map((student) => student.correct / student.total)),
-        mean(assessment.students.map((student) => student.grade).filter(Number.isFinite)),
+        ...assessment.areas.map((_, index) => mean(scored.map((student) => student.areas[index]?.correct).filter(Number.isFinite))),
+        mean(scored.map((student) => student.correct)),
+        mean(scored.map((student) => student.total)),
+        mean(scored.filter((student) => student.total).map((student) => student.correct / student.total)),
+        mean(scored.map((student) => student.grade).filter(Number.isFinite)),
       ]
       columns.forEach((value, index) => {
         const col = start + index

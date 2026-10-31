@@ -1,12 +1,15 @@
 import { getAssessmentForSubmission } from './assessment.js'
 import { getQuestionAreas } from './knowledgeAreas.js'
 import { DEFAULT_ROUNDING, roundGrade } from './gradeScale.js'
+import { isSubmissionVoided } from './voidedSubmission.js'
 
 export const SEGES_RESULT_STATUS = {
   ready: 'PRONTO',
   review: 'REVISAR',
   missing: 'SEM_CORRECAO',
   unavailable: 'SEM_DADOS_DO_RECORTE',
+  // Prova anulada: a linha sai sem acertos e sem nota, para o lançamento ficar a cargo do professor.
+  voided: 'ANULADA',
 }
 
 function submissionDate(submission) {
@@ -76,9 +79,11 @@ export function buildSegesResultRows({ assessment, classes, students, submission
     ))
     .map((student) => {
       const submission = submissionsByStudent.get(student.id)
-      const metrics = calculateAssessmentResult(submission, assessment, scope, maxGrade, rounding)
+      const voided = isSubmissionVoided(submission)
+      const metrics = voided ? null : calculateAssessmentResult(submission, assessment, scope, maxGrade, rounding)
       let status = SEGES_RESULT_STATUS.ready
       if (!submission) status = SEGES_RESULT_STATUS.missing
+      else if (voided) status = SEGES_RESULT_STATUS.voided
       else if (submission.status === 'Revisar') status = SEGES_RESULT_STATUS.review
       else if (!metrics) status = SEGES_RESULT_STATUS.unavailable
 

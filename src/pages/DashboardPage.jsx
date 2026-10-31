@@ -6,6 +6,7 @@ import {
 import { Badge, Button, StatCard } from '../components/ui'
 import { average, formatDate } from '../lib/utils'
 import { getAssessmentStatusLabel, getPendingReviewSubmissions, isAssessmentClosed } from '../lib/assessment'
+import { isSubmissionVoided } from '../lib/voidedSubmission'
 
 function assessmentDate(value) {
   if (!value) return null
@@ -77,7 +78,7 @@ export function DashboardPage({ data, setPage }) {
   const assessments = data.assessments.filter((assessment) => assessmentDate(assessment.date)?.getFullYear() === selectedYear)
   const assessmentIds = new Set(assessments.map((assessment) => assessment.id))
   const periodSubmissions = data.submissions.filter((submission) => assessmentIds.has(submission.assessmentId))
-  const corrected = periodSubmissions.filter((submission) => submission.status === 'Corrigido')
+  const corrected = periodSubmissions.filter((submission) => submission.status === 'Corrigido' && !isSubmissionVoided(submission))
   const review = getPendingReviewSubmissions(data.submissions, data.assessments).length
   const avg = average(corrected.map((submission) => submission.score))
   const expectedSubmissions = assessments.reduce((total, assessment) => total + activeStudents.filter((student) => assessment.classIds.includes(student.classId)).length, 0)
