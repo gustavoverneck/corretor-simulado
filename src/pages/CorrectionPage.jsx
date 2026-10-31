@@ -3,7 +3,7 @@ import {
   UploadCloud, Camera, ScanLine, CheckCircle2, AlertTriangle, FileImage, RotateCcw,
   Save, MoreHorizontal, QrCode, Focus, CircleDot, ChevronRight, X, ClipboardList,
   ListChecks, PencilLine, UsersRound, Eye, Check, FileText, Files, UserPlus, Search, Trash2, Ban, CircleOff, LockKeyhole,
-  ArrowUp, ArrowDown, ArrowUpDown, ShieldCheck, UserX, Download,
+  ArrowUp, ArrowDown, ArrowUpDown, ShieldCheck, UserX, Download, Undo2,
 } from 'lucide-react'
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { CorrectedSheetPreview } from '../components/CorrectedSheetPreview'
@@ -15,6 +15,7 @@ import { cn, downloadBlob, formatDateTime, nextStudentRegistration, normalize, u
 import { getAttendance, setStudentsAbsent } from '../lib/attendance'
 import { archiveScanFile, scanReference } from '../lib/scanArchive'
 import { OriginalSheetButton, useScanArchiveFolder } from '../components/OriginalSheet'
+import { activeSubmissions, describeVoid, inheritVoid, isSubmissionVoided, restoreVoidedSubmission, VOID_REASONS, voidSubmission } from '../lib/voidedSubmission'
 
 const answerStatuses = {
   correct: { label: 'Correta', tone: 'green' },
@@ -285,7 +286,7 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
     <div className="answer-key-layout">
       <aside className="panel answer-key-assessments">
         <header><h3>Simulados</h3><Badge tone="neutral">{data.assessments.length}</Badge></header>
-        <div>{data.assessments.map((item) => { const alerts = countAnswerKeyAlerts(item, data.submissions); return <button key={item.id} className={item.id === assessment.id ? 'active' : ''} onClick={() => chooseAssessment(item.id)}><span><strong>{item.title}</strong><small>{item.code} · {item.questionCount} questões{alerts ? <b className="key-alert-count"> · {alerts} {alerts === 1 ? 'alerta' : 'alertas'}</b> : null}</small></span><em>{item.classIds.length}</em></button> })}</div>
+        <div>{data.assessments.map((item) => { const alerts = countAnswerKeyAlerts(item, activeSubmissions(data.submissions)); return <button key={item.id} className={item.id === assessment.id ? 'active' : ''} onClick={() => chooseAssessment(item.id)}><span><strong>{item.title}</strong><small>{item.code} · {item.questionCount} questões{alerts ? <b className="key-alert-count"> · {alerts} {alerts === 1 ? 'alerta' : 'alertas'}</b> : null}</small></span><em>{item.classIds.length}</em></button> })}</div>
       </aside>
 
       <section className="panel answer-key-workspace">
@@ -323,7 +324,7 @@ function AnswerKeysPanel({ data, setData, notify, initialAssessmentId }) {
             <div className="key-edit-footer"><div><AlertTriangle size={16} /><p>Anuladas valem um acerto; canceladas são retiradas do total válido. Ao salvar, as correções desta versão são recalculadas.</p></div><Button variant="ghost" onClick={() => setEditing(false)}>Cancelar</Button><Button icon={Save} onClick={saveAnswerKey}>Salvar alterações</Button></div>
           </div>
         ) : (
-          <div className="answer-key-view"><AnswerKeyStrip answerKey={answerKey} /><AnswerKeyCheck answerKey={answerKey} assessment={assessment} submissions={data.submissions} editable={!assessmentClosed} onUseLetter={(index, letter) => startEditing(answerKey.map((value, keyIndex) => keyIndex === index ? letter : value))} /><div className="question-area-summary"><span>ÁREAS DAS QUESTÕES</span><div>{areaSummary.map(([area, count]) => <Badge tone="neutral" key={area}>{area} · {count}</Badge>)}</div></div><div className="key-legend"><span><i /> Número da questão</span><span><i /> Resposta correta</span></div></div>
+          <div className="answer-key-view"><AnswerKeyStrip answerKey={answerKey} /><AnswerKeyCheck answerKey={answerKey} assessment={assessment} submissions={activeSubmissions(data.submissions)} editable={!assessmentClosed} onUseLetter={(index, letter) => startEditing(answerKey.map((value, keyIndex) => keyIndex === index ? letter : value))} /><div className="question-area-summary"><span>ÁREAS DAS QUESTÕES</span><div>{areaSummary.map(([area, count]) => <Badge tone="neutral" key={area}>{area} · {count}</Badge>)}</div></div><div className="key-legend"><span><i /> Número da questão</span><span><i /> Resposta correta</span></div></div>
         )}
       </section>
     </div>
@@ -414,6 +415,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState(null)
   const [deleteId, setDeleteId] = useState(null)
+  const [voidDraft, setVoidDraft] = useState(null)
   const [answerFilter, setAnswerFilter] = useState('all')
   const [sort, setSort] = useState({ key: 'date', direction: 'desc' })
   const assessment = data.assessments.find((item) => item.id === assessmentId) || data.assessments[0]
@@ -441,7 +443,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
       return { submission, student, classroom }
     })
     .filter((row) => classId === 'all' || row.student?.classId === classId)
-    .filter((row) => status === 'all' || row.submission.status === status)
+    .filter((row) => status === 'all' || (status === 'voided' ? isSubmissionVoided(row.submission) : !isSubmissionVoided(row.submission) && row.submission.status === status))
     .filter((row) => !search.trim() || normalize(`${row.student?.name} ${row.student?.registration} ${row.classroom?.name}`).includes(normalize(search)))
     .sort((first, second) => {
       const nameComparison = String(first.student?.name || '').localeCompare(String(second.student?.name || ''), 'pt-BR', { sensitivity: 'base' })
@@ -485,6 +487,19 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
     setSelectedId(submission.id)
   }
 
+  function confirmVoid() {
+    if (!selected || !voidDraft?.reason || (voidDraft.reason === 'Outro' && !voidDraft.note.trim())) return
+    setData((current) => ({ ...current, submissions: voidSubmission(current.submissions, selected, voidDraft) }))
+    setVoidDraft(null)
+    notify('Prova anulada', `${selectedStudent?.name || 'Aluno removido'}: nota zero nas exportações e fora das análises. Você pode desfazer a qualquer momento.`)
+  }
+
+  function undoVoid() {
+    if (!selected) return
+    setData((current) => ({ ...current, submissions: restoreVoidedSubmission(current.submissions, selected) }))
+    notify('Anulação desfeita', `A nota de ${selectedStudent?.name || 'aluno removido'} voltou a valer.`)
+  }
+
   function deleteResponse() {
     if (!responseToDelete) return
     setData((current) => ({ ...current, submissions: current.submissions.filter((item) => item.id !== responseToDelete.id) }))
@@ -503,16 +518,17 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
         <div className="responses-toolbar">
           <label><span>Simulado</span><select value={assessment.id} onChange={(event) => chooseAssessment(event.target.value)}>{data.assessments.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
           <label><span>Turma</span><select value={classId} onChange={(event) => setClassId(event.target.value)}><option value="all">Todas as turmas</option>{assessment.classIds.map((id) => { const item = data.classes.find((entry) => entry.id === id); return <option value={id} key={id}>{item?.name || 'Turma removida'}</option> })}</select></label>
-          <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos</option><option value="Corrigido">Corrigidas</option><option value="Revisar">{assessmentClosed ? 'Com ressalva' : 'Para revisar'}</option></select></label>
+          <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Todos</option><option value="Corrigido">Corrigidas</option><option value="Revisar">{assessmentClosed ? 'Com ressalva' : 'Para revisar'}</option><option value="voided">Anuladas</option></select></label>
           <label className="responses-search"><span>Buscar aluno</span><div><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nome ou matrícula" />{search && <button type="button" onClick={() => setSearch('')} aria-label="Limpar busca"><X size={13} /></button>}</div></label>
         </div>
         <div className="response-status-legend"><Badge tone="ochre">Revisar</Badge><span>A correção ainda precisa de conferência. Se a marcação múltipla ou em branco estiver correta, basta mantê-la e concluir a revisão.</span></div>
 
-        {rows.length ? <div className="table-wrap"><table><thead><tr>{sortableHeader('name', 'Aluno')}<th>TURMA</th>{sortableHeader('result', 'Resultado')}<th>RESPOSTAS</th><th>STATUS</th>{sortableHeader('date', 'Corrigida em')}<th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => { const archivedReview = assessmentClosed && submission.status === 'Revisar'; return <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{submission.gradedTotal ?? Math.max(0, assessment.questionCount - (submission.cancelled || 0))} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span>{submission.cancelled > 0 && <span className="cancelled">{submission.cancelled} C</span>}</div></td><td><Badge tone={archivedReview ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'}>{archivedReview ? 'Encerrado com ressalva' : submission.status}</Badge></td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr> })}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
+        {rows.length ? <div className="table-wrap"><table><thead><tr>{sortableHeader('name', 'Aluno')}<th>TURMA</th>{sortableHeader('result', 'Resultado')}<th>RESPOSTAS</th><th>STATUS</th>{sortableHeader('date', 'Corrigida em')}<th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => { const archivedReview = assessmentClosed && submission.status === 'Revisar'; return <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{submission.gradedTotal ?? Math.max(0, assessment.questionCount - (submission.cancelled || 0))} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span>{submission.cancelled > 0 && <span className="cancelled">{submission.cancelled} C</span>}</div></td><td>{isSubmissionVoided(submission) ? <span title={describeVoid(submission.voided)}><Badge tone="red">Anulada</Badge></span> : <Badge tone={archivedReview ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'}>{archivedReview ? 'Encerrado com ressalva' : submission.status}</Badge>}</td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr> })}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
       </section>
 
-      <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selectedStudent ? `Respostas de ${selectedStudent.name}` : 'Detalhes da correção'} subtitle={`${selectedClass?.name || 'Turma não encontrada'} · ${selectedAssessment?.title || ''}`} size="xl" footer={<><Button variant="danger" icon={Trash2} onClick={() => setDeleteId(selected.id)}>Excluir resposta</Button><OriginalSheetButton scan={selected?.scan} title={selectedStudent?.name} /><Button onClick={() => setSelectedId(null)}>Fechar</Button></>}>
+      <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selectedStudent ? `Respostas de ${selectedStudent.name}` : 'Detalhes da correção'} subtitle={`${selectedClass?.name || 'Turma não encontrada'} · ${selectedAssessment?.title || ''}`} size="xl" footer={<><Button variant="danger" icon={Trash2} onClick={() => setDeleteId(selected.id)}>Excluir resposta</Button>{selected && (isSubmissionVoided(selected) ? <Button variant="secondary" icon={Undo2} onClick={undoVoid}>Desfazer anulação</Button> : <Button variant="secondary" icon={Ban} onClick={() => setVoidDraft({ reason: VOID_REASONS[0], note: '' })}>Anular prova</Button>)}<OriginalSheetButton scan={selected?.scan} title={selectedStudent?.name} /><Button onClick={() => setSelectedId(null)}>Fechar</Button></>}>
         {selected && <div className="response-detail-view">
+          {isSubmissionVoided(selected) && <div className="voided-exam-banner" role="status"><span><Ban size={18} /></span><div><strong>Prova anulada · {describeVoid(selected.voided)}</strong><p>{selected.voided.at ? `Anulada em ${formatDateTime(selected.voided.at)}. ` : ''}A folha continua registrada, a nota vai como zero na planilha e no SEGES e a prova fica fora dos gráficos e das análises.</p></div><Button size="sm" variant="secondary" icon={Undo2} onClick={undoVoid}>Desfazer</Button></div>}
           <div className="response-detail-identification">
             <article><small>ALUNO</small><strong>{selectedStudent?.name || 'Aluno removido'}</strong><p>{selectedStudent ? `Matrícula ${selectedStudent.registration}` : 'Cadastro não encontrado'}</p></article>
             <article><small>TURMA / GABARITO</small><strong>{selectedClass?.name || 'Turma removida'}</strong><p>{selected.answerKeyVersionLabel || (hasCustomAnswerKey(selectedAssessment, selectedClass?.id) ? 'Versão específica' : 'Gabarito padrão')}</p></article>
@@ -527,6 +543,14 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
             <AnswerFilters answers={selectedAnswers} value={answerFilter} onChange={setAnswerFilter} />
             <DetailedAnswerList answers={visibleAnswers} assessment={selectedAssessment} questionAreas={selectedQuestionAreas} readOnly />
           </section> : <EmptyState icon={FileText} title="Detalhamento indisponível" description="Esta correção antiga possui apenas o resumo do resultado." />}
+        </div>}
+      </Modal>
+
+      <Modal open={Boolean(selected && voidDraft)} onClose={() => setVoidDraft(null)} title="Anular prova?" subtitle={`${selectedStudent?.name || 'Aluno removido'} · ${selectedAssessment?.title || ''}`} footer={<><Button variant="ghost" onClick={() => setVoidDraft(null)}>Cancelar</Button><Button variant="danger" icon={Ban} disabled={!voidDraft?.reason || (voidDraft?.reason === 'Outro' && !voidDraft?.note.trim())} onClick={confirmVoid}>Anular prova</Button></>}>
+        {voidDraft && <div className="void-exam-form">
+          <p>As respostas continuam guardadas. A prova recebe <b>nota zero</b> na planilha de notas e no arquivo do SEGES, aparece como <b>Anulada</b> em Resultados e fica fora dos gráficos e das análises. Dá para desfazer depois.</p>
+          <div className="void-exam-reasons" role="radiogroup" aria-label="Motivo da anulação">{VOID_REASONS.map((reason) => <button type="button" role="radio" aria-checked={voidDraft.reason === reason} key={reason} className={voidDraft.reason === reason ? 'active' : ''} onClick={() => setVoidDraft((current) => ({ ...current, reason }))}>{reason}</button>)}</div>
+          <Field label={voidDraft.reason === 'Outro' ? 'Descreva o motivo' : 'Observação (opcional)'} required={voidDraft.reason === 'Outro'}><textarea rows={3} value={voidDraft.note} onChange={(event) => setVoidDraft((current) => ({ ...current, note: event.target.value }))} placeholder="Ex.: flagrado com anotações durante a prova" /></Field>
         </div>}
       </Modal>
 
@@ -567,7 +591,7 @@ export function CorrectionPage({ data, setData, notify }) {
   const assessmentClosed = isAssessmentClosed(assessment)
   const pendingReviews = getPendingReviewSubmissions(data.submissions, data.assessments)
   const attendanceOpen = getAttendance(assessment, data.students, data.submissions).pending
-  const answerKeyAlerts = useMemo(() => data.assessments.reduce((total, item) => total + countAnswerKeyAlerts(item, data.submissions), 0), [data.assessments, data.submissions])
+  const answerKeyAlerts = useMemo(() => data.assessments.reduce((total, item) => total + countAnswerKeyAlerts(item, activeSubmissions(data.submissions)), 0), [data.assessments, data.submissions])
   const classroom = data.classes.find((item) => item.id === classId)
   const answerKey = getAnswerKeyForClass(assessment, classId)
   const eligibleStudents = data.students.filter((student) => student.classId === classId && student.status === 'Ativo')
@@ -977,7 +1001,7 @@ export function CorrectionPage({ data, setData, notify }) {
     }
     setData((current) => ({
       ...current,
-      submissions: [submission, ...current.submissions.filter((item) => !(item.assessmentId === finalAssessment.id && item.studentId === finalStudent.id))],
+      submissions: [inheritVoid(submission, current.submissions), ...current.submissions.filter((item) => !(item.assessmentId === finalAssessment.id && item.studentId === finalStudent.id))],
       assessments: current.assessments.map((item) => item.id === finalAssessment.id && item.status === 'Pronto para aplicar' ? { ...item, status: 'Correção em andamento' } : item),
     }))
     notify(needsReview ? 'Correção salva com ressalvas' : 'Folha corrigida e salva', needsReview ? 'As marcações ambíguas foram enviadas à fila de revisão.' : `${finalStudent.name}: ${graded.correct} acertos com o gabarito de ${data.classes.find((item) => item.id === finalStudent.classId)?.name}.`)
@@ -1033,7 +1057,7 @@ export function CorrectionPage({ data, setData, notify }) {
     setData((current) => ({
       ...current,
       submissions: [
-        ...submissions,
+        ...submissions.map((item) => inheritVoid(item, current.submissions)),
         ...current.submissions.filter((item) => !replacementKeys.has(`${item.assessmentId}:${item.studentId}`)),
       ],
       assessments: current.assessments.map((item) => touchedAssessments.has(item.id) && item.status === 'Pronto para aplicar' ? { ...item, status: 'Correção em andamento' } : item),
@@ -1085,7 +1109,7 @@ export function CorrectionPage({ data, setData, notify }) {
           <aside className="correction-guide"><h3>Para uma leitura precisa</h3><div><span><Focus size={19} /></span><p><strong>Uma folha por arquivo</strong>Cada imagem ou página do PDF deve conter uma folha completa, sem cortes.</p></div><div><span><CircleDot size={19} /></span><p><strong>Digitalize com nitidez</strong>Prefira 200 ou 300 DPI e mantenha os quatro marcadores visíveis.</p></div><div><span><QrCode size={19} /></span><p><strong>Não cubra o QR Code</strong>Ele identifica o simulado e, nas folhas nominadas, também o aluno.</p></div><div className="privacy-note"><CheckCircle2 size={18} /><p><strong>Processamento privado</strong>As imagens e o PDF são analisados neste dispositivo e não são enviados para servidores.</p></div></aside>
         </div>
 
-        <section className="panel recent-corrections"><header className="panel-header"><div><h3>Correções recentes</h3><p>Últimas folhas processadas e o gabarito aplicado</p></div><button className="text-button" onClick={() => setTab('reviews')}>{pendingReviews.length} para revisar <ChevronRight size={14} /></button></header>{recent.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA / GABARITO</th><th>SIMULADO</th><th>RESULTADO</th><th>STATUS</th><th /></tr></thead><tbody>{recent.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const archivedReview = submission.status === 'Revisar' && isAssessmentClosed(itemAssessment); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span><small className="cell-subtitle">Gabarito {hasCustomAnswerKey(itemAssessment, itemStudent?.classId) ? 'específico' : 'padrão'}</small></td><td>{itemAssessment?.title}</td><td><strong>{submission.correct} / {validTotal}</strong><small className="cell-subtitle">{submission.score}% de acertos</small></td><td><Badge tone={archivedReview ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'}>{archivedReview ? 'Encerrado com ressalva' : submission.status}</Badge></td><td><button className="icon-button"><MoreHorizontal size={18} /></button></td></tr> })}</tbody></table></div> : <EmptyState icon={ScanLine} title="Nenhuma folha corrigida" description="As leituras aparecerão aqui." />}</section>
+        <section className="panel recent-corrections"><header className="panel-header"><div><h3>Correções recentes</h3><p>Últimas folhas processadas e o gabarito aplicado</p></div><button className="text-button" onClick={() => setTab('reviews')}>{pendingReviews.length} para revisar <ChevronRight size={14} /></button></header>{recent.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA / GABARITO</th><th>SIMULADO</th><th>RESULTADO</th><th>STATUS</th><th /></tr></thead><tbody>{recent.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const archivedReview = submission.status === 'Revisar' && isAssessmentClosed(itemAssessment); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span><small className="cell-subtitle">Gabarito {hasCustomAnswerKey(itemAssessment, itemStudent?.classId) ? 'específico' : 'padrão'}</small></td><td>{itemAssessment?.title}</td><td><strong>{submission.correct} / {validTotal}</strong><small className="cell-subtitle">{submission.score}% de acertos</small></td><td>{isSubmissionVoided(submission) ? <Badge tone="red">Anulada</Badge> : <Badge tone={archivedReview ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'}>{archivedReview ? 'Encerrado com ressalva' : submission.status}</Badge>}</td><td><button className="icon-button"><MoreHorizontal size={18} /></button></td></tr> })}</tbody></table></div> : <EmptyState icon={ScanLine} title="Nenhuma folha corrigida" description="As leituras aparecerão aqui." />}</section>
       </>}
 
       {batch && <section className="batch-review page-stack">
@@ -1162,7 +1186,7 @@ export function CorrectionPage({ data, setData, notify }) {
               {result.markersFound < 4 && <div className="scan-notice is-warning"><Focus size={17} /><p><strong>Enquadramento estimado.</strong> {result.markersFound} de 4 marcadores encontrados.</p></div>}
               {result.multiple > 0 && <div className="scan-notice is-multiple"><CircleDot size={17} /><p><strong>{result.multiple} múltipla(s).</strong> Mais de uma alternativa detectada.</p></div>}
               {result.uncertain > 0 && <div className="scan-notice is-warning"><AlertTriangle size={17} /><p><strong>{result.uncertain} incerta(s).</strong> Confira as marcações destacadas.</p></div>}
-              {existingResultSubmission && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>Já existe uma correção.</strong> O resultado anterior será substituído.</p></div>}
+              {existingResultSubmission && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>Já existe uma correção.</strong> O resultado anterior será substituído.{isSubmissionVoided(existingResultSubmission) ? ' A prova está anulada e continuará anulada após a nova leitura.' : ''}</p></div>}
               {!resultNoticeCount && <div className="scan-notice is-success"><CheckCircle2 size={17} /><p><strong>Nenhuma inconsistência encontrada.</strong></p></div>}
             </div>
           </aside>

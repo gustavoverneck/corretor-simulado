@@ -7,6 +7,7 @@ import { OmrSettingsPanel } from '../components/OmrSettingsPanel'
 import { resolveOmrSettings } from '../lib/omrSettings'
 import { chooseAutoBackupFolder, clearAutoBackupFolder, isAutoBackupSupported, openAutoBackupFolder } from '../lib/autoBackup'
 import { chooseScanArchiveFolder, clearScanArchiveFolder, getScanArchiveFolder, isScanArchiveSupported } from '../lib/scanArchive'
+import { normalizeSubmissionVoid } from '../lib/voidedSubmission'
 
 function updateStatusLabel(updates) {
   if (!updates.supported) return 'Atualização automática indisponível neste modo'
@@ -97,7 +98,7 @@ export function SettingsPage({ data, setData, notify, exportBackup, backupMeta, 
         throw new Error('Estrutura de dados inválida.')
       }
       if (!window.confirm(`Restaurar o backup “${file.name}” e substituir os dados atuais?`)) return
-      setData(restored)
+      setData({ ...restored, submissions: Array.isArray(restored.submissions) ? restored.submissions.map(normalizeSubmissionVoid) : [] })
       notify('Backup restaurado', `${restored.students.length} alunos e ${restored.classes.length} turmas recuperados.`)
     } catch (error) {
       notify('Backup inválido', error.message || 'Não foi possível ler esse arquivo.', 'warning')

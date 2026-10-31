@@ -44,7 +44,8 @@
     "test:scan-archive": "node scripts/test-scan-archive.mjs",
     "test:tri": "node scripts/test-tri.mjs",
     "test:student-report": "node scripts/test-student-report.mjs",
-    "test:auto-backup": "node scripts/test-auto-backup.mjs"
+    "test:auto-backup": "node scripts/test-auto-backup.mjs",
+    "test:voided-submission": "node scripts/test-voided-submission.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",

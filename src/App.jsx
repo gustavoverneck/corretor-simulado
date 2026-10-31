@@ -20,6 +20,7 @@ import { getPendingReviewSubmissions } from './lib/assessment'
 import { backupReminder, getStorageStatus, isQuotaError, loadStoredState, readBackupMeta, recordBackup, requestPersistentStorage, saveStoredState, snoozeBackupReminder } from './lib/storage'
 import { downloadBackup } from './lib/backup'
 import { createAutoBackupScheduler, getAutoBackupFolder, writeAutoBackup } from './lib/autoBackup'
+import { normalizeSubmissionVoid } from './lib/voidedSubmission'
 
 const SAVE_DELAY_MS = 400
 
@@ -49,7 +50,8 @@ function normalizeState(parsed) {
   const assessments = Array.isArray(parsed?.assessments)
     ? parsed.assessments.map((assessment) => ({ ...assessment, questionAreas: getQuestionAreas(assessment) }))
     : parsed.assessments
-  return { ...parsed, assessments }
+  const submissions = Array.isArray(parsed?.submissions) ? parsed.submissions.map(normalizeSubmissionVoid) : parsed.submissions
+  return { ...parsed, assessments, submissions }
 }
 
 function formatBytes(bytes) {

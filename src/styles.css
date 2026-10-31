@@ -405,7 +405,7 @@ td > strong { color: #27362f; font-weight: 650; }
 .seges-results-export-classes label > span { width: 8px; height: 8px; border-radius: 50%; }
 .seges-results-export-classes label svg { color: #c5ceca; }
 .seges-results-export-classes label.checked svg { color: #4e7a6d; }
-.seges-results-export-summary { overflow: hidden; display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #e1e6e3; border-radius: 9px; }
+.seges-results-export-summary { overflow: hidden; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid #e1e6e3; border-radius: 9px; }
 .seges-results-export-summary > div { min-height: 68px; padding: 12px 13px; display: flex; flex-direction: column; border-right: 1px solid #e6ebe8; }
 .seges-results-export-summary > div:last-child { border-right: 0; }
 .seges-results-export-summary small { color: #89938f; font-size: 6.5px; font-weight: 800; letter-spacing: .4px; }
@@ -970,7 +970,7 @@ td > strong { color: #27362f; font-weight: 650; }
   .assessment-version-roster header select { width: 100%; }
   .assessment-version-roster-summary { align-items: flex-start; flex-direction: column; }
   .seges-results-export-config, .grade-scale-options { grid-template-columns: 1fr; }
-  .seges-results-export-summary { grid-template-columns: repeat(2, 1fr); }
+  .seges-results-export-summary { grid-auto-flow: row; grid-template-columns: repeat(2, 1fr); }
   .seges-results-export-summary > div:nth-child(2) { border-right: 0; }
   .seges-results-export-summary > div:nth-child(-n+2) { border-bottom: 1px solid #e6ebe8; }
   .assessment-detail-areas > header { align-items: stretch; flex-direction: column; }
@@ -1412,3 +1412,18 @@ td.is-advanced strong, td.is-advanced { color: #2f6a59; }
 .class-open-actions { display: flex; gap: 14px; }
 .class-open-actions .class-open:first-child { width: auto; justify-content: flex-start; }
 .auto-backup-folder { margin-bottom: 14px; }
+/* Prova anulada */
+.voided-exam-banner { margin-bottom: 14px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; color: #7e3d39; background: #faeeee; border: 1px solid #efd3d1; border-radius: 10px; }
+.voided-exam-banner > span { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; color: #a5504a; background: #fff; border-radius: 9px; }
+.voided-exam-banner > div { flex: 1; min-width: 0; }
+.voided-exam-banner strong { display: block; font-size: 11.5px; }
+.voided-exam-banner p { margin-top: 3px; color: #8d5b57; font-size: 9.5px; line-height: 1.45; }
+.void-exam-form { display: flex; flex-direction: column; gap: 14px; }
+.void-exam-form > p { color: #66726d; font-size: 10px; line-height: 1.5; }
+.void-exam-reasons { display: flex; flex-wrap: wrap; gap: 7px; }
+.void-exam-reasons button { padding: 8px 12px; color: #4e5c57; background: #f4f6f5; border: 1px solid #dfe5e2; border-radius: 999px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.void-exam-reasons button.active { color: #fff; background: #a5504a; border-color: #a5504a; }
+.void-exam-form textarea { width: 100%; padding: 10px 11px; resize: vertical; font: inherit; font-weight: 400; border: 1px solid #dfe5e2; border-radius: 8px; }
+.ranking-panel tr.is-voided td { color: #8d8f8e; }
+.ranking-panel tr.is-voided .student-name strong { text-decoration: line-through; text-decoration-color: #c98f8a; }
+.student-result-voided { margin-bottom: 4px; }
