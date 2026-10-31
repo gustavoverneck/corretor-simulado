@@ -88,6 +88,27 @@ const sheetUp = strFromU8(unzipSync(new Uint8Array(await generateGradeListWorkbo
 assert.match(sheetUp, /ROUNDUP\(F7\/G7\*10,0\)/)
 assert.equal(buildGradeList({ ...source, maxGrade: 7.5 }).classes[1].assessments[0].students[1].grade, 7.5)
 
+// Notas TRI: colunas por área e geral, só no simulado com TRI.
+const triRows = rows.map((row, index) => ({ ...row, id: `r${index}` }))
+const triScores = new Map([['a', { scores: new Map([
+  ['r1', { areas: { Matemática: 612.4, Linguagens: 580.2 }, score: 596.3, scale: 'enem' }],
+  ['r2', { areas: { Matemática: 455, Linguagens: 498.6 }, score: 476.8, scale: 'enem' }],
+]), groups: [] }]])
+const triList = buildGradeList({ ...source, rows: triRows, triScores })
+const triDiag = triList.classes[1].assessments[0]
+assert.deepEqual(triDiag.triAreas, ['Matemática', 'Linguagens'])
+assert.equal(triDiag.triScale, 'enem')
+assert.deepEqual(triDiag.students.map((student) => student.tri?.score), [476.8, 596.3])
+assert.deepEqual(triList.classes[1].assessments[1].triAreas, [], 'simulado sem TRI não ganha colunas')
+const triSheet = strFromU8(unzipSync(new Uint8Array(await generateGradeListWorkbook(triList).blob.arrayBuffer()))['xl/worksheets/sheet2.xml'])
+assert.match(triSheet, /TRI Matemática/)
+assert.match(triSheet, /TRI geral/)
+assert.match(triSheet, /escala do ENEM/)
+assert.match(triSheet, /<c r="J7"[^>]*><v>455<\/v>/, 'TRI de Ana logo depois da nota')
+assert.match(triSheet, /<c r="L7"[^>]*><v>476.8<\/v>/)
+assert.match(triSheet, /<f>IFERROR\(ROUND\(O7\/P7\*10,1\),&quot;&quot;\)<\/f>/, 'segundo simulado desloca 3 colunas')
+assert.match(triSheet, /AVERAGE\(L7:L8\)/)
+
 if (process.env.GRADE_LIST_OUT) {
   const { writeFile } = await import('node:fs/promises')
   await writeFile(process.env.GRADE_LIST_OUT, Buffer.from(await file.blob.arrayBuffer()))

@@ -19,7 +19,12 @@ function markedLabel(question) {
   return question.selected.length ? question.selected.join('+') : '—'
 }
 
-export function StudentResultModal({ row, studentRows = [], peerRows = [], areaColors = [], onSelectRow, onClose }) {
+function formatTri(value) {
+  return Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+}
+
+// `tri`: nota TRI desta folha ({ areas, score, scale }), quando o simulado tem TRI ligada.
+export function StudentResultModal({ row, studentRows = [], peerRows = [], areaColors = [], tri = null, onSelectRow, onClose }) {
   const [areaFilter, setAreaFilter] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
   useEffect(() => { setAreaFilter(null); setStatusFilter('all') }, [row?.id])
@@ -38,6 +43,7 @@ export function StudentResultModal({ row, studentRows = [], peerRows = [], areaC
   const groupedQuestions = (result?.areas || [])
     .map((area) => ({ area: area.area, questions: visibleQuestions.filter((question) => question.area === area.area) }))
     .filter((group) => group.questions.length)
+  const triArea = (area) => isSubmissionVoided(row) ? null : tri?.areas?.[area] ?? null
   const areaColor = (area) => areaColors[(result?.areas.findIndex((item) => item.area === area) ?? 0) % Math.max(1, areaColors.length)]
 
   return <Modal open onClose={onClose} size="lg" title={student?.name || 'Aluno removido'} subtitle={[row.classroom?.name, student?.registration && `Matrícula ${student.registration}`, row.assessment.title, result?.versionLabel].filter(Boolean).join(' · ')} footer={<><OriginalSheetButton scan={row.scan} title={student?.name} /><Button variant="secondary" onClick={onClose}>Fechar</Button></>}>
@@ -53,6 +59,7 @@ export function StudentResultModal({ row, studentRows = [], peerRows = [], areaC
           <div><b>{result.totals.blank}</b><small>em branco</small></div>
           {result.totals.review > 0 && <div><b>{result.totals.review}</b><small>para revisar</small></div>}
           {result.totals.cancelled > 0 && <div><b>{result.totals.cancelled}</b><small>canceladas</small></div>}
+          {tri?.score != null && !isSubmissionVoided(row) && <div className="student-result-tri" title={tri.scale === 'enem' ? 'Nota TRI na escala do ENEM, com os parâmetros oficiais do INEP. É a média das notas das áreas.' : 'Nota TRI na escala do grupo: 500 é a média de quem fez a prova. É a média das notas das áreas.'}><b>{formatTri(tri.score)}</b><small>nota TRI {tri.scale === 'enem' ? '(escala ENEM)' : '(escala do grupo)'}</small></div>}
         </div>
 
         <section className="student-result-section">
@@ -64,7 +71,7 @@ export function StudentResultModal({ row, studentRows = [], peerRows = [], areaC
               <span className="area-performance-icon" style={{ '--area-color': areaColor(area.area) }}><BookOpenCheck size={16} /></span>
               <span className="student-area-copy"><strong>{area.area}</strong><small>{area.correct} {area.correct === 1 ? 'acerto' : 'acertos'} em {area.total} {area.total === 1 ? 'questão' : 'questões'}{area.cancelled ? ` · ${area.cancelled} cancelada${area.cancelled !== 1 ? 's' : ''}` : ''}</small></span>
               <span className="student-area-bar"><span><i style={{ width: `${area.score}%`, background: areaColor(area.area) }} />{classScore !== undefined && <em style={{ left: `${classScore}%` }} title={`Média da turma: ${classScore}%`} />}</span><strong>{area.score}%</strong></span>
-              <small className="student-area-class">{classScore !== undefined ? `Média da turma ${classScore}%` : ''}</small>
+              <small className="student-area-class">{classScore !== undefined ? `Média da turma ${classScore}%` : ''}{triArea(area.area) != null && <b>TRI {formatTri(triArea(area.area))}</b>}</small>
             </button>
           })}</div>
         </section>

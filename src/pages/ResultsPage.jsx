@@ -10,6 +10,7 @@ import { formatMaxGrade, gradeScaleLabel, loadPreferredMaxGrade, loadPreferredRo
 import { average, cn, downloadBlob, initials, normalize } from '../lib/utils'
 import { uniqueQuestionAreas } from '../lib/knowledgeAreas'
 import { isAssessmentClosed } from '../lib/assessment'
+import { computeTriScores, isTriEnabled } from '../lib/tri'
 import { describeVoid, isSubmissionVoided } from '../lib/voidedSubmission'
 import { MultiFilter } from '../components/MultiFilter'
 import { ResultsReportModal } from '../components/ResultsReportModal'
@@ -234,6 +235,7 @@ export function ResultsPage({ data, notify }) {
   const listedRowCount = studentRows.length + voidedRows.length
   const avg = average(studentRows.map((item) => item.score))
   const openStudentRow = allResultRows.find((item) => item.id === openStudentRowId)
+  const triScores = useMemo(() => new Map(data.assessments.filter(isTriEnabled).map((assessment) => [assessment.id, computeTriScores(assessment, data.submissions)])), [data.assessments, data.submissions])
   const detailedSubmissions = filteredRows.filter((item) => Array.isArray(item.answers))
   const areaResults = calculateAreaResults(selectedAssessments, filteredRows).map((item, index) => ({ ...item, color: areaColors[index % areaColors.length] }))
   const selectedAreaResults = areaResults.filter((item) => selectedAreas.includes(item.area))
@@ -385,6 +387,7 @@ export function ResultsPage({ data, notify }) {
         rows: filteredRows,
         voidedRows,
         selectedAreas,
+        triScores,
         filters: [
           ['Simulados', selectedAssessments.map((item) => item.title).join(', ')],
           ['Turmas', selectedClassNames.join(', ')],
@@ -398,6 +401,7 @@ export function ResultsPage({ data, notify }) {
         studentRows={openStudentRow ? allResultRows.filter((item) => item.studentId === openStudentRow.studentId) : []}
         peerRows={resultRows}
         areaColors={areaColors}
+        tri={openStudentRow ? triScores.get(openStudentRow.assessmentId)?.scores.get(openStudentRow.id) : null}
         onSelectRow={(item) => setOpenStudentRowId(item.id)}
         onClose={() => setOpenStudentRowId(null)}
       />

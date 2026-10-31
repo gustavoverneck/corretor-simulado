@@ -167,7 +167,7 @@ export function StudentsReport({ data, notify, initialClassId = null, initialStu
         </>}
       </section>
 
-      <StudentResultModal row={openRow} studentRows={studentRows} peerRows={peerRows} areaColors={areaColors} onSelectRow={(row) => setOpenAssessmentId(row.assessmentId)} onClose={() => setOpenAssessmentId(null)} />
+      <StudentResultModal row={openRow} studentRows={studentRows} peerRows={peerRows} areaColors={areaColors} tri={openEntry?.tri} onSelectRow={(row) => setOpenAssessmentId(row.assessmentId)} onClose={() => setOpenAssessmentId(null)} />
     </div>
   )
 }
