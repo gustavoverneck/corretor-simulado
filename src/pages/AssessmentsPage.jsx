@@ -1606,7 +1606,7 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
         onClose={() => setDetailAssessmentId(null)}
         title={detailAssessment?.title || 'Detalhes do simulado'}
         subtitle="Informações da aplicação, turmas participantes e gabaritos utilizados."
-        size="lg"
+        size="xl"
         footer={detailAssessment && <><Button variant="ghost" onClick={() => setDetailAssessmentId(null)}>Fechar</Button><Button variant="secondary" icon={PencilLine} onClick={() => { setDetailAssessmentId(null); openAssessmentEditor(detailAssessment) }}>Editar</Button><Button variant="secondary" icon={Printer} onClick={() => { setDetailAssessmentId(null); openPrint(detailAssessment) }}>Gerar folhas</Button><Button variant="secondary" icon={isAssessmentClosed(detailAssessment) ? RotateCcw : LockKeyhole} onClick={() => setAssessmentLifecycleId(detailAssessment.id)}>{isAssessmentClosed(detailAssessment) ? 'Reabrir simulado' : 'Encerrar simulado'}</Button><Button icon={ScanLine} onClick={() => openCorrection(detailAssessment, 'responses')}>Ver correção</Button></>}
       >
         {detailAssessment && <AssessmentDetails assessment={detailAssessment} data={data} setData={setData} notify={notify} />}
