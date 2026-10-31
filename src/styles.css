@@ -1345,3 +1345,65 @@ tr.clickable-row:focus-visible { outline: 3px solid rgba(65, 111, 98, .2); outli
 .scan-archive-folder strong { display: block; font-size: 10px; word-break: break-all; }
 .scan-archive-folder p { margin: 4px 0 0; color: #84908b; font-size: 8.5px; line-height: 1.45; }
 .scan-archive-folder > div:last-child { display: flex; gap: 8px; }
+.assessment-tri > header p { max-width: 720px; }
+.tri-toggle { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; color: #4f776c; font-size: 10px; font-weight: 700; cursor: pointer; }
+.tri-toggle input { width: 16px; height: 16px; accent-color: #4c776b; }
+.tri-status { padding: 13px 15px; display: grid; gap: 10px; color: #64716c; font-size: 9.5px; line-height: 1.5; }
+.tri-status ul { margin: 0; padding: 0; display: grid; gap: 6px; list-style: none; }
+.tri-status li { display: flex; align-items: center; gap: 8px; }
+
+/* Relatório do aluno */
+.students-report-page { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); align-items: start; gap: 16px; }
+.students-report-list { position: sticky; top: 84px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; }
+.students-report-list .table-wrap { overflow: auto; }
+.students-report-list td strong { display: block; font-size: 9.5px; }
+.students-report-list td .badge { margin-top: 3px; }
+.students-report-list tr.is-selected { background: #e9f1ed; }
+.students-report-filters { padding: 12px 15px; display: grid; gap: 9px; background: #fafbfa; border-bottom: 1px solid #e8ece9; }
+.students-report-filters > label { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.students-report-filters > label > span { color: #84908b; font-size: 7px; font-weight: 800; letter-spacing: .55px; }
+.students-report-filters select, .students-report-filters input { width: 100%; height: 36px; color: #35443f; background-color: white; border: 1px solid #dce2de; border-radius: 7px; font-size: 9px; }
+.students-report-filters .responses-search input { padding-left: 32px; }
+.students-report-filters .students-report-check { flex-direction: row; align-items: center; gap: 7px; color: #55645e; font-size: 9px; cursor: pointer; }
+.students-report-check input { width: 15px; height: 15px; accent-color: #4c776b; }
+.students-report-none { padding: 18px; color: #86918c; font-size: 9px; text-align: center; }
+.students-report-detail { min-width: 0; }
+.student-report-header { padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.student-report-header h2 { font-family: Georgia, serif; font-size: 18px; }
+.student-report-header p { margin-top: 4px; color: #7f8b86; font-size: 9px; }
+.student-delta { display: inline-flex; align-items: center; gap: 3px; color: #6f7c77; font-size: 9px; font-weight: 700; }
+.student-delta.is-up { color: #3f7968; }
+.student-delta.is-down { color: #a6544d; }
+td.is-low strong, td.is-low { color: #a6544d; }
+td.is-basic strong, td.is-basic { color: #9a6c33; }
+td.is-adequate strong, td.is-adequate { color: #4f7a4a; }
+td.is-advanced strong, td.is-advanced { color: #2f6a59; }
+.student-report-alerts ul { margin: 0; padding: 12px 16px; display: grid; gap: 7px; list-style: none; }
+.student-report-alerts li { display: flex; align-items: baseline; gap: 8px; color: #44524d; font-size: 9.5px; line-height: 1.45; }
+.student-report-alerts li i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #8a9590; }
+.student-report-alerts li.alert-red i { background: #a6544d; }
+.student-report-alerts li.alert-ochre i { background: #c69558; }
+.student-report-alerts li.alert-green i { background: #3f7968; }
+.student-chart { position: relative; padding: 10px 16px 14px; }
+.student-chart-legend { display: flex; justify-content: flex-end; gap: 14px; color: #6f7c77; font-size: 8.5px; }
+.student-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.student-chart-legend i { width: 16px; height: 0; border-top: 2px solid #3f665b; }
+.student-chart-legend i.is-class { border-top: 2px dashed #9aa5a0; }
+.student-chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.student-chart svg text { fill: #86918c; font-size: 9px; }
+.student-chart svg .grid { stroke: #e9eeeb; stroke-width: 1; }
+.student-chart svg .crosshair { stroke: #c9d3ce; stroke-width: 1; }
+.student-chart svg .line-student { fill: none; stroke: #3f665b; stroke-width: 2; stroke-linejoin: round; }
+.student-chart svg .line-class { fill: none; stroke: #9aa5a0; stroke-width: 2; stroke-dasharray: 4 4; }
+.student-chart svg .dot-student { fill: #3f665b; stroke: #fff; stroke-width: 2; }
+.student-chart svg .dot-class { fill: #9aa5a0; stroke: #fff; stroke-width: 2; }
+.student-chart svg .value-label { fill: #2f4a42; font-weight: 700; }
+.student-chart-tooltip { position: absolute; top: 34px; transform: translateX(-50%); padding: 8px 10px; display: grid; gap: 2px; pointer-events: none; color: #33423d; background: #fff; border: 1px solid #dfe6e2; border-radius: 7px; box-shadow: 0 6px 18px rgba(20,40,32,.1); font-size: 8.5px; white-space: nowrap; }
+.student-chart-empty { padding: 22px 16px; color: #86918c; font-size: 9px; }
+.student-area-matrix td small { display: block; margin-top: 2px; color: #8c9792; font-size: 7.5px; font-weight: 400; }
+.student-area-name { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; }
+.student-area-name i { width: 8px; height: 8px; border-radius: 2px; }
+@media (max-width: 1050px) {
+  .students-report-page { grid-template-columns: 1fr; }
+  .students-report-list { position: static; max-height: 420px; }
+}

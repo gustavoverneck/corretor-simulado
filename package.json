@@ -41,7 +41,9 @@
     "test:grade-scale": "node scripts/test-grade-scale.mjs",
     "test:student-result": "node scripts/test-student-result.mjs",
     "test:print-documents": "node scripts/test-print-documents.mjs",
-    "test:scan-archive": "node scripts/test-scan-archive.mjs"
+    "test:scan-archive": "node scripts/test-scan-archive.mjs",
+    "test:tri": "node scripts/test-tri.mjs",
+    "test:student-report": "node scripts/test-student-report.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",

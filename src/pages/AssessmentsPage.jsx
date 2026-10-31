@@ -14,6 +14,7 @@ import { CURRENT_MARKER_LAYOUT } from '../lib/omr'
 import { buildSegesResultRows, calculateAssessmentResult, formatSegesGrade, SEGES_RESULT_STATUS, segesResultsFilename, serializeSegesResultsCsv, indexAssessmentSubmissions } from '../lib/segesResults'
 import { average, cn, downloadBlob, formatDate, initials, uid } from '../lib/utils'
 import { createAnswerKeyPdf, createAttendancePdf, printDocumentFilename } from '../lib/printDocuments'
+import { computeTriScores, isTriEnabled, setTriEnabled, TRI_MIN_SHEETS, triGroupMessage } from '../lib/tri'
 import { assessmentToLatex, createPrintableVersions, createStudentPrintableVersions, emptyQuestion, resizeQuestions } from '../lib/fullAssessment'
 
 const subjectOptions = ['Língua Portuguesa', 'Matemática', 'Ciências da Natureza', 'Ciências Humanas', 'Linguagens']
@@ -186,6 +187,13 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const areaAssessment = getAssessmentForVersion(assessment, areaVersion)
   const questionAreas = getQuestionAreas(areaAssessment)
   const areaSummary = [...questionAreas.reduce((summary, area) => summary.set(area, (summary.get(area) || 0) + 1), new Map()).entries()]
+  const triEnabled = isTriEnabled(assessment)
+  const triStatus = useMemo(() => triEnabled ? computeTriScores(assessment, data.submissions) : null, [assessment, data.submissions, triEnabled])
+
+  function toggleTri(enabled) {
+    setData((current) => ({ ...current, assessments: current.assessments.map((item) => item.id === assessment.id ? setTriEnabled(item, enabled) : item) }))
+    notify(enabled ? 'Nota TRI ativada' : 'Nota TRI desativada', enabled ? 'A nota TRI aparece ao lado da nota atual na aba Alunos e no boletim. As notas e exportações atuais não mudam.' : 'A nota TRI deixou de ser mostrada para este simulado.')
+  }
   const submissionsByStudent = useMemo(
     () => indexAssessmentSubmissions(data.submissions, assessment.id),
     [assessment.id, data.submissions],
@@ -540,6 +548,17 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
             {areaDraft.map((area, index) => <label key={index}><span>Questão {String(index + 1).padStart(2, '0')}</span><div className="assessment-area-choice"><input value={area} onChange={(event) => changeQuestionArea(index, event.target.value)} placeholder="Digite uma área personalizada" /><select value={declaredAreaOptions.includes(area) ? area : ''} onChange={(event) => event.target.value && changeQuestionArea(index, event.target.value)} aria-label={`Escolher área cadastrada para a questão ${index + 1}`}><option value="">Escolher área cadastrada</option>{declaredAreaOptions.map((option) => <option value={option} key={option}>{option}</option>)}</select></div></label>)}
           </div>
           <div className="assessment-area-actions"><Button variant="ghost" size="sm" icon={X} onClick={cancelEditingAreas}>Cancelar</Button><Button size="sm" icon={CheckCircle2} onClick={saveQuestionAreas}>Salvar áreas</Button></div>
+        </div>}
+      </section>
+
+      <section className="assessment-detail-areas assessment-tri">
+        <header>
+          <div><h3>Nota TRI (opcional)</h3><p>Calcula, ao lado da nota atual, uma nota pela Teoria de Resposta ao Item, no modelo do ENEM. Acertar as fáceis e errar as difíceis vale mais que o contrário, o que reduz o peso do chute.</p></div>
+          <label className="tri-toggle"><input type="checkbox" checked={triEnabled} onChange={(event) => toggleTri(event.target.checked)} /><span>{triEnabled ? 'Ativada' : 'Desativada'}</span></label>
+        </header>
+        {triEnabled && <div className="tri-status">
+          <p>Os parâmetros de cada questão são estimados com os alunos deste simulado, separados por área e por versão de gabarito. A escala é a do grupo: <strong>500 é a média de quem fez a prova</strong> e cada 100 pontos equivale a um desvio-padrão. Não é a escala oficial do INEP, então não compare diretamente com notas do ENEM.</p>
+          {triStatus?.groups.length ? <ul>{triStatus.groups.map((group) => <li key={group.id}><Badge tone={group.status === 'ok' ? 'green' : 'ochre'}>{group.status === 'ok' ? 'Calculada' : 'Sem nota'}</Badge><span>{triGroupMessage(group) || `${group.label}: ${group.sheets} folhas, ${group.areas.filter((item) => item.status === 'ok').map((item) => item.area).join(', ')}.`}</span></li>)}</ul> : <p>Ainda não há folhas corrigidas. A TRI precisa de pelo menos {TRI_MIN_SHEETS} folhas com o mesmo gabarito.</p>}
         </div>}
       </section>
 
