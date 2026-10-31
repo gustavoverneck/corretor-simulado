@@ -9,7 +9,8 @@ export function normalCdf(value) {
 }
 
 export function pearsonWithInference(first, second, confidence = 0.95) {
-  const pairs = first.map((value, index) => [Number(value), Number(second[index])]).filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b))
+  const toNumber = (value) => value === null || value === undefined || value === '' ? NaN : Number(value)
+  const pairs = first.map((value, index) => [toNumber(value), toNumber(second[index])]).filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b))
   const n = pairs.length
   if (n < 4) return { r: null, n, p: null, ci: [null, null], significant: false }
   const meanA = pairs.reduce((sum, [a]) => sum + a, 0) / n
@@ -25,6 +26,37 @@ export function pearsonWithInference(first, second, confidence = 0.95) {
   const statistic = Math.abs(r) * Math.sqrt((n - 2) / Math.max(1e-12, 1 - r * r))
   const p = 2 * (1 - normalCdf(statistic))
   return { r, n, p: clamp(p, 0, 1), ci, significant: p < (1 - confidence) }
+}
+
+// Correção de Benjamini-Hochberg para muitos testes ao mesmo tempo: devolve,
+// na mesma ordem, o p ajustado (q). Sem ela, entre centenas de pares de
+// questões, 5% pareceriam significativos só por acaso.
+export function adjustPValues(pValues) {
+  const indexed = pValues.map((p, index) => ({ p, index })).filter(({ p }) => Number.isFinite(p)).sort((a, b) => a.p - b.p)
+  const adjusted = pValues.map(() => null)
+  let running = 1
+  for (let rank = indexed.length; rank >= 1; rank -= 1) {
+    const { p, index } = indexed[rank - 1]
+    running = Math.min(running, p * indexed.length / rank)
+    adjusted[index] = clamp(running, 0, 1)
+  }
+  return adjusted
+}
+
+// Aplica a correção a uma lista de testes ({ p }), marcando q e significant.
+export function withMultipleComparison(tests, confidence = 0.95) {
+  const q = adjustPValues(tests.map((test) => test.p))
+  return tests.map((test, index) => ({ ...test, q: q[index], significant: q[index] !== null && q[index] < 1 - confidence }))
+}
+
+// Acerto 1, erro 0. Branco, leitura incerta e questão cancelada ficam de fora
+// (null): branco não é a mesma coisa que errar, e quem deixa o fim da prova em
+// branco criaria correlações falsas entre as últimas questões.
+function correctness(answer) {
+  const status = answer?.status
+  if (status === 'correct') return answer?.annulled ? null : 1
+  if (status === 'wrong' || status === 'multiple') return 0
+  return null
 }
 
 function answerCode(answer) {
@@ -115,11 +147,13 @@ export function buildQuestionNetwork({ assessment, submissions, classId = 'all',
   const rows = submissions.filter((row) => row.assessmentId === assessment.id && Array.isArray(row.answers) && (classId === 'all' || row.classId === classId))
   const indexes = Array.from({ length: assessment.questionCount }, (_, index) => index).filter((index) => category === 'all' || questionCategory(assessment, index, dimension) === category)
   const nodes = indexes.map((index) => ({ id: `q${index + 1}`, label: `Q${index + 1}`, index, category: questionCategory(assessment, index, dimension), correctRate: rows.length ? rows.filter((row) => row.answers[index]?.status === 'correct').length / rows.length : 0 }))
-  const edges = []
+  const tests = []
   nodes.forEach((first, index) => nodes.slice(index + 1).forEach((second) => {
-    const stats = pearsonWithInference(rows.map((row) => row.answers[first.index]?.status === 'correct' ? 1 : 0), rows.map((row) => row.answers[second.index]?.status === 'correct' ? 1 : 0), confidence)
-    if (stats.r !== null && Math.abs(stats.r) >= threshold) edges.push({ source: first.id, target: second.id, weight: Math.abs(stats.r), correlation: stats.r, ...stats })
+    const stats = pearsonWithInference(rows.map((row) => correctness(row.answers[first.index])), rows.map((row) => correctness(row.answers[second.index])), confidence)
+    if (stats.r !== null) tests.push({ source: first.id, target: second.id, weight: Math.abs(stats.r), correlation: stats.r, ...stats })
   }))
+  // A correção considera todos os pares testados, não só os exibidos.
+  const edges = withMultipleComparison(tests, confidence).filter((edge) => Math.abs(edge.r) >= threshold)
   const communities = labelCommunities(nodes.map((node) => node.id), edges)
   const metrics = graphMetrics(nodes, edges, communities)
   nodes.forEach((node) => { node.community = communities.get(node.id); node.centrality = metrics.centrality.get(node.id) })
@@ -136,12 +170,19 @@ export function buildBipartiteNetwork({ assessment, submissions, students, class
   return { nodes: [...studentNodes, ...questionNodes], edges, studentCount: studentNodes.length, questionCount: questionNodes.length, density: studentNodes.length && questionNodes.length ? edges.length / (studentNodes.length * questionNodes.length) : 0 }
 }
 
-export function buildTemporalAnalysis({ assessments, submissions, students, classId = 'all', threshold = 0.65 }) {
+// Evolução entre simulados respeitando o recorte (área, habilidade etc.): a
+// média e a rede usam só as questões do recorte em cada simulado.
+export function buildTemporalAnalysis({ assessments, submissions, students, classId = 'all', threshold = 0.65, dimension = 'area', category = 'all' }) {
   return assessments.filter((assessment) => submissions.some((row) => row.assessmentId === assessment.id && (classId === 'all' || row.classId === classId))).sort((a, b) => String(a.date).localeCompare(String(b.date))).map((assessment) => {
-    const network = buildStudentNetwork({ assessment, submissions, students, classId, threshold })
+    const network = buildStudentNetwork({ assessment, submissions, students, classId, threshold, dimension, category })
     const rows = submissions.filter((row) => row.assessmentId === assessment.id && (classId === 'all' || row.classId === classId))
-    return { assessmentId: assessment.id, title: assessment.title, date: assessment.date, density: network.density, modularity: network.modularity, communities: network.communityCount, meanScore: rows.length ? rows.reduce((sum, row) => sum + Number(row.score || 0), 0) / rows.length : 0, students: rows.length }
-  })
+    const scores = category === 'all' ? rows.map((row) => Number(row.score || 0)) : rows.filter((row) => Array.isArray(row.answers)).map((row) => {
+      const answers = network.questionIndexes.map((index) => row.answers[index]).filter((answer) => answer && answer.status !== 'cancelled')
+      return answers.length ? answers.filter((answer) => answer.status === 'correct').length / answers.length * 100 : null
+    }).filter(Number.isFinite)
+    if (category !== 'all' && !network.questionIndexes.length) return null
+    return { assessmentId: assessment.id, title: assessment.title, date: assessment.date, density: network.density, modularity: network.modularity, communities: network.communityCount, meanScore: scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : 0, students: scores.length }
+  }).filter(Boolean)
 }
 
 export function summarizeBehavior(submissions) {

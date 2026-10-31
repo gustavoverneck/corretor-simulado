@@ -166,7 +166,7 @@ No desktop, **Configurações → Folhas escaneadas** define uma pasta (por exem
 
 ### Backup automático (desktop)
 
-Em **Configurações → Banco local → Backup automático**, escolha uma pasta (por exemplo, `OneDrive\JCR\2026\Backups Turmas`). O app grava `backup-automatico-AAAA-MM-DD_hh-mm-ss.json` ao abrir, no máximo a cada 5 minutos depois de alterações e ao fechar a janela. Ficam as 20 cópias mais novas e a última de cada dia dos 30 dias mais recentes. O arquivo é o mesmo do backup manual e se restaura em **Restaurar backup**.
+O backup automático já vem ligado, na pasta `Corretor de Simulados\Backups` dentro do OneDrive (ou em Documentos, se não houver OneDrive). Em **Configurações → Banco local → Backup automático** dá para trocar a pasta (por exemplo, `OneDrive\JCR\2026\Backups Turmas`) ou desativar. O app grava `backup-automatico-AAAA-MM-DD_hh-mm-ss.json` ao abrir, no máximo a cada 5 minutos depois de alterações e ao fechar a janela. Ficam as 20 cópias mais novas e a última de cada dia dos 30 dias mais recentes. O arquivo é o mesmo do backup manual e se restaura em **Restaurar backup**.
 
 ### Atualização automática (desktop)
 

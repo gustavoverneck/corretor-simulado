@@ -2,7 +2,9 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 
 // Backup automático do banco numa pasta escolhida pelo professor (por exemplo,
-// dentro do OneDrive). Cada cópia leva data e hora no nome. Ficam as RECENT
+// dentro do OneDrive). Enquanto ele não escolhe nem desativa, vale a pasta
+// padrão (defaultFolder): Corretor de Simulados/Backups no OneDrive ou em
+// Documentos. Cada cópia leva data e hora no nome. Ficam as RECENT
 // cópias mais novas e, além delas, a última de cada dia dos DAYS dias mais
 // recentes, para um dia de muitas correções não apagar os dias anteriores.
 const RECENT = 20
@@ -13,12 +15,25 @@ function configPath(userDataPath) {
   return path.join(userDataPath, 'backup-automatico.json')
 }
 
-async function readFolder(userDataPath) {
+function defaultFolder({ oneDrive = process.env.OneDrive, documents } = {}) {
+  const base = oneDrive || documents
+  return base ? path.join(base, 'Corretor de Simulados', 'Backups') : null
+}
+
+// Sem arquivo de configuração: pasta padrão. Com { folder: null }: desativado
+// pelo professor.
+async function readFolder(userDataPath, { fallback = null } = {}) {
+  let text
   try {
-    const config = JSON.parse(await fs.readFile(configPath(userDataPath), 'utf8'))
+    text = await fs.readFile(configPath(userDataPath), 'utf8')
+  } catch {
+    return fallback
+  }
+  try {
+    const config = JSON.parse(text)
     return typeof config.folder === 'string' && config.folder ? config.folder : null
   } catch {
-    return null
+    return fallback
   }
 }
 
@@ -53,8 +68,8 @@ async function prune(folder) {
 
 // Grava num arquivo temporário e renomeia, para nunca deixar um backup pela
 // metade se o computador desligar no meio.
-async function writeBackup(userDataPath, json, date = new Date()) {
-  const folder = await readFolder(userDataPath)
+async function writeBackup(userDataPath, json, date = new Date(), { fallback = null } = {}) {
+  const folder = await readFolder(userDataPath, { fallback })
   if (!folder) return null
   if (typeof json !== 'string' || !json.startsWith('{')) throw new Error('Backup inválido.')
   await fs.mkdir(folder, { recursive: true })
@@ -67,4 +82,4 @@ async function writeBackup(userDataPath, json, date = new Date()) {
   return { file: name, folder, savedAt: date.toISOString() }
 }
 
-module.exports = { RECENT, DAYS, PREFIX, readFolder, writeFolder, backupName, filesToKeep, writeBackup, prune }
+module.exports = { RECENT, DAYS, PREFIX, defaultFolder, readFolder, writeFolder, backupName, filesToKeep, writeBackup, prune }
