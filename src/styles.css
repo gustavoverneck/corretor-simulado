@@ -1351,6 +1351,20 @@ tr.clickable-row:focus-visible { outline: 3px solid rgba(65, 111, 98, .2); outli
 .tri-status { padding: 13px 15px; display: grid; gap: 10px; color: #64716c; font-size: 9.5px; line-height: 1.5; }
 .tri-status ul { margin: 0; padding: 0; display: grid; gap: 6px; list-style: none; }
 .tri-status li { display: flex; align-items: center; gap: 8px; }
+.tri-status p { margin: 0; }
+.tri-mode { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
+.tri-mode label { display: flex; align-items: flex-start; gap: 8px; padding: 9px 11px; border: 1px solid #dfe5e2; border-radius: 8px; cursor: pointer; }
+.tri-mode label:has(input:checked) { border-color: #4c776b; background: #f3f8f6; }
+.tri-mode input { margin-top: 2px; accent-color: #4c776b; }
+.tri-mode span { display: grid; gap: 2px; }
+.tri-mode strong { color: #26322e; font-size: 10.5px; }
+.tri-enem { display: grid; gap: 8px; padding: 10px 11px; border-radius: 8px; background: #f7f9f8; }
+.tri-enem-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tri-enem li > span:first-child { flex: 0 0 auto; }
+.tri-classes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.tri-classes > span { font-weight: 700; color: #26322e; }
+.tri-classes label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.tri-classes input { accent-color: #4c776b; }
 
 /* Relatório do aluno */
 .students-report-page { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); align-items: start; gap: 16px; }

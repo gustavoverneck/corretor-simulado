@@ -236,7 +236,9 @@ export async function createStudentReportPdf({ reports, classes = [], school, is
   const total = pdf.getNumberOfPages()
   for (let page = 1; page <= total; page += 1) {
     pdf.setPage(page)
-    text(pdf, `Percentuais = acertos sobre questões válidas. Média da turma sem provas anuladas.${showTri ? ' TRI na escala do grupo: 500 = média de quem fez a prova.' : ''}`, margin, PAGE.height - 8, { size: 6.5, color: MUTED })
+    const triScales = new Set(reports.flatMap((report) => report.done).filter((entry) => entry.tri?.score).map((entry) => entry.tri.scale === 'enem' ? 'enem' : 'grupo'))
+    const triNote = !showTri ? '' : triScales.has('enem') && triScales.has('grupo') ? ' TRI: escala do ENEM nos simulados com parâmetros oficiais; nos demais, 500 = média de quem fez a prova.' : triScales.has('enem') ? ' TRI na escala do ENEM (parâmetros oficiais do INEP).' : ' TRI na escala do grupo: 500 = média de quem fez a prova.'
+    text(pdf, `Percentuais = acertos sobre questões válidas. Média da turma sem provas anuladas.${triNote}`, margin, PAGE.height - 8, { size: 6.5, color: MUTED })
     text(pdf, `Página ${page} de ${total}`, PAGE.width - margin, PAGE.height - 8, { size: 7, color: MUTED, align: 'right' })
   }
   return new Blob([pdf.output('arraybuffer')], { type: 'application/pdf' })

@@ -149,6 +149,15 @@ Em **Turmas e alunos → Relatório do aluno** (ou clicando no nome do aluno na 
 
 Em **Simulados → Detalhes**, a seção **Nota TRI** liga o cálculo para aquele simulado; desligada, nada muda. O modelo é o logístico de 3 parâmetros, como no ENEM, com o acerto ao acaso fixo em 1/nº de alternativas. Os parâmetros das questões são estimados com os próprios alunos (máxima verossimilhança marginal), separados por área e por versão de gabarito, e a nota de cada área sai por EAP. A escala é a do grupo: 500 é a média de quem fez a prova e 100 pontos equivalem a um desvio-padrão; a nota geral é a média das áreas. São necessárias pelo menos 30 folhas com o mesmo gabarito e 5 questões válidas por área; abaixo de 100 folhas a nota ainda oscila. A nota TRI aparece no relatório do aluno e no boletim, ao lado da nota atual, sem alterar notas, planilhas ou exportação para o SEGES.
 
+Há dois modos:
+
+- **Estimada com os alunos**: o descrito acima, para simulados com questões próprias.
+- **Parâmetros oficiais do ENEM**: para simulados montados com a prova do ENEM. O botão **Usar ENEM 2025** compara o gabarito de cada versão com os gabaritos oficiais de todos os cadernos (cor, área e, em Linguagens, a língua estrangeira), em blocos de 45 questões, e grava os parâmetros a, b e c do INEP para as versões que batem em pelo menos 90%. A nota sai na escala do ENEM e funciona com qualquer número de alunos. Itens abandonados pelo INEP e questões anuladas ou canceladas no simulado ficam fora. Conferido com 7.741 notas de participantes do ENEM 2025: a diferença máxima foi de 0,31 ponto.
+
+Em ambos os modos, **Turmas com nota TRI** limita o cálculo às turmas marcadas.
+
+Para outro ano do ENEM, use **Importar ITENS_PROVA de outro ano** com o arquivo `DADOS/ITENS_PROVA_<ano>.csv` dos microdados do INEP. Para que o ano venha com o app, gere o arquivo compacto com `npm run build:enem-params -- <ITENS_PROVA.csv> <ano>` (cria `src/data/enem<ano>.json`) e acrescente o ano em `BUNDLED_YEARS` em `src/components/TriSettings.jsx`. Os dados de 2025 usados na validação estão em `data/enem/2025/` e o teste é `npm run test:enem-tri`.
+
 ## Aplicativo desktop e arquivo das folhas
 
 `npm run desktop` gera a versão com caminhos relativos (`build:desktop`) e abre o aplicativo Electron; `npm run make` cria o instalador. Os dados do desktop ficam separados dos do navegador: para levar a base, baixe um backup no navegador e restaure no aplicativo.

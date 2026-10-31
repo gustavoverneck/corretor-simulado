@@ -15,7 +15,8 @@ import { activeSubmissions, isSubmissionVoided } from '../lib/voidedSubmission'
 import { buildSegesResultRows, calculateAssessmentResult, formatSegesGrade, SEGES_RESULT_STATUS, segesResultsFilename, serializeSegesResultsCsv, indexAssessmentSubmissions } from '../lib/segesResults'
 import { average, cn, downloadBlob, formatDate, initials, uid } from '../lib/utils'
 import { createAnswerKeyPdf, createAttendancePdf, printDocumentFilename } from '../lib/printDocuments'
-import { computeTriScores, isTriEnabled, setTriEnabled, TRI_MIN_SHEETS, triGroupMessage } from '../lib/tri'
+import { computeTriScores, isTriEnabled, setTriEnabled } from '../lib/tri'
+import { TriSettings } from '../components/TriSettings'
 import { assessmentToLatex, createPrintableVersions, createStudentPrintableVersions, emptyQuestion, resizeQuestions } from '../lib/fullAssessment'
 
 const subjectOptions = ['Língua Portuguesa', 'Matemática', 'Ciências da Natureza', 'Ciências Humanas', 'Linguagens']
@@ -557,13 +558,10 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
 
       <section className="assessment-detail-areas assessment-tri">
         <header>
-          <div><h3>Nota TRI (opcional)</h3><p>Calcula, ao lado da nota atual, uma nota pela Teoria de Resposta ao Item, no modelo do ENEM. Acertar as fáceis e errar as difíceis vale mais que o contrário, o que reduz o peso do chute.</p></div>
+          <div><h3>Nota TRI (opcional)</h3><p>Calcula, ao lado da nota atual, uma nota pela Teoria de Resposta ao Item, no modelo do ENEM, só nas turmas que você escolher. Acertar as fáceis e errar as difíceis vale mais que o contrário, o que reduz o peso do chute.</p></div>
           <label className="tri-toggle"><input type="checkbox" checked={triEnabled} onChange={(event) => toggleTri(event.target.checked)} /><span>{triEnabled ? 'Ativada' : 'Desativada'}</span></label>
         </header>
-        {triEnabled && <div className="tri-status">
-          <p>Os parâmetros de cada questão são estimados com os alunos deste simulado, separados por área e por versão de gabarito. A escala é a do grupo: <strong>500 é a média de quem fez a prova</strong> e cada 100 pontos equivale a um desvio-padrão. Não é a escala oficial do INEP, então não compare diretamente com notas do ENEM.</p>
-          {triStatus?.groups.length ? <ul>{triStatus.groups.map((group) => <li key={group.id}><Badge tone={group.status === 'ok' ? 'green' : 'ochre'}>{group.status === 'ok' ? 'Calculada' : 'Sem nota'}</Badge><span>{triGroupMessage(group) || `${group.label}: ${group.sheets} folhas, ${group.areas.filter((item) => item.status === 'ok').map((item) => item.area).join(', ')}.`}</span></li>)}</ul> : <p>Ainda não há folhas corrigidas. A TRI precisa de pelo menos {TRI_MIN_SHEETS} folhas com o mesmo gabarito.</p>}
-        </div>}
+        {triEnabled && <TriSettings assessment={assessment} classes={data.classes} setData={setData} notify={notify} triStatus={triStatus} />}
       </section>
 
       <section className="assessment-detail-classes">

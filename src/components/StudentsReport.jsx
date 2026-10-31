@@ -141,13 +141,13 @@ export function StudentsReport({ data, notify, initialClassId = null, initialStu
           <section className="panel"><header className="panel-header"><div><h3>Evolução</h3><p>Aproveitamento do aluno e média da turma em cada simulado, em ordem de aplicação.</p></div></header><EvolutionChart report={report} /></section>
 
           <section className="panel"><header className="panel-header"><div><h3>Por simulado</h3><p>Clique em um simulado corrigido para ver as respostas questão por questão.</p></div></header>
-            <div className="table-wrap"><table><thead><tr><th>SIMULADO</th><th>ACERTOS</th><th>ALUNO</th><th>TURMA</th>{showTri && <th title="Nota TRI na escala do grupo: 500 = média de quem fez a prova">TRI</th>}<th>SITUAÇÃO</th></tr></thead><tbody>
+            <div className="table-wrap"><table><thead><tr><th>SIMULADO</th><th>ACERTOS</th><th>ALUNO</th><th>TURMA</th>{showTri && <th title="Nota TRI: escala do ENEM quando o simulado usa os parâmetros oficiais; senão, 500 = média de quem fez a prova">TRI</th>}<th>SITUAÇÃO</th></tr></thead><tbody>
               {report.entries.map((entry) => { const clickable = entry.submission && entry.status !== 'voided'; return <tr key={entry.assessment.id} className={cn(clickable && 'clickable-row')} onClick={() => clickable && setOpenAssessmentId(entry.assessment.id)}>
                 <td><strong>{entry.assessment.title}</strong><small className="cell-subtitle">{entry.assessment.code}</small></td>
                 <td>{entry.total ? `${entry.correct}/${entry.total}` : '—'}</td>
                 <td className={band(entry.score)}>{entry.score === undefined ? '—' : `${entry.score}%`}</td>
                 <td>{entry.classScore === null ? '—' : `${entry.classScore}%`}</td>
-                {showTri && <td>{entry.tri?.score ?? '—'}</td>}
+                {showTri && <td title={entry.tri?.scale === 'enem' ? 'Escala do ENEM' : entry.tri ? 'Escala do grupo' : undefined}>{entry.tri?.score ?? '—'}</td>}
                 <td><Badge tone={statusTones[entry.status]}>{STATUS_LABELS[entry.status]}</Badge></td>
               </tr> })}
             </tbody></table></div>

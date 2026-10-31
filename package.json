@@ -45,7 +45,9 @@
     "test:tri": "node scripts/test-tri.mjs",
     "test:student-report": "node scripts/test-student-report.mjs",
     "test:auto-backup": "node scripts/test-auto-backup.mjs",
-    "test:voided-submission": "node scripts/test-voided-submission.mjs"
+    "test:voided-submission": "node scripts/test-voided-submission.mjs",
+    "test:enem-tri": "node scripts/test-enem-tri.mjs",
+    "build:enem-params": "node scripts/build-enem-params.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
