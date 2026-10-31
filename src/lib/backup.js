@@ -1,4 +1,4 @@
-import { downloadBlob } from './utils'
+import { downloadBlob } from './utils.js'
 
 export function createBackup(data, exportedAt = new Date()) {
   return { format: 'sistema-avaliacoes-backup', version: 1, exportedAt: exportedAt.toISOString(), data }
