@@ -92,9 +92,10 @@ function registerUpdates() {
 
 function registerAutoBackup() {
   const userData = () => app.getPath('userData')
-  ipcMain.handle('auto-backup:get-folder', () => autoBackup.readFolder(userData()))
+  const options = () => ({ fallback: autoBackup.defaultFolder({ documents: app.getPath('documents') }) })
+  ipcMain.handle('auto-backup:get-folder', () => autoBackup.readFolder(userData(), options()))
   ipcMain.handle('auto-backup:choose-folder', async (event) => {
-    const current = await autoBackup.readFolder(userData())
+    const current = await autoBackup.readFolder(userData(), options())
     const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
       title: 'Pasta do backup automático',
       buttonLabel: 'Usar esta pasta',
@@ -109,9 +110,9 @@ function registerAutoBackup() {
     await autoBackup.writeFolder(userData(), null)
     return null
   })
-  ipcMain.handle('auto-backup:write', (_event, json) => autoBackup.writeBackup(userData(), json))
+  ipcMain.handle('auto-backup:write', (_event, json) => autoBackup.writeBackup(userData(), json, new Date(), options()))
   ipcMain.handle('auto-backup:reveal', async () => {
-    const folder = await autoBackup.readFolder(userData())
+    const folder = await autoBackup.readFolder(userData(), options())
     if (folder) await shell.openPath(folder)
   })
 }

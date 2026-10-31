@@ -2,7 +2,7 @@ import { CANCELLED_ANSWER, getAnswerKeyVersions, getAssessmentForSubmission, get
 import { getQuestionAreas } from './knowledgeAreas.js'
 import { analyzeItems, MIN_RESPONSES, submissionAnswerKey } from './itemAnalysis.js'
 import { calculateSubmissionMetrics } from './resultsMetrics.js'
-import { pearsonWithInference } from './networkAnalysis.js'
+import { pearsonWithInference, withMultipleComparison } from './networkAnalysis.js'
 
 // Leituras pedagógicas da aba Análise: análise de itens (teoria clássica dos testes),
 // correlação entre áreas e frases-resumo para o professor.
@@ -180,11 +180,12 @@ export function buildAreaReport({ assessment, submissions, students = [], classe
     const values = rows.map((row) => row.areas[area]).filter((value) => value !== null && value !== undefined)
     return { area, n: values.length, mean: mean(values), sd: deviation(values) }
   })
-  const pairs = []
+  const tests = []
   areaOrder.forEach((first, index) => areaOrder.slice(index + 1).forEach((second) => {
     const both = rows.filter((row) => Number.isFinite(row.areas[first]) && Number.isFinite(row.areas[second]))
-    pairs.push({ first, second, ...pearsonWithInference(both.map((row) => row.areas[first]), both.map((row) => row.areas[second])) })
+    tests.push({ first, second, ...pearsonWithInference(both.map((row) => row.areas[first]), both.map((row) => row.areas[second])) })
   }))
+  const pairs = withMultipleComparison(tests)
   const classIds = [...new Set(rows.map((row) => row.classId))]
   const byClass = classIds.map((classId) => {
     const classRows = rows.filter((row) => row.classId === classId)

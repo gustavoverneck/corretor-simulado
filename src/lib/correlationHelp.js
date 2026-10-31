@@ -49,7 +49,7 @@ export const CORRELATION_HELP = {
     title: 'Correlação entre áreas',
     text: 'Mostra se as notas de duas áreas andam juntas (r de Pearson, de −1 a 1). Perto de 1: quem vai bem numa tende a ir bem na outra. Perto de 0: são dificuldades independentes e pedem trabalho separado. Negativa (em vermelho): quem vai bem numa tende a ir mal na outra.',
     ranges: [['green', '0,50 ou mais', 'Forte'], ['green', '0,30 a 0,49', 'Moderada'], ['neutral', '0,10 a 0,29', 'Fraca'], ['neutral', 'abaixo de 0,10', 'Desprezível']],
-    note: '"Incerta" quer dizer que, com esse número de alunos, a relação pode ser acaso (p de 0,05 ou mais). Passe o mouse sobre a célula para ver r, número de alunos e p.',
+    note: '"Incerta" quer dizer que, com esse número de alunos, a relação pode ser acaso. Como a tabela compara vários pares de áreas ao mesmo tempo, o p é ajustado (Benjamini-Hochberg) antes de comparar com 0,05. Passe o mouse sobre a célula para ver r, número de alunos e o p ajustado.',
   },
   areaAlpha: {
     title: 'Alfa da área',
