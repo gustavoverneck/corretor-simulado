@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const path = require('node:path')
 const scanArchive = require('./scanArchive.cjs')
+const autoBackup = require('./autoBackup.cjs')
 
 if (require('electron-squirrel-startup')) app.quit()
 
@@ -29,6 +30,17 @@ function createWindow() {
     if (navigationUrl !== mainWindow.webContents.getURL()) event.preventDefault()
   })
   mainWindow.once('ready-to-show', () => mainWindow.show())
+  // Dá ao app até 5 s para gravar o backup automático antes de fechar.
+  let closing = false
+  mainWindow.on('close', (event) => {
+    if (closing) return
+    event.preventDefault()
+    closing = true
+    const finish = () => { if (!mainWindow.isDestroyed()) mainWindow.destroy() }
+    ipcMain.once('app:close-ready', finish)
+    setTimeout(finish, 5000)
+    mainWindow.webContents.send('app:before-close')
+  })
   mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
 }
 
@@ -62,10 +74,37 @@ function registerScanArchive() {
   })
 }
 
+function registerAutoBackup() {
+  const userData = () => app.getPath('userData')
+  ipcMain.handle('auto-backup:get-folder', () => autoBackup.readFolder(userData()))
+  ipcMain.handle('auto-backup:choose-folder', async (event) => {
+    const current = await autoBackup.readFolder(userData())
+    const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+      title: 'Pasta do backup automático',
+      buttonLabel: 'Usar esta pasta',
+      defaultPath: current || app.getPath('documents'),
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (result.canceled || !result.filePaths[0]) return current
+    await autoBackup.writeFolder(userData(), result.filePaths[0])
+    return result.filePaths[0]
+  })
+  ipcMain.handle('auto-backup:clear-folder', async () => {
+    await autoBackup.writeFolder(userData(), null)
+    return null
+  })
+  ipcMain.handle('auto-backup:write', (_event, json) => autoBackup.writeBackup(userData(), json))
+  ipcMain.handle('auto-backup:reveal', async () => {
+    const folder = await autoBackup.readFolder(userData())
+    if (folder) await shell.openPath(folder)
+  })
+}
+
 app.setName(appName)
 
 app.whenReady().then(() => {
   registerScanArchive()
+  registerAutoBackup()
   createWindow()
 
   app.on('activate', () => {

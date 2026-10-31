@@ -19,6 +19,7 @@ import { getQuestionAreas } from './lib/knowledgeAreas'
 import { getPendingReviewSubmissions } from './lib/assessment'
 import { backupReminder, getStorageStatus, isQuotaError, loadStoredState, readBackupMeta, recordBackup, requestPersistentStorage, saveStoredState, snoozeBackupReminder } from './lib/storage'
 import { downloadBackup } from './lib/backup'
+import { createAutoBackupScheduler, getAutoBackupFolder, writeAutoBackup } from './lib/autoBackup'
 
 const SAVE_DELAY_MS = 400
 
@@ -79,6 +80,10 @@ function Workspace({ initialData, backend }) {
   const [saveError, setSaveError] = useState(null)
   const [backupMeta, setBackupMeta] = useState(readBackupMeta)
   const [storageStatus, setStorageStatus] = useState(null)
+  const [autoBackupFolder, setAutoBackupFolder] = useState(null)
+  const [autoBackupStatus, setAutoBackupStatus] = useState({ savedAt: null, file: null, error: null })
+  const autoBackupScheduler = useRef(null)
+  const latestData = useRef(initialData)
   const [page, setPage] = useState(() => {
     const requested = new URLSearchParams(window.location.search).get('page')
     return titles[requested] ? requested : 'dashboard'
@@ -123,6 +128,30 @@ function Workspace({ initialData, backend }) {
     return () => { document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('pagehide', flush) }
   }, [persist])
 
+  // Backup automático (só no desktop, com pasta escolhida em Configurações).
+  useEffect(() => { getAutoBackupFolder().then(setAutoBackupFolder).catch(() => {}) }, [])
+  useEffect(() => {
+    if (!autoBackupFolder) { autoBackupScheduler.current?.cancel(); autoBackupScheduler.current = null; return undefined }
+    const scheduler = createAutoBackupScheduler({
+      write: (snapshot) => writeAutoBackup(snapshot),
+      onSaved: (result) => { setAutoBackupStatus({ savedAt: result.savedAt, file: result.file, error: null }); setBackupMeta(recordBackup(new Date(result.savedAt))) },
+      onError: (error) => setAutoBackupStatus((current) => ({ ...current, error: error.message })),
+    })
+    autoBackupScheduler.current = scheduler
+    scheduler.changed(latestData.current)
+    return () => { scheduler.flush(); scheduler.cancel() }
+  }, [autoBackupFolder])
+  useEffect(() => {
+    if (latestData.current === data) return
+    latestData.current = data
+    autoBackupScheduler.current?.changed(data)
+  }, [data])
+  useEffect(() => window.desktopWindow?.onBeforeClose(async () => {
+    const snapshot = pendingSave.current
+    pendingSave.current = null
+    await Promise.all([snapshot ? persist(snapshot) : null, autoBackupScheduler.current?.flush()])
+  }), [persist])
+
   useEffect(() => {
     if (!toast || toast.tone === 'loading') return undefined
     const timer = window.setTimeout(() => setToast(null), 4200)
@@ -148,9 +177,10 @@ function Workspace({ initialData, backend }) {
       setToast({ title: 'Backup criado', message: 'Guarde o arquivo em uma pasta segura ou unidade externa.', tone: 'success' })
     },
     backupMeta,
+    autoBackup: { folder: autoBackupFolder, setFolder: setAutoBackupFolder, ...autoBackupStatus },
     storageStatus,
     storageBackend: backend,
-  }), [data, backupMeta, storageStatus, backend])
+  }), [data, backupMeta, storageStatus, backend, autoBackupFolder, autoBackupStatus])
 
   const reminder = backupReminder(data, backupMeta)
 

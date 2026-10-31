@@ -1411,3 +1411,4 @@ td.is-advanced strong, td.is-advanced { color: #2f6a59; }
 .student-report-link:hover { color: #3f665b; text-decoration: underline; }
 .class-open-actions { display: flex; gap: 14px; }
 .class-open-actions .class-open:first-child { width: auto; justify-content: flex-start; }
+.auto-backup-folder { margin-bottom: 14px; }

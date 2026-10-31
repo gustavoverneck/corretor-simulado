@@ -154,3 +154,7 @@ Em **Simulados → Detalhes**, a seção **Nota TRI** liga o cálculo para aquel
 `npm run desktop` gera a versão com caminhos relativos (`build:desktop`) e abre o aplicativo Electron; `npm run make` cria o instalador. Os dados do desktop ficam separados dos do navegador: para levar a base, baixe um backup no navegador e restaure no aplicativo.
 
 No desktop, **Configurações → Folhas escaneadas** define uma pasta (por exemplo, no OneDrive). Ao salvar correções, o app copia o PDF ou a imagem para `<pasta>/<código do simulado>/<data>_<nome>_<hash>.<ext>` e guarda em cada correção o arquivo e a página. Um mesmo arquivo enviado de novo não é duplicado. O botão **Folha original** (detalhes da correção, fila de revisões e tela do aluno) mostra a página exata e permite abrir o arquivo ou mostrá-lo na pasta. O processo principal só lê e grava dentro da pasta escolhida.
+
+### Backup automático (desktop)
+
+Em **Configurações → Banco local → Backup automático**, escolha uma pasta (por exemplo, `OneDrive\JCR\2026\Backups Turmas`). O app grava `backup-automatico-AAAA-MM-DD_hh-mm-ss.json` ao abrir, no máximo a cada 5 minutos depois de alterações e ao fechar a janela. Ficam as 20 cópias mais novas e a última de cada dia dos 30 dias mais recentes. O arquivo é o mesmo do backup manual e se restaura em **Restaurar backup**.
