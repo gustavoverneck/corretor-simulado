@@ -1,0 +1,55 @@
+name: Publicar app desktop
+
+# A cada merge na main, gera o instalador do Windows e publica uma Release no
+# GitHub. Os apps instalados procuram essas Releases (update.electronjs.org) e
+# se atualizam sozinhos.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v7
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Definir versão
+        id: version
+        shell: bash
+        run: |
+          VERSION="0.2.${{ github.run_number }}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Gerar instalador
+        run: npm run make
+
+      - name: Publicar Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          NOTES=$(git log -1 --pretty=%B)
+          gh release create "v$VERSION" out/make/squirrel.windows/x64/* \
+            --title "Corretor de Simulados $VERSION" \
+            --notes "$NOTES" \
+            --target "${{ github.sha }}"

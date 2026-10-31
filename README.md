@@ -158,3 +158,7 @@ No desktop, **Configurações → Folhas escaneadas** define uma pasta (por exem
 ### Backup automático (desktop)
 
 Em **Configurações → Banco local → Backup automático**, escolha uma pasta (por exemplo, `OneDrive\JCR\2026\Backups Turmas`). O app grava `backup-automatico-AAAA-MM-DD_hh-mm-ss.json` ao abrir, no máximo a cada 5 minutos depois de alterações e ao fechar a janela. Ficam as 20 cópias mais novas e a última de cada dia dos 30 dias mais recentes. O arquivo é o mesmo do backup manual e se restaura em **Restaurar backup**.
+
+### Atualização automática (desktop)
+
+A cada merge na `main`, o workflow **Publicar app desktop** gera o instalador do Windows (`npm run make`) e publica uma Release `v0.2.<n>` com os arquivos do Squirrel. O app instalado pelo `Setup.exe` procura versões novas em update.electronjs.org (que lê essas Releases) ao abrir e a cada 4 horas, baixa em segundo plano e pergunta se pode reiniciar; antes de reiniciar, grava o banco e o backup automático. Os dados ficam em `%APPDATA%\Corretor de Simulados` e não são afetados. Sem certificado de assinatura, o Windows pode mostrar o aviso do SmartScreen na primeira instalação. No modo de teste (`npm run desktop`) a atualização fica desligada.

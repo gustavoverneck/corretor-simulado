@@ -26,3 +26,13 @@ contextBridge.exposeInMainWorld('desktopWindow', {
     return () => ipcRenderer.removeListener('app:before-close', listener)
   },
 })
+
+contextBridge.exposeInMainWorld('desktopUpdates', {
+  getState: () => ipcRenderer.invoke('updates:state'),
+  check: () => ipcRenderer.invoke('updates:check'),
+  onState: (callback) => {
+    const listener = (_event, state) => callback(state)
+    ipcRenderer.on('updates:state', listener)
+    return () => ipcRenderer.removeListener('updates:state', listener)
+  },
+})

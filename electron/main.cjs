@@ -2,10 +2,26 @@ const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const path = require('node:path')
 const scanArchive = require('./scanArchive.cjs')
 const autoBackup = require('./autoBackup.cjs')
+const updater = require('./updater.cjs')
 
 if (require('electron-squirrel-startup')) app.quit()
 
 const appName = 'Corretor de Simulados'
+
+// Dá ao app até 5 s para gravar o banco e o backup automático antes de fechar
+// a janela (ou de instalar uma atualização).
+function flushWindow(window) {
+  if (window.isDestroyed() || window.flushed) return Promise.resolve()
+  if (window.flushing) return window.flushing
+  window.flushing = new Promise((resolve) => {
+    const done = () => { window.flushed = true; resolve() }
+    const listener = (event) => { if (event.sender === window.webContents) { ipcMain.removeListener('app:close-ready', listener); done() } }
+    ipcMain.on('app:close-ready', listener)
+    setTimeout(() => { ipcMain.removeListener('app:close-ready', listener); done() }, 5000)
+    window.webContents.send('app:before-close')
+  })
+  return window.flushing
+}
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -30,16 +46,10 @@ function createWindow() {
     if (navigationUrl !== mainWindow.webContents.getURL()) event.preventDefault()
   })
   mainWindow.once('ready-to-show', () => mainWindow.show())
-  // Dá ao app até 5 s para gravar o backup automático antes de fechar.
-  let closing = false
   mainWindow.on('close', (event) => {
-    if (closing) return
+    if (mainWindow.flushed) return
     event.preventDefault()
-    closing = true
-    const finish = () => { if (!mainWindow.isDestroyed()) mainWindow.destroy() }
-    ipcMain.once('app:close-ready', finish)
-    setTimeout(finish, 5000)
-    mainWindow.webContents.send('app:before-close')
+    flushWindow(mainWindow).then(() => { if (!mainWindow.isDestroyed()) mainWindow.destroy() })
   })
   mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
 }
@@ -74,6 +84,12 @@ function registerScanArchive() {
   })
 }
 
+function registerUpdates() {
+  ipcMain.handle('updates:state', () => updater.getState())
+  ipcMain.handle('updates:check', () => { updater.check(); return updater.getState() })
+  updater.start({ beforeInstall: () => Promise.all(BrowserWindow.getAllWindows().map(flushWindow)) })
+}
+
 function registerAutoBackup() {
   const userData = () => app.getPath('userData')
   ipcMain.handle('auto-backup:get-folder', () => autoBackup.readFolder(userData()))
@@ -105,6 +121,7 @@ app.setName(appName)
 app.whenReady().then(() => {
   registerScanArchive()
   registerAutoBackup()
+  registerUpdates()
   createWindow()
 
   app.on('activate', () => {
