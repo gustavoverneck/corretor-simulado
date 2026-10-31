@@ -489,7 +489,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
     if (!selected || !voidDraft?.reason || (voidDraft.reason === 'Outro' && !voidDraft.note.trim())) return
     setData((current) => ({ ...current, submissions: voidSubmission(current.submissions, selected, voidDraft) }))
     setVoidDraft(null)
-    notify('Prova anulada', `${selectedStudent?.name || 'Aluno removido'}: a nota fica fora das médias e das exportações. Você pode desfazer a qualquer momento.`)
+    notify('Prova anulada', `${selectedStudent?.name || 'Aluno removido'}: nota zero nas exportações e fora das análises. Você pode desfazer a qualquer momento.`)
   }
 
   function undoVoid() {
@@ -526,7 +526,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
 
       <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selectedStudent ? `Respostas de ${selectedStudent.name}` : 'Detalhes da correção'} subtitle={`${selectedClass?.name || 'Turma não encontrada'} · ${selectedAssessment?.title || ''}`} size="xl" footer={<><Button variant="danger" icon={Trash2} onClick={() => setDeleteId(selected.id)}>Excluir resposta</Button>{selected && (isSubmissionVoided(selected) ? <Button variant="secondary" icon={Undo2} onClick={undoVoid}>Desfazer anulação</Button> : <Button variant="secondary" icon={Ban} onClick={() => setVoidDraft({ reason: VOID_REASONS[0], note: '' })}>Anular prova</Button>)}<Button onClick={() => setSelectedId(null)}>Fechar</Button></>}>
         {selected && <div className="response-detail-view">
-          {isSubmissionVoided(selected) && <div className="voided-exam-banner" role="status"><span><Ban size={18} /></span><div><strong>Prova anulada · {describeVoid(selected.voided)}</strong><p>{selected.voided.at ? `Anulada em ${formatDateTime(selected.voided.at)}. ` : ''}A folha continua registrada, mas não recebe nota, não entra nas médias e não vai para o SEGES.</p></div><Button size="sm" variant="secondary" icon={Undo2} onClick={undoVoid}>Desfazer</Button></div>}
+          {isSubmissionVoided(selected) && <div className="voided-exam-banner" role="status"><span><Ban size={18} /></span><div><strong>Prova anulada · {describeVoid(selected.voided)}</strong><p>{selected.voided.at ? `Anulada em ${formatDateTime(selected.voided.at)}. ` : ''}A folha continua registrada, a nota vai como zero na planilha e no SEGES e a prova fica fora dos gráficos e das análises.</p></div><Button size="sm" variant="secondary" icon={Undo2} onClick={undoVoid}>Desfazer</Button></div>}
           <div className="response-detail-identification">
             <article><small>ALUNO</small><strong>{selectedStudent?.name || 'Aluno removido'}</strong><p>{selectedStudent ? `Matrícula ${selectedStudent.registration}` : 'Cadastro não encontrado'}</p></article>
             <article><small>TURMA / GABARITO</small><strong>{selectedClass?.name || 'Turma removida'}</strong><p>{selected.answerKeyVersionLabel || (hasCustomAnswerKey(selectedAssessment, selectedClass?.id) ? 'Versão específica' : 'Gabarito padrão')}</p></article>
@@ -546,7 +546,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
 
       <Modal open={Boolean(selected && voidDraft)} onClose={() => setVoidDraft(null)} title="Anular prova?" subtitle={`${selectedStudent?.name || 'Aluno removido'} · ${selectedAssessment?.title || ''}`} footer={<><Button variant="ghost" onClick={() => setVoidDraft(null)}>Cancelar</Button><Button variant="danger" icon={Ban} disabled={!voidDraft?.reason || (voidDraft?.reason === 'Outro' && !voidDraft?.note.trim())} onClick={confirmVoid}>Anular prova</Button></>}>
         {voidDraft && <div className="void-exam-form">
-          <p>As respostas continuam guardadas. A prova aparece como <b>Anulada</b> em Resultados, na planilha de notas e no arquivo do SEGES (sem nota), e fica fora das médias e das análises. Dá para desfazer depois.</p>
+          <p>As respostas continuam guardadas. A prova recebe <b>nota zero</b> na planilha de notas e no arquivo do SEGES, aparece como <b>Anulada</b> em Resultados e fica fora dos gráficos e das análises. Dá para desfazer depois.</p>
           <div className="void-exam-reasons" role="radiogroup" aria-label="Motivo da anulação">{VOID_REASONS.map((reason) => <button type="button" role="radio" aria-checked={voidDraft.reason === reason} key={reason} className={voidDraft.reason === reason ? 'active' : ''} onClick={() => setVoidDraft((current) => ({ ...current, reason }))}>{reason}</button>)}</div>
           <Field label={voidDraft.reason === 'Outro' ? 'Descreva o motivo' : 'Observação (opcional)'} required={voidDraft.reason === 'Outro'}><textarea rows={3} value={voidDraft.note} onChange={(event) => setVoidDraft((current) => ({ ...current, note: event.target.value }))} placeholder="Ex.: flagrado com anotações durante a prova" /></Field>
         </div>}

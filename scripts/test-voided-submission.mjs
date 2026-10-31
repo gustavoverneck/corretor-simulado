@@ -40,15 +40,16 @@ assert.equal(submissions[0].voided, undefined, 'não altera o array original')
 assert.deepEqual(getPendingReviewSubmissions(submissions, [assessment]).map((item) => item.id), ['new'])
 assert.deepEqual(getPendingReviewSubmissions(voided, [assessment]), [])
 
-// SEGES: mesmo cabeçalho, status ANULADA, sem acertos e sem nota.
+// SEGES: mesmo cabeçalho; anulada vai pronta com zero acertos e nota zero (mesmo se estava em revisão).
 const segesRows = buildSegesResultRows({ assessment, classes, students, submissions: voided, classIds: ['c1'] })
-assert.equal(segesRows[0].status, SEGES_RESULT_STATUS.voided)
-assert.equal(segesRows[0].exportable, false)
-assert.equal(segesRows[0].metrics, null)
+assert.equal(segesRows[0].status, SEGES_RESULT_STATUS.ready)
+assert.equal(segesRows[0].voided, true)
+assert.equal(segesRows[0].exportable, true)
+assert.equal(segesRows[0].metrics.grade, 0)
 assert.equal(segesRows[1].status, SEGES_RESULT_STATUS.ready)
 const csv = serializeSegesResultsCsv(segesRows, { assessment, exportId: 'x', maxGrade: 10 }).split('\n')
 assert.equal(csv[0], '"versao";"exportacao_id";"simulado_id";"simulado_codigo";"simulado_nome";"tipo_recorte";"recorte";"turma";"aluno";"matricula";"acertos";"questoes_validas";"nota";"nota_maxima";"status"')
-assert.equal(csv[1], '"1";"x";"a";"SIM";"Simulado";"GERAL";"Nota geral";"1ª A";"Ana";"1";"";"";"";"10,0";"ANULADA"')
+assert.equal(csv[1], '"1";"x";"a";"SIM";"Simulado";"GERAL";"Nota geral";"1ª A";"Ana";"1";"0";"2";"0,0";"10,0";"PRONTO"')
 assert.match(csv[2], /"5,0";"10,0";"PRONTO"$/)
 
 // Desfazer devolve a nota e guarda o histórico.
@@ -73,13 +74,13 @@ assert.deepEqual(normalizeSubmissionVoid({ id: 'x', voided: { reason: 'Cola' } }
 const rows = voided.map((row) => ({ ...row, ...calculateSubmissionMetrics(row, assessment), assessment, student: students.find((item) => item.id === row.studentId), classroom: classes[0] }))
 const list = buildGradeList({ assessments: [assessment], rows: rows.filter((row) => !row.voided), voidedRows: rows.filter((row) => row.voided), selectedAreas: ['Matemática', 'Linguagens'] })
 const block = list.classes[0].assessments[0]
-assert.deepEqual(block.students.map((student) => [student.name, student.voided || null, student.score]), [['Ana', 'Cola: bilhete na carteira', null], ['Bruno', null, 50]])
-assert.equal(block.average, 50)
-assert.deepEqual(block.areaAverages, [100, 0])
+assert.deepEqual(block.students.map((student) => [student.name, student.voided || null, student.score, student.grade]), [['Ana', 'Cola: bilhete na carteira', 0, 0], ['Bruno', null, 50, 5]])
+assert.equal(block.average, 25, 'nota zero entra na média da planilha')
+assert.deepEqual(block.areaAverages, [100, 0], 'sem respostas por área para a anulada')
 const file = generateGradeListWorkbook(list)
 const zip = unzipSync(new Uint8Array(await file.blob.arrayBuffer()))
 const sheet = strFromU8(zip['xl/worksheets/sheet1.xml'])
 const shared = strFromU8(zip['xl/sharedStrings.xml'] || new Uint8Array())
-assert.ok(`${sheet}${shared}`.includes('Anulada'), 'célula marcada como Anulada')
+assert.ok(`${sheet}${shared}`.includes('Ana †'), 'aluno marcado com †')
 
 console.log('voided submission tests passed')

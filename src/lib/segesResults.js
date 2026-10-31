@@ -8,8 +8,6 @@ export const SEGES_RESULT_STATUS = {
   review: 'REVISAR',
   missing: 'SEM_CORRECAO',
   unavailable: 'SEM_DADOS_DO_RECORTE',
-  // Prova anulada: a linha sai sem acertos e sem nota, para o lançamento ficar a cargo do professor.
-  voided: 'ANULADA',
 }
 
 function submissionDate(submission) {
@@ -79,12 +77,13 @@ export function buildSegesResultRows({ assessment, classes, students, submission
     ))
     .map((student) => {
       const submission = submissionsByStudent.get(student.id)
+      // Prova anulada vai como nota zero e pronta, para a extensão lançar no SEGES.
       const voided = isSubmissionVoided(submission)
-      const metrics = voided ? null : calculateAssessmentResult(submission, assessment, scope, maxGrade, rounding)
+      const result = calculateAssessmentResult(submission, assessment, scope, maxGrade, rounding)
+      const metrics = voided && result ? { ...result, correct: 0, percentage: 0, grade: 0 } : result
       let status = SEGES_RESULT_STATUS.ready
       if (!submission) status = SEGES_RESULT_STATUS.missing
-      else if (voided) status = SEGES_RESULT_STATUS.voided
-      else if (submission.status === 'Revisar') status = SEGES_RESULT_STATUS.review
+      else if (submission.status === 'Revisar' && !voided) status = SEGES_RESULT_STATUS.review
       else if (!metrics) status = SEGES_RESULT_STATUS.unavailable
 
       return {
@@ -93,6 +92,7 @@ export function buildSegesResultRows({ assessment, classes, students, submission
         submission,
         metrics,
         status,
+        voided,
         exportable: status === SEGES_RESULT_STATUS.ready,
       }
     })

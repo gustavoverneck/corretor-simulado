@@ -222,9 +222,10 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
     const allowedVersions = getAnswerKeyVersionsForClass(assessment, student.classId)
     const submission = submissionsByStudent.get(student.id)
     const voided = isSubmissionVoided(submission)
-    const result = voided ? null : calculateAssessmentResult(submission, assessment, 'all', 10)
+    const computed = calculateAssessmentResult(submission, assessment, 'all', 10)
+    const result = voided && computed ? { ...computed, correct: 0, percentage: 0, grade: 0 } : computed
     const resultTone = voided ? 'red' : !submission || (closed && submission.status === 'Revisar') ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'
-    const resultLabel = voided ? 'Anulada' : !submission ? closed ? 'Não participou' : 'Sem correção' : submission.status === 'Revisar' ? closed ? 'Encerrado com ressalva' : 'Revisar' : 'Corrigido'
+    const resultLabel = voided ? 'Anulada (nota 0)' : !submission ? closed ? 'Não participou' : 'Sem correção' : submission.status === 'Revisar' ? closed ? 'Encerrado com ressalva' : 'Revisar' : 'Corrigido'
     return {
       student,
       classroom,
@@ -681,12 +682,12 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
             <div><small>PARA REVISAR</small><strong>{exportSummary[SEGES_RESULT_STATUS.review] || 0}</strong></div>
             <div><small>SEM CORREÇÃO</small><strong>{exportSummary[SEGES_RESULT_STATUS.missing] || 0}</strong></div>
             <div><small>SEM DADOS DO RECORTE</small><strong>{exportSummary[SEGES_RESULT_STATUS.unavailable] || 0}</strong></div>
-            {exportSummary[SEGES_RESULT_STATUS.voided] > 0 && <div><small>ANULADAS</small><strong>{exportSummary[SEGES_RESULT_STATUS.voided]}</strong></div>}
+            {exportRows.some((row) => row.voided) && <div><small>ANULADAS (NOTA 0)</small><strong>{exportRows.filter((row) => row.voided).length}</strong></div>}
           </div>
           {(exportRows.length > (exportSummary[SEGES_RESULT_STATUS.ready] || 0)) && <div className="seges-results-export-warning"><AlertTriangle size={17} /><p><strong>Somente notas prontas recebem valor no arquivo.</strong><span>Pendências permanecem listadas com o respectivo status, mas a coluna de nota fica vazia para impedir lançamento indevido.</span></p></div>}
           <div className="seges-results-export-preview">
             <div><strong>Prévia</strong><span>{exportRows.length} aluno{exportRows.length !== 1 ? 's' : ''} nas turmas selecionadas</span></div>
-            <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>ACERTOS</th><th>NOTA</th><th>STATUS</th></tr></thead><tbody>{exportRows.slice(0, 8).map((row) => <tr key={row.student.id}><td><strong>{row.student.name}</strong></td><td>{row.classroom?.name || '—'}</td><td>{row.metrics ? `${row.metrics.correct}/${row.metrics.valid}` : '—'}</td><td>{row.exportable ? formatSegesGrade(row.metrics.grade) : '—'}</td><td><Badge tone={row.exportable ? 'green' : row.status === SEGES_RESULT_STATUS.review ? 'ochre' : row.status === SEGES_RESULT_STATUS.voided ? 'red' : 'neutral'}>{row.status.replaceAll('_', ' ')}</Badge></td></tr>)}</tbody></table></div>
+            <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>ACERTOS</th><th>NOTA</th><th>STATUS</th></tr></thead><tbody>{exportRows.slice(0, 8).map((row) => <tr key={row.student.id}><td><strong>{row.student.name}</strong></td><td>{row.classroom?.name || '—'}</td><td>{row.metrics ? `${row.metrics.correct}/${row.metrics.valid}` : '—'}</td><td>{row.exportable ? formatSegesGrade(row.metrics.grade) : '—'}</td><td><Badge tone={row.voided ? 'red' : row.exportable ? 'green' : row.status === SEGES_RESULT_STATUS.review ? 'ochre' : 'neutral'}>{row.voided ? 'ANULADA' : row.status.replaceAll('_', ' ')}</Badge></td></tr>)}</tbody></table></div>
             {exportRows.length > 8 && <small>Exibindo os 8 primeiros registros. O arquivo incluirá todos os {exportRows.length} alunos selecionados.</small>}
           </div>
         </div>
