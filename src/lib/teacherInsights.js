@@ -94,7 +94,9 @@ function diagnose(item, small) {
   return { tone: 'neutral', label: 'Adequada', hint: '' }
 }
 
-export function buildItemReport({ assessment, answerKey, submissions, optionCount = 5 }) {
+// questionNumbers: numeração exibida (por exemplo, a do caderno de referência
+// quando as versões do ENEM são juntadas).
+export function buildItemReport({ assessment, answerKey, submissions, optionCount = 5, questionNumbers = null }) {
   const sheets = submissions.filter((submission) => Array.isArray(submission.answers))
   const letters = Array.from({ length: optionCount }, (_, index) => String.fromCharCode(65 + index))
   const areas = getQuestionAreas(assessment)
@@ -129,7 +131,7 @@ export function buildItemReport({ assessment, answerKey, submissions, optionCoun
     const dIndex = cancelled || n < 4 ? null : share(top) - share(bottom)
     const distractor = cancelled ? null : letters.filter((letter) => letter !== key).sort((a, b) => counts[b] - counts[a])[0]
     const item = {
-      index, number: index + 1, area: areas[index], key, cancelled, attempts: n, correctRate, blankRate: n ? blank / n : 0, multipleRate: n ? multiple / n : 0,
+      index, number: questionNumbers?.[index] ?? index + 1, area: areas[index], key, cancelled, attempts: n, correctRate, blankRate: n ? blank / n : 0, multipleRate: n ? multiple / n : 0,
       distribution, discrimination, dIndex, topDistractor: distractor && counts[distractor] ? { letter: distractor, share: distribution[distractor] } : null,
       flag: flags[index]?.flag === 'key' ? 'key' : null, suggested: flags[index]?.suggested || null,
     }

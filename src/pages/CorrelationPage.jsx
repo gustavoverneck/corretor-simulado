@@ -5,6 +5,7 @@ import { Badge, Button, EmptyState } from '../components/ui'
 import { downloadBlob, formatDate, initials } from '../lib/utils'
 import { buildBipartiteNetwork, buildQuestionNetwork, buildStudentNetwork, buildTemporalAnalysis, questionCategory, summarizeBehavior } from '../lib/networkAnalysis'
 import { answerKeyGroups, buildAreaReport, buildItemReport, buildTeacherInsights, correlationStrength, pairFor, reliabilityLabel, studentsNeedingAttention } from '../lib/teacherInsights'
+import { enemItemGroup, enemItemsReady } from '../lib/tri'
 import { buildCorrelationWorkbook } from '../lib/correlationReport'
 import { CORRELATION_HELP, CORRELATION_HELP_ORDER } from '../lib/correlationHelp'
 import { buildSimilarityReport, compareSubmissions, HIGH_AGREEMENT } from '../lib/similarity'
@@ -189,10 +190,17 @@ export function CorrelationPage({ data, notify }) {
   const [assessmentId, setAssessmentId] = useState(assessments[0]?.id || ''); const [classId, setClassId] = useState('all'); const [versionId, setVersionId] = useState('all'); const [dimension, setDimension] = useState('area'); const [category, setCategory] = useState('all'); const [threshold, setThreshold] = useState(.65); const [confidence, setConfidence] = useState(.95); const [view, setView] = useState('overview'); const [advanced, setAdvanced] = useState(false)
   const assessment = assessments.find((item) => item.id === assessmentId) || assessments[0]
   const classSubmissions = useMemo(() => scoredSubmissions.filter((row) => row.assessmentId === assessment?.id && Array.isArray(row.answers) && (classId === 'all' || row.classId === classId)), [scoredSubmissions, assessment?.id, classId])
-  const groups = useMemo(() => assessment ? answerKeyGroups(assessment, classSubmissions) : [], [assessment, classSubmissions])
+  // Simulados com a prova do ENEM e parâmetros oficiais aplicados: as cores
+  // são juntadas pela questão oficial, em vez de analisadas uma a uma.
+  const groups = useMemo(() => {
+    if (!assessment) return []
+    const byVersion = answerKeyGroups(assessment, classSubmissions)
+    const unified = byVersion.length > 1 ? enemItemGroup(assessment, classSubmissions) : null
+    return unified ? [unified, ...byVersion] : byVersion
+  }, [assessment, classSubmissions])
   const group = groups.find((item) => item.id === versionId) || groups[0]
   const scopeSubmissions = versionId === 'all' ? classSubmissions : group?.submissions || []
-  const itemReport = useMemo(() => group && buildItemReport({ assessment: group.assessment, answerKey: group.answerKey, submissions: group.submissions, optionCount: assessment.optionCount || 5 }), [group, assessment?.optionCount])
+  const itemReport = useMemo(() => group && buildItemReport({ assessment: group.assessment, answerKey: group.answerKey, submissions: group.submissions, optionCount: assessment.optionCount || 5, questionNumbers: group.questions?.map((question) => question.number) }), [group, assessment?.optionCount])
   const areaReport = useMemo(() => buildAreaReport({ assessment, submissions: scopeSubmissions, students: data.students, classes: data.classes }), [assessment, scopeSubmissions, data.students, data.classes])
   const attention = useMemo(() => studentsNeedingAttention(areaReport), [areaReport])
   const itemLabel = groups.length > 1 && group ? group.label : ''
@@ -210,7 +218,12 @@ export function CorrelationPage({ data, notify }) {
   const classes = assessment.classIds?.map((id) => data.classes.find((item) => item.id === id)).filter(Boolean) || []
   const className = classId === 'all' ? 'todas as turmas' : classes.find((item) => item.id === classId)?.name || 'turma'
   const scopeLabel = `${className} · ${versionId === 'all' ? (groups.length > 1 ? 'todas as versões' : 'gabarito único') : group?.label}`
-  const groupNote = groups.length > 1 && versionId === 'all' ? `As versões deste simulado têm gabaritos diferentes, então as questões são analisadas por versão. Mostrando ${group.label} (${group.submissions.length} folhas); escolha outra no filtro Versão.` : ''
+  const unifiedVersions = groups[0]?.id === 'enem-items' ? groups.length - 1 : 0
+  const groupNote = group?.id === 'enem-items'
+    ? `As ${unifiedVersions} versões foram juntadas pela questão oficial do ENEM (${group.submissions.length} folhas), com a numeração de ${group.referenceLabel}.${group.excluded ? ` ${group.excluded} questão(ões) que mudam entre as versões, como as de língua estrangeira, ficam só na análise por versão.` : ''}`
+    : groups.length > 1 && versionId === 'all'
+      ? `As versões deste simulado têm gabaritos diferentes, então as questões são analisadas por versão. Mostrando ${group.label} (${group.submissions.length} folhas); escolha outra no filtro Versão.${assessment.tri?.enem?.versions?.length && !enemItemsReady(assessment) ? ' Para juntar as versões pela questão do ENEM, abra Simulados → Detalhes → Nota TRI e clique de novo em "Usar ENEM".' : ''}`
+      : ''
 
   function exportWorkbook() {
     const { bytes } = buildCorrelationWorkbook({ assessment, scopeLabel, itemReport, itemLabel, areaReport, insights, attention, similarity })
@@ -224,7 +237,7 @@ export function CorrelationPage({ data, notify }) {
   const activeView = tabs.some(([id]) => id === view) ? view : 'overview'
   const significant = advanced ? questionNetwork.edges.filter((edge) => edge.significant) : []
   return <div className="page-stack research-page"><section className="correlation-intro"><span><Network size={21} /></span><div><strong>Leitura pedagógica do simulado</strong><p>Quais questões funcionaram, quais conteúdos retomar, como as áreas se relacionam, quais alunos precisam de atenção e quais folhas estão parecidas demais.</p></div><Badge tone="blue">{areaReport.summary.n} folhas</Badge></section>
-    <section className={`panel research-toolbar${advanced ? ' advanced' : ''}`}><div className="research-filter-grid"><label><span>Simulado</span><select value={assessment.id} onChange={(event) => { setAssessmentId(event.target.value); setClassId('all'); setVersionId('all'); setCategory('all') }}>{assessments.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label><span>Turma</span><select value={classId} onChange={(event) => { setClassId(event.target.value); setVersionId('all') }}><option value="all">Todas</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{groups.length > 1 && <label><span>Versão</span><select value={versionId} onChange={(event) => { setVersionId(event.target.value); setCategory('all') }}><option value="all">Todas as versões</option>{groups.map((item) => <option key={item.id} value={item.id}>{item.label} ({item.submissions.length})</option>)}</select></label>}
+    <section className={`panel research-toolbar${advanced ? ' advanced' : ''}`}><div className="research-filter-grid"><label><span>Simulado</span><select value={assessment.id} onChange={(event) => { setAssessmentId(event.target.value); setClassId('all'); setVersionId('all'); setCategory('all') }}>{assessments.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label><span>Turma</span><select value={classId} onChange={(event) => { setClassId(event.target.value); setVersionId('all') }}><option value="all">Todas</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{groups.length > 1 && <label><span>Versão</span><select value={versionId} onChange={(event) => { setVersionId(event.target.value); setCategory('all') }}><option value="all">Todas as versões</option>{groups.filter((item) => item.id !== 'enem-items').map((item) => <option key={item.id} value={item.id}>{item.label} ({item.submissions.length})</option>)}</select></label>}
       {advanced && <><label><span>Comparar por</span><select value={dimension} onChange={(event) => { setDimension(event.target.value); setCategory('all') }}><option value="area">Área</option><option value="skill">Habilidade</option><option value="descriptor">Descritor</option><option value="content">Conteúdo</option></select></label><label><span>Recorte</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="all">Todos</option>{categories.map((item) => <option key={item}>{item}</option>)}</select></label><label><span>Similaridade {percent(threshold, 0)}</span><input type="range" min=".4" max=".95" step=".05" value={threshold} onChange={(event) => setThreshold(Number(event.target.value))} /></label><label><span>Confiança</span><select value={confidence} onChange={(event) => setConfidence(Number(event.target.value))}><option value=".9">90%</option><option value=".95">95%</option><option value=".99">99%</option></select></label></>}</div>
       <div className="research-actions"><Button variant="secondary" onClick={() => setAdvanced(!advanced)}><Settings2 size={15} />{advanced ? 'Ocultar avançado' : 'Avançado'}</Button>{advanced && <><Button variant="secondary" onClick={exportCsv}><Download size={15} />CSV</Button><Button variant="secondary" onClick={exportReport}><FileText size={15} />JSON</Button></>}<Button onClick={exportWorkbook}><FileSpreadsheet size={15} />Exportar planilha</Button></div></section>
     <nav className="research-tabs">{tabs.map(([id, Icon, label]) => <button key={id} className={activeView === id ? 'active' : ''} onClick={() => setView(id)}><Icon size={15} />{label}</button>)}</nav>
