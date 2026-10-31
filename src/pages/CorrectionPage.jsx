@@ -13,6 +13,8 @@ import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAre
 import { analyzeItems, countAnswerKeyAlerts, MIN_RESPONSES, submissionsForAnswerKey, suspiciousItems } from '../lib/itemAnalysis'
 import { cn, downloadBlob, formatDateTime, nextStudentRegistration, normalize, uid } from '../lib/utils'
 import { getAttendance, setStudentsAbsent } from '../lib/attendance'
+import { archiveScanFile, scanReference } from '../lib/scanArchive'
+import { OriginalSheetButton, useScanArchiveFolder } from '../components/OriginalSheet'
 
 const answerStatuses = {
   correct: { label: 'Correta', tone: 'green' },
@@ -398,7 +400,7 @@ function ReviewQueue({ data, setData, notify }) {
         {pending.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>SIMULADO</th><th>OCORRÊNCIAS</th><th>RESULTADO ATUAL</th><th /></tr></thead><tbody>{pending.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span></td><td>{itemAssessment?.title}</td><td><div className="issue-badges">{submission.multiple > 0 && <Badge tone="orange">{submission.multiple} múltipla(s)</Badge>}{submission.uncertain > 0 && <Badge tone="ochre">{submission.uncertain} incerta(s)</Badge>}{!submission.uncertain && !submission.multiple && <Badge tone="ochre">Revisão manual</Badge>}</div></td><td><strong>{submission.score}%</strong><small className="cell-subtitle">{submission.correct}/{validTotal} acertos</small></td><td><Button size="sm" variant="secondary" icon={Eye} onClick={() => openReview(submission)}>Revisar</Button></td></tr> })}</tbody></table></div> : <EmptyState icon={CheckCircle2} title="Tudo revisado" description="Não há marcações ambíguas aguardando conferência." />}
       </section>
 
-      <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title="Revisar respostas" subtitle={`${student?.name || ''} · ${classroom?.name || ''} · ${assessment?.title || ''}`} size="lg" footer={<><Button variant="ghost" onClick={() => setSelectedId(null)}>Cancelar</Button><Button icon={Check} onClick={saveReview}>Concluir revisão</Button></>}>
+      <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title="Revisar respostas" subtitle={`${student?.name || ''} · ${classroom?.name || ''} · ${assessment?.title || ''}`} size="lg" footer={<><Button variant="ghost" onClick={() => setSelectedId(null)}>Cancelar</Button><OriginalSheetButton scan={selected?.scan} title={student?.name} /><Button icon={Check} onClick={saveReview}>Concluir revisão</Button></>}>
         {selected && <div className="saved-review"><div className="saved-review-summary"><Badge tone="blue">Gabarito {classroom?.name}</Badge><span>Clique nas alternativas para marcar ou desmarcar. Questões anuladas ou canceladas mantêm a regra definida no gabarito.</span></div><ResultBreakdown result={{ ...draftSummary, total: draftAnswers.length }} /><section className="answer-review-panel response-answer-view review-answer-view"><header className="answer-review-heading"><div><h3>Respostas da folha</h3><p>Filtre por situação para conferir primeiro o que precisa de atenção.</p></div><Badge tone={draftSummary.uncertain ? 'ochre' : 'green'}>{draftSummary.uncertain ? `${draftSummary.uncertain} incerta(s)` : 'Sem incertas'}</Badge></header><AnswerFilters answers={draftAnswers} value={reviewFilter} onChange={selectReviewFilter} /><DetailedAnswerList answers={visibleDraftAnswers} assessment={assessment} questionAreas={getQuestionAreas(assessment)} onChange={changeDraftAnswer} /></section></div>}
       </Modal>
     </>
@@ -509,7 +511,7 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
         {rows.length ? <div className="table-wrap"><table><thead><tr>{sortableHeader('name', 'Aluno')}<th>TURMA</th>{sortableHeader('result', 'Resultado')}<th>RESPOSTAS</th><th>STATUS</th>{sortableHeader('date', 'Corrigida em')}<th /></tr></thead><tbody>{rows.map(({ submission, student, classroom }) => { const archivedReview = assessmentClosed && submission.status === 'Revisar'; return <tr key={submission.id}><td><strong>{student?.name || 'Aluno removido'}</strong><small className="cell-subtitle">{student?.registration || 'Sem matrícula'}</small></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || '—'}</span></td><td><div className="response-score-cell"><strong>{submission.score}%</strong><small>{submission.correct}/{submission.gradedTotal ?? Math.max(0, assessment.questionCount - (submission.cancelled || 0))} acertos</small></div></td><td><div className="response-counts"><span className="correct">{submission.correct || 0} A</span><span className="wrong">{submission.wrong || 0} E</span><span>{submission.blank || 0} B</span><span className="review">{(submission.multiple || 0) + (submission.uncertain || 0)} R</span>{submission.cancelled > 0 && <span className="cancelled">{submission.cancelled} C</span>}</div></td><td><Badge tone={archivedReview ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'}>{archivedReview ? 'Encerrado com ressalva' : submission.status}</Badge></td><td>{formatDateTime(submission.correctedAt)}</td><td><div className="response-row-actions"><Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponse(submission)}>Visualizar</Button><button type="button" className="icon-button response-delete-button" onClick={() => setDeleteId(submission.id)} aria-label={`Excluir resposta de ${student?.name || 'aluno removido'}`} title="Excluir resposta"><Trash2 size={16} /></button></div></td></tr> })}</tbody></table></div> : <EmptyState icon={FileText} title="Nenhuma resposta neste recorte" description="Altere os filtros ou corrija as primeiras folhas deste simulado." />}
       </section>
 
-      <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selectedStudent ? `Respostas de ${selectedStudent.name}` : 'Detalhes da correção'} subtitle={`${selectedClass?.name || 'Turma não encontrada'} · ${selectedAssessment?.title || ''}`} size="xl" footer={<><Button variant="danger" icon={Trash2} onClick={() => setDeleteId(selected.id)}>Excluir resposta</Button><Button onClick={() => setSelectedId(null)}>Fechar</Button></>}>
+      <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selectedStudent ? `Respostas de ${selectedStudent.name}` : 'Detalhes da correção'} subtitle={`${selectedClass?.name || 'Turma não encontrada'} · ${selectedAssessment?.title || ''}`} size="xl" footer={<><Button variant="danger" icon={Trash2} onClick={() => setDeleteId(selected.id)}>Excluir resposta</Button><OriginalSheetButton scan={selected?.scan} title={selectedStudent?.name} /><Button onClick={() => setSelectedId(null)}>Fechar</Button></>}>
         {selected && <div className="response-detail-view">
           <div className="response-detail-identification">
             <article><small>ALUNO</small><strong>{selectedStudent?.name || 'Aluno removido'}</strong><p>{selectedStudent ? `Matrícula ${selectedStudent.registration}` : 'Cadastro não encontrado'}</p></article>
@@ -559,6 +561,8 @@ export function CorrectionPage({ data, setData, notify }) {
   const [batchFilter, setBatchFilter] = useState('all')
   const [fileName, setFileName] = useState('')
   const [filter, setFilter] = useState('all')
+  const [archiving, setArchiving] = useState(false)
+  const scanArchiveFolder = useScanArchiveFolder()
   const assessment = data.assessments.find((item) => item.id === assessmentId)
   const assessmentClosed = isAssessmentClosed(assessment)
   const pendingReviews = getPendingReviewSubmissions(data.submissions, data.assessments)
@@ -691,7 +695,7 @@ export function CorrectionPage({ data, setData, notify }) {
           items.push({ pageNumber, pageFilename: pageFile.name, error: error.message || 'Página não reconhecida.' })
         }
       })
-      setBatch({ fileName: file.name, sourceType: 'pdf', totalPages: items.length, items })
+      setBatch({ fileName: file.name, sourceType: 'pdf', totalPages: items.length, items, sourceFile: file })
       const identified = items.filter((item) => data.students.some((student) => student.id === item.identity?.studentId)).length
       notify('PDF analisado', `${items.length} página(s) processada(s) · ${identified} aluno(s) identificado(s).`, identified === items.length ? 'success' : 'warning')
     } catch (error) {
@@ -735,7 +739,7 @@ export function CorrectionPage({ data, setData, notify }) {
             data.settings?.omr,
             resolveRecognitionContext,
           )
-          items.push({ ...analyzed, pageNumber: itemNumber, pageFilename: imageFile.name })
+          items.push({ ...analyzed, pageNumber: itemNumber, pageFilename: imageFile.name, sourceFile: imageFile })
         } catch (error) {
           items.push({ pageNumber: itemNumber, pageFilename: imageFile.name, error: error.message || 'Imagem não reconhecida.' })
         }
@@ -809,7 +813,7 @@ export function CorrectionPage({ data, setData, notify }) {
         resolveRecognitionContext,
       )
       setFilter('all')
-      setResult(analyzed)
+      setResult({ ...analyzed, sourceFile: file })
       if (!analyzed.qrFound && !studentId) notify('QR Code não identificado', 'Selecione o aluno antes de salvar a correção.', 'warning')
       else if (analyzed.qrFound && !analyzed.identity?.studentId) notify('Folha sem aluno identificada', 'Selecione um aluno existente ou cadastre-o agora para concluir a correção.', 'warning')
       else if (analyzed.qrFound && !data.students.some((item) => item.id === analyzed.identity?.studentId)) notify('Aluno não encontrado', 'O QR foi lido, mas o aluno não existe mais no banco local.', 'warning')
@@ -918,7 +922,26 @@ export function CorrectionPage({ data, setData, notify }) {
     setBatchPreviewIndex(index)
   }
 
-  function saveCorrection() {
+  // Guarda uma cópia do arquivo escaneado na pasta do desktop. Se falhar, a
+  // correção é salva mesmo assim e o professor é avisado.
+  async function archiveScans(files, archiveAssessment) {
+    if (!scanArchiveFolder) return new Map()
+    const paths = new Map()
+    setArchiving(true)
+    try {
+      for (const file of files) {
+        if (file && !paths.has(file)) paths.set(file, await archiveScanFile(file, archiveAssessment))
+      }
+    } catch (error) {
+      notify('Arquivo escaneado não guardado', `${error.message} A correção foi salva sem a cópia da folha.`, 'warning')
+      return new Map()
+    } finally {
+      setArchiving(false)
+    }
+    return paths
+  }
+
+  async function saveCorrection() {
     const finalStudent = data.students.find((item) => item.id === (result?.identity?.studentId || studentId))
     const finalAssessment = data.assessments.find((item) => item.id === result?.assessmentId)
     if (!finalStudent || !finalAssessment) {
@@ -937,6 +960,8 @@ export function CorrectionPage({ data, setData, notify }) {
     const finalKey = finalVersion?.answerKey || getAnswerKeyForClass(finalAssessment, finalStudent.classId)
     const graded = regradeAnswers(result.answers, finalKey)
     const needsReview = !result.qrFound || graded.multiple > 0 || graded.uncertain > 0 || result.markersFound < 4
+    const archived = await archiveScans([result.sourceFile], finalAssessment)
+    const scan = scanReference(archived.get(result.sourceFile), 1, 'image')
     const submission = {
       id: uid('submission'), assessmentId: finalAssessment.id, studentId: finalStudent.id, classId: finalStudent.classId,
       status: needsReview ? 'Revisar' : 'Corrigido', ...graded,
@@ -948,6 +973,7 @@ export function CorrectionPage({ data, setData, notify }) {
         ...(graded.uncertain > 0 ? ['Marcações incertas'] : []),
       ],
       correctedAt: new Date().toISOString(), filename: fileName,
+      ...(scan ? { scan } : {}),
     }
     setData((current) => ({
       ...current,
@@ -958,12 +984,19 @@ export function CorrectionPage({ data, setData, notify }) {
     setResult(null); setStudentId(''); setFileName('')
   }
 
-  function saveBatchCorrections() {
+  async function saveBatchCorrections() {
     if (!batchSaveable.length) {
       notify('Nenhuma correção pronta', 'Identifique ao menos uma folha antes de salvar o lote.', 'warning')
       return
     }
+    const archived = await archiveScans(
+      batch.sourceType === 'pdf' ? [batch.sourceFile] : batchSaveable.map(({ item }) => item.sourceFile),
+      batchSaveable[0].assessment,
+    )
     const correctedAt = new Date().toISOString()
+    const archivedScan = (item) => batch.sourceType === 'pdf'
+      ? scanReference(archived.get(batch.sourceFile), item.pageNumber, 'pdf')
+      : scanReference(archived.get(item.sourceFile), 1, 'image')
     const submissions = batchSaveable.map(({ item, student: finalStudent, assessment: finalAssessment, needsReview }) => {
       const finalVersion = getAnswerKeyVersionForStudent(finalAssessment, finalStudent)
       const finalKey = finalVersion?.answerKey || getAnswerKeyForClass(finalAssessment, finalStudent.classId)
@@ -992,6 +1025,7 @@ export function CorrectionPage({ data, setData, notify }) {
         filename: batch.sourceType === 'images' ? item.pageFilename : `${batch.fileName} · página ${item.pageNumber}`,
         sourceType: batch.sourceType === 'images' ? 'image-batch' : 'pdf',
         sourcePage: item.pageNumber,
+        ...(archivedScan(item) ? { scan: archivedScan(item) } : {}),
       }
     })
     const replacementKeys = new Set(submissions.map((item) => `${item.assessmentId}:${item.studentId}`))
@@ -1056,8 +1090,8 @@ export function CorrectionPage({ data, setData, notify }) {
 
       {batch && <section className="batch-review page-stack">
         <header className="scan-result-header">
-          <div><button className="back-link" onClick={() => { setBatch(null); setBatchPreviewIndex(null); setFileName('') }}><X size={16} /> Descartar lote</button><h2>Revisão do lote</h2><p>{batch.fileName} · {batch.totalPages} {batch.sourceType === 'images' ? 'imagem(ns)' : 'página(s)'} analisada(s)</p></div>
-          <div className="scan-header-actions"><Button variant="secondary" icon={RotateCcw} onClick={() => { setBatch(null); setBatchPreviewIndex(null) }}>Escolher outro arquivo</Button><Button icon={Save} disabled={!batchSaveable.length} onClick={saveBatchCorrections}>Salvar {batchSaveable.length} correção(ões)</Button></div>
+          <div><button className="back-link" onClick={() => { setBatch(null); setBatchPreviewIndex(null); setFileName('') }}><X size={16} /> Descartar lote</button><h2>Revisão do lote</h2><p>{batch.fileName} · {batch.totalPages} {batch.sourceType === 'images' ? 'imagem(ns)' : 'página(s)'} analisada(s){scanArchiveFolder ? ' · uma cópia será guardada na pasta das folhas' : ''}</p></div>
+          <div className="scan-header-actions"><Button variant="secondary" icon={RotateCcw} onClick={() => { setBatch(null); setBatchPreviewIndex(null) }}>Escolher outro arquivo</Button><Button icon={Save} disabled={!batchSaveable.length || archiving} onClick={saveBatchCorrections}>{archiving ? 'Guardando PDF...' : `Salvar ${batchSaveable.length} correção(ões)`}</Button></div>
         </header>
 
         <div className="batch-summary-grid">
@@ -1097,7 +1131,7 @@ export function CorrectionPage({ data, setData, notify }) {
       {result && <section className="scan-result">
         <header className="scan-result-header">
           <div><button className="back-link" onClick={() => setResult(null)}><X size={16} /> Fechar leitura</button><h2>Conferência completa da folha</h2><p>{fileName} · confira a identificação e cada resposta antes de salvar</p></div>
-          <div className="scan-header-actions"><Button variant="secondary" icon={RotateCcw} onClick={() => setResult(null)}>Escolher outro arquivo</Button><Button icon={Save} disabled={!resultReady} onClick={saveCorrection}>{existingResultSubmission ? 'Atualizar correção' : 'Confirmar correção'}</Button></div>
+          <div className="scan-header-actions"><Button variant="secondary" icon={RotateCcw} onClick={() => setResult(null)}>Escolher outro arquivo</Button><Button icon={Save} disabled={!resultReady || archiving} onClick={saveCorrection}>{archiving ? 'Guardando imagem...' : existingResultSubmission ? 'Atualizar correção' : 'Confirmar correção'}</Button></div>
         </header>
 
         <div className="scan-photo-workspace">

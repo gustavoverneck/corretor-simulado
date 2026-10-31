@@ -10,9 +10,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "desktop": "npm run build && electron .",
-    "package:desktop": "npm run build && electron-forge package",
-    "make": "npm run build && electron-forge make",
+    "build:desktop": "vite build --base ./",
+    "desktop": "npm run build:desktop && electron .",
+    "package:desktop": "npm run build:desktop && electron-forge package",
+    "make": "npm run build:desktop && electron-forge make",
     "preview": "vite preview",
     "test:seges": "node scripts/test-seges.mjs",
     "test:seges-pdf": "node scripts/test-seges-pdf.mjs",
@@ -39,7 +40,8 @@
     "test:grade-list": "node scripts/test-grade-list.mjs",
     "test:grade-scale": "node scripts/test-grade-scale.mjs",
     "test:student-result": "node scripts/test-student-result.mjs",
-    "test:print-documents": "node scripts/test-print-documents.mjs"
+    "test:print-documents": "node scripts/test-print-documents.mjs",
+    "test:scan-archive": "node scripts/test-scan-archive.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",

@@ -1336,3 +1336,12 @@ tr.clickable-row:focus-visible { outline: 3px solid rgba(65, 111, 98, .2); outli
 .help-glossary-grid { padding: 15px 21px 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }.help-glossary section { padding: 12px 14px; color: #586861; background: #f7f9f8; border: 1px solid #e5ebe7; border-radius: 8px; font-size: 9px; line-height: 1.5; }
 .plagiarism-summary.similarity-summary { grid-template-columns: repeat(4, 1fr); }.similarity-groups { margin-bottom: 14px; display: flex; flex-direction: column; gap: 7px; }.similarity-groups > div { padding: 10px 12px; display: flex; align-items: center; gap: 9px; color: #6b4a46; background: #fbf1ef; border: 1px solid #f0d9d5; border-radius: 8px; font-size: 9px; }.plagiarism-results .item-controls { margin: 0 -21px; border-top: 1px solid #edf0ee; }.plagiarism-detail-table .same-wrong { background: #fbefed; }.similarity-more { padding: 12px; display: flex; justify-content: center; }.plagiarism-pair-summary .badge { margin-left: auto; }.plagiarism-empty { grid-column: 1 / -1; }
 @media (max-width: 720px) { .plagiarism-summary.similarity-summary { grid-template-columns: 1fr 1fr; } }
+
+/* Folha original guardada pelo app desktop */
+.original-sheet-loading { min-height: 260px; display: flex; align-items: center; justify-content: center; gap: 10px; color: #6b7a74; font-size: 10px; }
+.original-sheet-image { padding: 10px; display: grid; place-items: center; background: #e7ebe8; border-radius: 9px; }
+.original-sheet-image img { width: 100%; max-height: 75vh; display: block; object-fit: contain; background: #fff; }
+.scan-archive-folder { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; background: #fafcfb; border: 1px solid #e1e8e4; border-radius: 9px; }
+.scan-archive-folder strong { display: block; font-size: 10px; word-break: break-all; }
+.scan-archive-folder p { margin: 4px 0 0; color: #84908b; font-size: 8.5px; line-height: 1.45; }
+.scan-archive-folder > div:last-child { display: flex; gap: 8px; }

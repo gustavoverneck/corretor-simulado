@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BookOpenCheck, ListChecks } from 'lucide-react'
 import { Badge, Button, Modal } from './ui'
+import { OriginalSheetButton } from './OriginalSheet'
 import { cn } from '../lib/utils'
 import { calculateAreaResults } from '../lib/results'
 import { ANSWER_STATUS_LABELS, buildStudentResult } from '../lib/studentResult'
@@ -38,7 +39,7 @@ export function StudentResultModal({ row, studentRows = [], peerRows = [], areaC
     .filter((group) => group.questions.length)
   const areaColor = (area) => areaColors[(result?.areas.findIndex((item) => item.area === area) ?? 0) % Math.max(1, areaColors.length)]
 
-  return <Modal open onClose={onClose} size="lg" title={student?.name || 'Aluno removido'} subtitle={[row.classroom?.name, student?.registration && `Matrícula ${student.registration}`, row.assessment.title, result?.versionLabel].filter(Boolean).join(' · ')} footer={<Button variant="secondary" onClick={onClose}>Fechar</Button>}>
+  return <Modal open onClose={onClose} size="lg" title={student?.name || 'Aluno removido'} subtitle={[row.classroom?.name, student?.registration && `Matrícula ${student.registration}`, row.assessment.title, result?.versionLabel].filter(Boolean).join(' · ')} footer={<><OriginalSheetButton scan={row.scan} title={student?.name} /><Button variant="secondary" onClick={onClose}>Fechar</Button></>}>
     <div className="student-result">
       {studentRows.length > 1 && <div className="chart-view-toggle student-result-assessments" role="group" aria-label="Simulados do aluno">{studentRows.map((item) => <button type="button" key={item.id} className={item.id === row.id ? 'active' : ''} aria-pressed={item.id === row.id} title={item.assessment.title} onClick={() => onSelectRow(item)}>{item.assessment.code || item.assessment.title}</button>)}</div>}
 
