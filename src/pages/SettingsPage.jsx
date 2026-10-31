@@ -5,6 +5,7 @@ import { createInitialState } from '../data'
 import { formatDateTime } from '../lib/utils'
 import { OmrSettingsPanel } from '../components/OmrSettingsPanel'
 import { resolveOmrSettings } from '../lib/omrSettings'
+import { normalizeSubmissionVoid } from '../lib/voidedSubmission'
 
 export function SettingsPage({ data, setData, notify, exportBackup, backupMeta, storageStatus, storageBackend }) {
   const restoreInput = useRef(null)
@@ -52,7 +53,7 @@ export function SettingsPage({ data, setData, notify, exportBackup, backupMeta, 
         throw new Error('Estrutura de dados inválida.')
       }
       if (!window.confirm(`Restaurar o backup “${file.name}” e substituir os dados atuais?`)) return
-      setData(restored)
+      setData({ ...restored, submissions: Array.isArray(restored.submissions) ? restored.submissions.map(normalizeSubmissionVoid) : [] })
       notify('Backup restaurado', `${restored.students.length} alunos e ${restored.classes.length} turmas recuperados.`)
     } catch (error) {
       notify('Backup inválido', error.message || 'Não foi possível ler esse arquivo.', 'warning')

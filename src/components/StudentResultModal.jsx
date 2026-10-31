@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BookOpenCheck, ListChecks } from 'lucide-react'
+import { Ban, BookOpenCheck, ListChecks } from 'lucide-react'
 import { Badge, Button, Modal } from './ui'
 import { cn } from '../lib/utils'
 import { calculateAreaResults } from '../lib/results'
 import { ANSWER_STATUS_LABELS, buildStudentResult } from '../lib/studentResult'
+import { describeVoid, isSubmissionVoided } from '../lib/voidedSubmission'
 
 const questionFilters = [
   { id: 'all', label: 'Todas' },
@@ -40,8 +41,9 @@ export function StudentResultModal({ row, studentRows = [], peerRows = [], areaC
 
   return <Modal open onClose={onClose} size="lg" title={student?.name || 'Aluno removido'} subtitle={[row.classroom?.name, student?.registration && `Matrícula ${student.registration}`, row.assessment.title, result?.versionLabel].filter(Boolean).join(' · ')} footer={<Button variant="secondary" onClick={onClose}>Fechar</Button>}>
     <div className="student-result">
-      {studentRows.length > 1 && <div className="chart-view-toggle student-result-assessments" role="group" aria-label="Simulados do aluno">{studentRows.map((item) => <button type="button" key={item.id} className={item.id === row.id ? 'active' : ''} aria-pressed={item.id === row.id} title={item.assessment.title} onClick={() => onSelectRow(item)}>{item.assessment.code || item.assessment.title}</button>)}</div>}
+      {studentRows.length > 1 && <div className="chart-view-toggle student-result-assessments" role="group" aria-label="Simulados do aluno">{studentRows.map((item) => <button type="button" key={item.id} className={item.id === row.id ? 'active' : ''} aria-pressed={item.id === row.id} title={isSubmissionVoided(item) ? `${item.assessment.title} (anulada)` : item.assessment.title} onClick={() => onSelectRow(item)}>{item.assessment.code || item.assessment.title}{isSubmissionVoided(item) ? ' · anulada' : ''}</button>)}</div>}
 
+      {isSubmissionVoided(row) && <div className="voided-exam-banner student-result-voided" role="status"><span><Ban size={18} /></span><div><strong>Prova anulada · {describeVoid(row.voided)}</strong><p>As respostas abaixo ficam só para consulta: a nota vai como zero nas exportações e a prova fica fora das médias desta tela. Para desfazer, abra a folha em Correção → Respostas.</p></div></div>}
       {!result ? <div className="area-analysis-empty"><ListChecks size={24} /><div><strong>Correção sem respostas detalhadas</strong><p>Esta folha foi registrada apenas com o total: {row.correct} acertos de {row.total} questões ({row.score}%). Corrija a folha novamente para ver questão por questão.</p></div></div> : <>
         <div className="student-result-summary">
           <div><b>{result.totals.score}%</b><small>aproveitamento</small></div>
@@ -80,7 +82,7 @@ export function StudentResultModal({ row, studentRows = [], peerRows = [], areaC
           </div>) : <p className="student-question-scope">Nenhuma questão neste filtro.</p>}
         </section>
       </>}
-      {row.status === 'Revisar' && <Badge tone="ochre">Esta folha ainda tem revisão pendente na Correção.</Badge>}
+      {row.status === 'Revisar' && !isSubmissionVoided(row) && <Badge tone="ochre">Esta folha ainda tem revisão pendente na Correção.</Badge>}
     </div>
   </Modal>
 }

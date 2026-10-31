@@ -8,6 +8,7 @@ import { answerKeyGroups, buildAreaReport, buildItemReport, buildTeacherInsights
 import { buildCorrelationWorkbook } from '../lib/correlationReport'
 import { CORRELATION_HELP, CORRELATION_HELP_ORDER } from '../lib/correlationHelp'
 import { buildSimilarityReport, compareSubmissions, HIGH_AGREEMENT } from '../lib/similarity'
+import { activeSubmissions } from '../lib/voidedSubmission'
 
 const colors = ['#47776a', '#b98558', '#796e91', '#56758d', '#a56565', '#748b5f']
 const number = (value, digits = 3) => Number(value || 0).toFixed(digits).replace('.', ',')
@@ -182,10 +183,12 @@ function SimilarityView({ similarity, group, groupNote }) {
 }
 
 export function CorrelationPage({ data, notify }) {
-  const assessments = data.assessments.filter((item) => data.submissions.some((row) => row.assessmentId === item.id && Array.isArray(row.answers)))
+  // Provas anuladas ficam fora de todas as análises.
+  const scoredSubmissions = useMemo(() => activeSubmissions(data.submissions), [data.submissions])
+  const assessments = data.assessments.filter((item) => scoredSubmissions.some((row) => row.assessmentId === item.id && Array.isArray(row.answers)))
   const [assessmentId, setAssessmentId] = useState(assessments[0]?.id || ''); const [classId, setClassId] = useState('all'); const [versionId, setVersionId] = useState('all'); const [dimension, setDimension] = useState('area'); const [category, setCategory] = useState('all'); const [threshold, setThreshold] = useState(.65); const [confidence, setConfidence] = useState(.95); const [view, setView] = useState('overview'); const [advanced, setAdvanced] = useState(false)
   const assessment = assessments.find((item) => item.id === assessmentId) || assessments[0]
-  const classSubmissions = useMemo(() => data.submissions.filter((row) => row.assessmentId === assessment?.id && Array.isArray(row.answers) && (classId === 'all' || row.classId === classId)), [data.submissions, assessment?.id, classId])
+  const classSubmissions = useMemo(() => scoredSubmissions.filter((row) => row.assessmentId === assessment?.id && Array.isArray(row.answers) && (classId === 'all' || row.classId === classId)), [scoredSubmissions, assessment?.id, classId])
   const groups = useMemo(() => assessment ? answerKeyGroups(assessment, classSubmissions) : [], [assessment, classSubmissions])
   const group = groups.find((item) => item.id === versionId) || groups[0]
   const scopeSubmissions = versionId === 'all' ? classSubmissions : group?.submissions || []
@@ -201,7 +204,7 @@ export function CorrelationPage({ data, notify }) {
   const studentNetwork = useMemo(() => advanced && networkAssessment && buildStudentNetwork({ assessment: networkAssessment, submissions: networkSubmissions, students: data.students, dimension, category, threshold }), [advanced, networkAssessment, networkSubmissions, data.students, dimension, category, threshold])
   const questionNetwork = useMemo(() => advanced && networkAssessment && buildQuestionNetwork({ assessment: networkAssessment, submissions: networkSubmissions, dimension, category, confidence }), [advanced, networkAssessment, networkSubmissions, dimension, category, confidence])
   const bipartite = useMemo(() => advanced && networkAssessment && buildBipartiteNetwork({ assessment: networkAssessment, submissions: networkSubmissions, students: data.students, dimension, category }), [advanced, networkAssessment, networkSubmissions, data.students, dimension, category])
-  const timeline = useMemo(() => advanced ? buildTemporalAnalysis({ assessments, submissions: data.submissions, students: data.students, classId, threshold }) : [], [advanced, assessments, data.submissions, data.students, classId, threshold])
+  const timeline = useMemo(() => advanced ? buildTemporalAnalysis({ assessments, submissions: scoredSubmissions, students: data.students, classId, threshold }) : [], [advanced, assessments, scoredSubmissions, data.students, classId, threshold])
   const behavior = useMemo(() => summarizeBehavior(networkSubmissions), [networkSubmissions])
   if (!assessment) return <EmptyState icon={GitCompare} title="Ainda não há dados para correlacionar" description="Corrija folhas em pelo menos um simulado para ver a análise das questões e das áreas." />
   const classes = assessment.classIds?.map((id) => data.classes.find((item) => item.id === id)).filter(Boolean) || []

@@ -1,3 +1,5 @@
+import { isSubmissionVoided } from './voidedSubmission.js'
+
 function stableIndex(value, length) {
   if (!length) return 0
   let hash = 0
@@ -38,7 +40,7 @@ export function reopenAssessment(assessment, { hasSubmissions = false, reopenedA
 
 export function getPendingReviewSubmissions(submissions = [], assessments = []) {
   const closedAssessmentIds = new Set(assessments.filter(isAssessmentClosed).map((assessment) => assessment.id))
-  return submissions.filter((submission) => submission.status === 'Revisar' && !closedAssessmentIds.has(submission.assessmentId))
+  return submissions.filter((submission) => submission.status === 'Revisar' && !isSubmissionVoided(submission) && !closedAssessmentIds.has(submission.assessmentId))
 }
 
 export function applyAssessmentRevision(data, revisedAssessment, { regradeSubmissions = false, regradedAt = new Date().toISOString() } = {}) {

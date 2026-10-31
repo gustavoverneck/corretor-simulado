@@ -11,6 +11,7 @@ import { withVersionQuestionAreas, getAssessmentForVersion, CANCELLED_ANSWER, ap
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS, uniqueQuestionAreas } from '../lib/knowledgeAreas'
 import { getSheetLayout, getSheetFormat } from '../lib/sheetFormat'
 import { CURRENT_MARKER_LAYOUT } from '../lib/omr'
+import { activeSubmissions, isSubmissionVoided } from '../lib/voidedSubmission'
 import { buildSegesResultRows, calculateAssessmentResult, formatSegesGrade, SEGES_RESULT_STATUS, segesResultsFilename, serializeSegesResultsCsv, indexAssessmentSubmissions } from '../lib/segesResults'
 import { average, cn, downloadBlob, formatDate, initials, uid } from '../lib/utils'
 import { createAnswerKeyPdf, createAttendancePdf, printDocumentFilename } from '../lib/printDocuments'
@@ -179,7 +180,8 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const closed = isAssessmentClosed(assessment)
   const totalStudents = data.students.filter((student) => assessment.classIds.includes(student.classId) && student.status === 'Ativo').length
   const progress = totalStudents ? Math.min(100, Math.round((submissions.length / totalStudents) * 100)) : 0
-  const pendingReviews = closed ? 0 : submissions.filter((item) => item.status === 'Revisar').length
+  const scoredSubmissions = activeSubmissions(submissions)
+  const pendingReviews = closed ? 0 : scoredSubmissions.filter((item) => item.status === 'Revisar').length
   const areaCount = uniqueQuestionAreas(assessment).length
   const areaVersions = getAnswerKeyVersions(assessment)
   const areaVersion = areaVersions.find((version) => version.id === areaVersionId) || areaVersions[0]
@@ -219,9 +221,11 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
     const version = getAnswerKeyVersionForStudent(assessment, student)
     const allowedVersions = getAnswerKeyVersionsForClass(assessment, student.classId)
     const submission = submissionsByStudent.get(student.id)
-    const result = calculateAssessmentResult(submission, assessment, 'all', 10)
-    const resultTone = !submission || (closed && submission.status === 'Revisar') ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'
-    const resultLabel = !submission ? closed ? 'Não participou' : 'Sem correção' : submission.status === 'Revisar' ? closed ? 'Encerrado com ressalva' : 'Revisar' : 'Corrigido'
+    const voided = isSubmissionVoided(submission)
+    const computed = calculateAssessmentResult(submission, assessment, 'all', 10)
+    const result = voided && computed ? { ...computed, correct: 0, percentage: 0, grade: 0 } : computed
+    const resultTone = voided ? 'red' : !submission || (closed && submission.status === 'Revisar') ? 'neutral' : submission.status === 'Revisar' ? 'ochre' : 'green'
+    const resultLabel = voided ? 'Anulada (nota 0)' : !submission ? closed ? 'Não participou' : 'Sem correção' : submission.status === 'Revisar' ? closed ? 'Encerrado com ressalva' : 'Revisar' : 'Corrigido'
     return {
       student,
       classroom,
@@ -513,7 +517,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
         <div><small>QUESTÕES</small><strong>{assessment.questionCount}</strong><span>{areaCount} {areaCount === 1 ? 'área' : 'áreas'} · A–{String.fromCharCode(64 + assessment.optionCount)}</span></div>
         <div><small>ALUNOS</small><strong>{totalStudents}</strong><span>{assessment.classIds.length} {assessment.classIds.length === 1 ? 'turma' : 'turmas'}</span></div>
         <div><small>PROCESSADAS</small><strong>{submissions.length}</strong><span>{progress}% concluído</span></div>
-        <div><small>MÉDIA</small><strong>{submissions.length ? `${average(submissions.map((item) => item.score))}%` : '—'}</strong><span>{closed ? 'resultado encerrado' : `${pendingReviews} para revisar`}</span></div>
+        <div><small>MÉDIA</small><strong>{scoredSubmissions.length ? `${average(scoredSubmissions.map((item) => item.score))}%` : '—'}</strong><span>{closed ? 'resultado encerrado' : `${pendingReviews} para revisar`}</span></div>
       </div>
 
       <div className="assessment-detail-progress"><div><span>{closed ? 'Participação final registrada' : 'Andamento da correção'}</span><strong>{submissions.length} de {totalStudents}</strong></div><div className="wide-progress"><i style={{ width: `${progress}%` }} /></div></div>
@@ -678,11 +682,12 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
             <div><small>PARA REVISAR</small><strong>{exportSummary[SEGES_RESULT_STATUS.review] || 0}</strong></div>
             <div><small>SEM CORREÇÃO</small><strong>{exportSummary[SEGES_RESULT_STATUS.missing] || 0}</strong></div>
             <div><small>SEM DADOS DO RECORTE</small><strong>{exportSummary[SEGES_RESULT_STATUS.unavailable] || 0}</strong></div>
+            {exportRows.some((row) => row.voided) && <div><small>ANULADAS (NOTA 0)</small><strong>{exportRows.filter((row) => row.voided).length}</strong></div>}
           </div>
           {(exportRows.length > (exportSummary[SEGES_RESULT_STATUS.ready] || 0)) && <div className="seges-results-export-warning"><AlertTriangle size={17} /><p><strong>Somente notas prontas recebem valor no arquivo.</strong><span>Pendências permanecem listadas com o respectivo status, mas a coluna de nota fica vazia para impedir lançamento indevido.</span></p></div>}
           <div className="seges-results-export-preview">
             <div><strong>Prévia</strong><span>{exportRows.length} aluno{exportRows.length !== 1 ? 's' : ''} nas turmas selecionadas</span></div>
-            <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>ACERTOS</th><th>NOTA</th><th>STATUS</th></tr></thead><tbody>{exportRows.slice(0, 8).map((row) => <tr key={row.student.id}><td><strong>{row.student.name}</strong></td><td>{row.classroom?.name || '—'}</td><td>{row.metrics ? `${row.metrics.correct}/${row.metrics.valid}` : '—'}</td><td>{row.exportable ? formatSegesGrade(row.metrics.grade) : '—'}</td><td><Badge tone={row.exportable ? 'green' : row.status === SEGES_RESULT_STATUS.review ? 'ochre' : 'neutral'}>{row.status.replaceAll('_', ' ')}</Badge></td></tr>)}</tbody></table></div>
+            <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>ACERTOS</th><th>NOTA</th><th>STATUS</th></tr></thead><tbody>{exportRows.slice(0, 8).map((row) => <tr key={row.student.id}><td><strong>{row.student.name}</strong></td><td>{row.classroom?.name || '—'}</td><td>{row.metrics ? `${row.metrics.correct}/${row.metrics.valid}` : '—'}</td><td>{row.exportable ? formatSegesGrade(row.metrics.grade) : '—'}</td><td><Badge tone={row.voided ? 'red' : row.exportable ? 'green' : row.status === SEGES_RESULT_STATUS.review ? 'ochre' : 'neutral'}>{row.voided ? 'ANULADA' : row.status.replaceAll('_', ' ')}</Badge></td></tr>)}</tbody></table></div>
             {exportRows.length > 8 && <small>Exibindo os 8 primeiros registros. O arquivo incluirá todos os {exportRows.length} alunos selecionados.</small>}
           </div>
         </div>
