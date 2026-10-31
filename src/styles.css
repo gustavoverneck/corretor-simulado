@@ -1443,3 +1443,4 @@ td.is-advanced strong, td.is-advanced { color: #2f6a59; }
 .ranking-panel tr.is-voided td { color: #8d8f8e; }
 .ranking-panel tr.is-voided .student-name strong { text-decoration: line-through; text-decoration-color: #c98f8a; }
 .student-result-voided { margin-bottom: 4px; }
+.assessment-detail-tabs { flex-wrap: wrap; align-self: flex-start; width: fit-content; max-width: 100%; }

@@ -190,6 +190,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
   const areaAssessment = getAssessmentForVersion(assessment, areaVersion)
   const questionAreas = getQuestionAreas(areaAssessment)
   const areaSummary = [...questionAreas.reduce((summary, area) => summary.set(area, (summary.get(area) || 0) + 1), new Map()).entries()]
+  const [detailTab, setDetailTab] = useState('students')
   const triEnabled = isTriEnabled(assessment)
   const triStatus = useMemo(() => triEnabled ? computeTriScores(assessment, data.submissions) : null, [assessment, data.submissions, triEnabled])
 
@@ -531,39 +532,28 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
 
       <div className="assessment-detail-progress"><div><span>{closed ? 'Participação final registrada' : 'Andamento da correção'}</span><strong>{submissions.length} de {totalStudents}</strong></div><div className="wide-progress"><i style={{ width: `${progress}%` }} /></div></div>
 
-      <section className="assessment-detail-areas">
+      <div className="segmented-tabs assessment-detail-tabs" role="tablist" aria-label="Seções do simulado">
+        {[['students', 'Alunos e resultados', versionedStudents.length], ['keys', 'Turmas e gabaritos', assessment.classIds.length], ['areas', 'Áreas', areaCount], ['tri', 'Nota TRI', triEnabled ? 'ativada' : null]].map(([id, label, count]) => <button type="button" role="tab" key={id} aria-selected={detailTab === id} className={cn(detailTab === id && 'active')} onClick={() => setDetailTab(id)}>{label}{count !== null && count !== undefined && <span>{count}</span>}</button>)}
+      </div>
+
+      {detailTab === 'students' && <>
+      <section className="assessment-version-roster">
         <header>
-          <div><h3>Áreas das questões</h3><p>Classifique cada questão para organizar os filtros e as análises pedagógicas.</p></div>
-          <div className="assessment-detail-areas-actions">
-            {areaVersions.length > 1 && <label><span>Versão</span><select value={areaVersion.id} onChange={(event) => { setAreaVersionId(event.target.value); setEditingAreas(false) }}>{areaVersions.map((version) => <option key={version.id} value={version.id}>{version.label}</option>)}</select></label>}
-            {!editingAreas && !closed && <Button variant="secondary" size="sm" icon={PencilLine} onClick={startEditingAreas}>Editar áreas</Button>}
-            {closed && <Badge tone="neutral"><LockKeyhole size={12} /> Reabra para editar</Badge>}
-          </div>
+          <div><h3>Alunos e resultados</h3><p>Confira a nota geral, a situação da correção e a versão de gabarito de cada aluno.</p></div>
+          <div className="assessment-roster-actions"><Button variant="secondary" size="sm" icon={Printer} onClick={() => openPrintDocument('attendance')}>Lista de presença</Button><Button variant="secondary" size="sm" icon={Download} onClick={openResultExport}>Exportar notas</Button><label><span>Filtrar por turma</span><select value={studentClassFilter} onChange={(event) => setStudentClassFilter(event.target.value)}><option value="all">Todas as turmas</option>{assessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); return <option value={classId} key={classId}>{classroom?.name || 'Turma removida'}</option> })}</select></label></div>
         </header>
-        <div className="assessment-area-summary">
-          {areaSummary.map(([area, count]) => <span key={area}><strong>{area}</strong><small>{count} {count === 1 ? 'questão' : 'questões'}</small></span>)}
+        <div className="assessment-version-roster-summary"><Badge tone="blue">{versionedStudents.length} aluno{versionedStudents.length !== 1 ? 's' : ''}</Badge><span>Notas exibidas na escala de 0 a 10.</span></div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr>{sortableStudentHeader('name', 'Aluno')}{sortableStudentHeader('class', 'Turma')}{sortableStudentHeader('grade', 'Nota geral')}{sortableStudentHeader('status', 'Situação')}{sortableStudentHeader('version', 'Versão do gabarito')}</tr></thead>
+            <tbody>{sortedStudentRows.map(({ student, classroom, version, allowedVersions, selectableVersions, result, resultTone, resultLabel }) => <tr key={student.id}><td><div className="assessment-version-student"><span style={{ background: `${classroom?.color}1c`, color: classroom?.color }}>{initials(student.name)}</span><div><strong>{student.name}</strong><small>{student.registration}</small></div></div></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || 'Turma removida'}</span></td><td><div className={cn('assessment-student-grade', !result && 'empty')}><strong>{result ? formatSegesGrade(result.grade) : '—'}</strong>{result && <small>{Math.round(result.percentage)}%</small>}</div></td><td><Badge tone={resultTone}>{resultLabel}</Badge></td><td><select className="assessment-student-version-select" style={answerKeyVersionColor(assessment, version?.id)} value={version?.id || ''} onChange={(event) => changeStudentVersion(student, event.target.value)} disabled={closed || allowedVersions.length < 2} aria-label={`Versão do gabarito de ${student.name}`}>{selectableVersions.map((item) => <option value={item.id} style={answerKeyVersionColor(assessment, item.id)} key={item.id}>{item.label}</option>)}</select></td></tr>)}</tbody>
+          </table>
         </div>
-        {editingAreas && <div className="assessment-area-editing">
-          <div className="assessment-area-safety-note"><AlertTriangle size={17} /><p><strong>Alteração segura</strong><span>As respostas, os gabaritos e as notas não mudam. Resultados por área serão reagrupados, inclusive nas {submissions.length} {submissions.length === 1 ? 'correção existente' : 'correções existentes'}.</span></p></div>
-          <div className="assessment-area-bulk">
-            <Field label="Aplicar uma área a todas"><div className="assessment-area-choice"><input value={bulkAreaDraft} onChange={(event) => setBulkAreaDraft(event.target.value)} placeholder="Digite uma área personalizada" /><select value={declaredAreaOptions.includes(bulkAreaDraft) ? bulkAreaDraft : ''} onChange={(event) => event.target.value && setBulkAreaDraft(event.target.value)} aria-label="Escolher área cadastrada para todas as questões"><option value="">Escolher área cadastrada</option>{declaredAreaOptions.map((area) => <option value={area} key={area}>{area}</option>)}</select></div></Field>
-            <Button variant="secondary" size="sm" icon={Layers3} onClick={applyDetailAreaToAll}>Aplicar</Button>
-          </div>
-          <div className="assessment-area-grid">
-            {areaDraft.map((area, index) => <label key={index}><span>Questão {String(index + 1).padStart(2, '0')}</span><div className="assessment-area-choice"><input value={area} onChange={(event) => changeQuestionArea(index, event.target.value)} placeholder="Digite uma área personalizada" /><select value={declaredAreaOptions.includes(area) ? area : ''} onChange={(event) => event.target.value && changeQuestionArea(index, event.target.value)} aria-label={`Escolher área cadastrada para a questão ${index + 1}`}><option value="">Escolher área cadastrada</option>{declaredAreaOptions.map((option) => <option value={option} key={option}>{option}</option>)}</select></div></label>)}
-          </div>
-          <div className="assessment-area-actions"><Button variant="ghost" size="sm" icon={X} onClick={cancelEditingAreas}>Cancelar</Button><Button size="sm" icon={CheckCircle2} onClick={saveQuestionAreas}>Salvar áreas</Button></div>
-        </div>}
+        {!versionedStudents.length && <div className="assessment-version-roster-empty">Nenhum aluno ativo nesta turma.</div>}
       </section>
+      </>}
 
-      <section className="assessment-detail-areas assessment-tri">
-        <header>
-          <div><h3>Nota TRI (opcional)</h3><p>Calcula, ao lado da nota atual, uma nota pela Teoria de Resposta ao Item, no modelo do ENEM, só nas turmas que você escolher. Acertar as fáceis e errar as difíceis vale mais que o contrário, o que reduz o peso do chute.</p></div>
-          <label className="tri-toggle"><input type="checkbox" checked={triEnabled} onChange={(event) => toggleTri(event.target.checked)} /><span>{triEnabled ? 'Ativada' : 'Desativada'}</span></label>
-        </header>
-        {triEnabled && <TriSettings assessment={assessment} classes={data.classes} setData={setData} notify={notify} triStatus={triStatus} />}
-      </section>
-
+      {detailTab === 'keys' && <>
       <section className="assessment-detail-classes">
         <header><div><h3>Turmas e gabaritos</h3><p>Clique em uma resposta para alterá-la, anulá-la com ponto ou cancelá-la sem entrar na nota daquela versão.</p></div><Button variant="secondary" size="sm" icon={Printer} onClick={() => openPrintDocument('answer-key')}>Imprimir gabaritos</Button></header>
         {assessment.classIds.map((classId) => {
@@ -609,21 +599,44 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
           )
         })}
       </section>
+      </>}
 
-      <section className="assessment-version-roster">
+      {detailTab === 'areas' && <>
+      <section className="assessment-detail-areas">
         <header>
-          <div><h3>Alunos e resultados</h3><p>Confira a nota geral, a situação da correção e a versão de gabarito de cada aluno.</p></div>
-          <div className="assessment-roster-actions"><Button variant="secondary" size="sm" icon={Printer} onClick={() => openPrintDocument('attendance')}>Lista de presença</Button><Button variant="secondary" size="sm" icon={Download} onClick={openResultExport}>Exportar notas</Button><label><span>Filtrar por turma</span><select value={studentClassFilter} onChange={(event) => setStudentClassFilter(event.target.value)}><option value="all">Todas as turmas</option>{assessment.classIds.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); return <option value={classId} key={classId}>{classroom?.name || 'Turma removida'}</option> })}</select></label></div>
+          <div><h3>Áreas das questões</h3><p>Classifique cada questão para organizar os filtros e as análises pedagógicas.</p></div>
+          <div className="assessment-detail-areas-actions">
+            {areaVersions.length > 1 && <label><span>Versão</span><select value={areaVersion.id} onChange={(event) => { setAreaVersionId(event.target.value); setEditingAreas(false) }}>{areaVersions.map((version) => <option key={version.id} value={version.id}>{version.label}</option>)}</select></label>}
+            {!editingAreas && !closed && <Button variant="secondary" size="sm" icon={PencilLine} onClick={startEditingAreas}>Editar áreas</Button>}
+            {closed && <Badge tone="neutral"><LockKeyhole size={12} /> Reabra para editar</Badge>}
+          </div>
         </header>
-        <div className="assessment-version-roster-summary"><Badge tone="blue">{versionedStudents.length} aluno{versionedStudents.length !== 1 ? 's' : ''}</Badge><span>Notas exibidas na escala de 0 a 10.</span></div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr>{sortableStudentHeader('name', 'Aluno')}{sortableStudentHeader('class', 'Turma')}{sortableStudentHeader('grade', 'Nota geral')}{sortableStudentHeader('status', 'Situação')}{sortableStudentHeader('version', 'Versão do gabarito')}</tr></thead>
-            <tbody>{sortedStudentRows.map(({ student, classroom, version, allowedVersions, selectableVersions, result, resultTone, resultLabel }) => <tr key={student.id}><td><div className="assessment-version-student"><span style={{ background: `${classroom?.color}1c`, color: classroom?.color }}>{initials(student.name)}</span><div><strong>{student.name}</strong><small>{student.registration}</small></div></div></td><td><span className="class-tag" style={{ '--class-color': classroom?.color }}>{classroom?.name || 'Turma removida'}</span></td><td><div className={cn('assessment-student-grade', !result && 'empty')}><strong>{result ? formatSegesGrade(result.grade) : '—'}</strong>{result && <small>{Math.round(result.percentage)}%</small>}</div></td><td><Badge tone={resultTone}>{resultLabel}</Badge></td><td><select className="assessment-student-version-select" style={answerKeyVersionColor(assessment, version?.id)} value={version?.id || ''} onChange={(event) => changeStudentVersion(student, event.target.value)} disabled={closed || allowedVersions.length < 2} aria-label={`Versão do gabarito de ${student.name}`}>{selectableVersions.map((item) => <option value={item.id} style={answerKeyVersionColor(assessment, item.id)} key={item.id}>{item.label}</option>)}</select></td></tr>)}</tbody>
-          </table>
+        <div className="assessment-area-summary">
+          {areaSummary.map(([area, count]) => <span key={area}><strong>{area}</strong><small>{count} {count === 1 ? 'questão' : 'questões'}</small></span>)}
         </div>
-        {!versionedStudents.length && <div className="assessment-version-roster-empty">Nenhum aluno ativo nesta turma.</div>}
+        {editingAreas && <div className="assessment-area-editing">
+          <div className="assessment-area-safety-note"><AlertTriangle size={17} /><p><strong>Alteração segura</strong><span>As respostas, os gabaritos e as notas não mudam. Resultados por área serão reagrupados, inclusive nas {submissions.length} {submissions.length === 1 ? 'correção existente' : 'correções existentes'}.</span></p></div>
+          <div className="assessment-area-bulk">
+            <Field label="Aplicar uma área a todas"><div className="assessment-area-choice"><input value={bulkAreaDraft} onChange={(event) => setBulkAreaDraft(event.target.value)} placeholder="Digite uma área personalizada" /><select value={declaredAreaOptions.includes(bulkAreaDraft) ? bulkAreaDraft : ''} onChange={(event) => event.target.value && setBulkAreaDraft(event.target.value)} aria-label="Escolher área cadastrada para todas as questões"><option value="">Escolher área cadastrada</option>{declaredAreaOptions.map((area) => <option value={area} key={area}>{area}</option>)}</select></div></Field>
+            <Button variant="secondary" size="sm" icon={Layers3} onClick={applyDetailAreaToAll}>Aplicar</Button>
+          </div>
+          <div className="assessment-area-grid">
+            {areaDraft.map((area, index) => <label key={index}><span>Questão {String(index + 1).padStart(2, '0')}</span><div className="assessment-area-choice"><input value={area} onChange={(event) => changeQuestionArea(index, event.target.value)} placeholder="Digite uma área personalizada" /><select value={declaredAreaOptions.includes(area) ? area : ''} onChange={(event) => event.target.value && changeQuestionArea(index, event.target.value)} aria-label={`Escolher área cadastrada para a questão ${index + 1}`}><option value="">Escolher área cadastrada</option>{declaredAreaOptions.map((option) => <option value={option} key={option}>{option}</option>)}</select></div></label>)}
+          </div>
+          <div className="assessment-area-actions"><Button variant="ghost" size="sm" icon={X} onClick={cancelEditingAreas}>Cancelar</Button><Button size="sm" icon={CheckCircle2} onClick={saveQuestionAreas}>Salvar áreas</Button></div>
+        </div>}
       </section>
+      </>}
+
+      {detailTab === 'tri' && <>
+      <section className="assessment-detail-areas assessment-tri">
+        <header>
+          <div><h3>Nota TRI (opcional)</h3><p>Calcula, ao lado da nota atual, uma nota pela Teoria de Resposta ao Item, no modelo do ENEM, só nas turmas que você escolher. Acertar as fáceis e errar as difíceis vale mais que o contrário, o que reduz o peso do chute.</p></div>
+          <label className="tri-toggle"><input type="checkbox" checked={triEnabled} onChange={(event) => toggleTri(event.target.checked)} /><span>{triEnabled ? 'Ativada' : 'Desativada'}</span></label>
+        </header>
+        {triEnabled && <TriSettings assessment={assessment} classes={data.classes} setData={setData} notify={notify} triStatus={triStatus} />}
+      </section>
+      </>}
 
       <Modal
         open={Boolean(pendingAnswerRevision)}
