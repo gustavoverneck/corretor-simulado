@@ -18,6 +18,9 @@ import { getQuestionAreas } from './knowledgeAreas.js'
 import { answerKeyGroups } from './teacherInsights.js'
 import { CANCELLED_ANSWER, getAnswerKeyVersions } from './assessment.js'
 import { enemScore, ENEM_AREAS } from './enemTri.js'
+import { enemTriForSubmission } from './enemItems.js'
+
+export { enemItemGroup, enemItemsReady, enemTriForSubmission } from './enemItems.js'
 
 export const TRI_MIN_SHEETS = 30
 export const TRI_RELIABLE_SHEETS = 100
@@ -45,14 +48,6 @@ export function triClassIds(assessment) {
   return selected.length ? selected : assessment?.classIds || []
 }
 
-// Parâmetros oficiais gravados para a versão usada na folha.
-export function enemTriForSubmission(assessment, submission) {
-  const versions = assessment?.tri?.enem?.versions || []
-  const byId = versions.find((item) => item.versionId && item.versionId === submission.answerKeyVersionId)
-  if (byId) return byId
-  const signature = JSON.stringify(submission.answerKeySnapshot || [])
-  return versions.find((item) => item.keySignature === signature) || (versions.length === 1 && getAnswerKeyVersions(assessment).length === 1 ? versions[0] : null)
-}
 
 function computeEnemScores(assessment, valid) {
   const scores = new Map()
@@ -240,3 +235,4 @@ export function triGroupMessage(group) {
   if (group.sheets < TRI_RELIABLE_SHEETS) return `${group.label}: ${group.sheets} folhas. A nota TRI já é calculada, mas ainda oscila; fica mais estável a partir de ${TRI_RELIABLE_SHEETS}.`
   return ''
 }
+

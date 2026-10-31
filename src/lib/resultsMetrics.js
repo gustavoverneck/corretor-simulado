@@ -1,7 +1,14 @@
 import { getAssessmentForSubmission, getAssessmentForVersion, getAnswerKeyVersions } from './assessment.js'
 import { getQuestionAreas } from './knowledgeAreas.js'
+import { enemItemGroup } from './enemItems.js'
 
 function resultConfigurations(assessment, submissions) {
+  // Versões do ENEM (cores) com parâmetros oficiais: as questões são juntadas
+  // pelo item oficial, não pela posição na folha.
+  const enemGroup = enemItemGroup(assessment, submissions)
+  if (enemGroup) {
+    return [{ assessment: { ...enemGroup.assessment, title: `${assessment.title} · numeração ${enemGroup.referenceLabel}`, questionNumbers: enemGroup.questions.map((question) => question.number) }, submissions: enemGroup.submissions }]
+  }
   const versions = getAnswerKeyVersions(assessment)
   const distinctStructure = new Set(versions.map((version) => JSON.stringify(getQuestionAreas(getAssessmentForVersion(assessment, version))))).size > 1
   if (!distinctStructure) return [{ assessment: getAssessmentForVersion(assessment, versions[0]), submissions }]
@@ -84,7 +91,7 @@ export function calculateQuestionResults(assessments, submissions, selectedAreas
     const questionAreas = getQuestionAreas(assessment)
     return questionAreas.map((questionArea, index) => {
       if (selectedAreas.length && !selectedAreas.includes(questionArea)) return null
-      const result = { id: `${assessment.id}:${assessment.resultVersionId ? `${assessment.resultVersionId}:` : ''}${index}`, assessmentId: assessment.id, assessmentTitle: assessment.title, assessmentCode: assessment.code, index, number: index + 1, area: questionArea, attempts: 0, correct: 0, wrong: 0, blank: 0, cancelled: 0, review: 0, score: 0 }
+      const result = { id: `${assessment.id}:${assessment.resultVersionId ? `${assessment.resultVersionId}:` : ''}${index}`, assessmentId: assessment.id, assessmentTitle: assessment.title, assessmentCode: assessment.code, index, number: assessment.questionNumbers?.[index] ?? index + 1, area: questionArea, attempts: 0, correct: 0, wrong: 0, blank: 0, cancelled: 0, review: 0, score: 0 }
       submissions.filter((submission) => submission.assessmentId === assessment.id).forEach((submission) => {
         const answer = submission.answers?.[index]
         if (!answer) return

@@ -46,6 +46,7 @@ export function parseItensProva(text, year) {
     provas.get(co).items.push({
       position: Number(get('CO_POSICAO')),
       key: String(get('TX_GABARITO') || '').toUpperCase(),
+      item: column('CO_ITEM') >= 0 ? String(get('CO_ITEM') || '') : '',
       a: parseNumber(get('NU_PARAM_A')),
       b: parseNumber(get('NU_PARAM_B')),
       c: parseNumber(get('NU_PARAM_C')),
@@ -60,7 +61,7 @@ export function parseItensProva(text, year) {
 }
 
 // Formato compacto usado no arquivo que acompanha o app:
-// item = [posição, gabarito, a, b, c, língua, abandonado].
+// item = [posição, gabarito, a, b, c, língua, abandonado, código do item].
 export function compactDataset(dataset) {
   return {
     year: dataset.year,
@@ -68,7 +69,7 @@ export function compactDataset(dataset) {
       co: prova.co,
       area: prova.area,
       cor: prova.cor,
-      items: prova.items.map((item) => [item.position, item.key, item.a, item.b, item.c, item.language, item.abandoned ? 1 : 0]),
+      items: prova.items.map((item) => [item.position, item.key, item.a, item.b, item.c, item.language, item.abandoned ? 1 : 0, item.item || '']),
     })),
   }
 }
@@ -78,7 +79,7 @@ export function expandDataset(compact) {
     year: compact.year,
     provas: compact.provas.map((prova) => ({
       ...prova,
-      items: prova.items.map(([position, key, a, b, c, language, abandoned]) => ({ position, key, a, b, c, language, abandoned: Boolean(abandoned), skill: '' })),
+      items: prova.items.map(([position, key, a, b, c, language, abandoned, item = '']) => ({ position, key, a, b, c, language, abandoned: Boolean(abandoned), skill: '', item })),
     })),
   }
 }
@@ -147,7 +148,7 @@ export function buildVersionTri(answerKey, dataset) {
   segments.forEach((segment) => {
     segment.sequence.forEach((item, index) => {
       if (item.abandoned || item.a === null || item.b === null || item.c === null) return
-      items[segment.offset + index] = { area: segment.prova.area, a: item.a, b: item.b, c: item.c }
+      items[segment.offset + index] = { area: segment.prova.area, a: item.a, b: item.b, c: item.c, ...(item.item ? { item: item.item } : {}) }
     })
   })
   return {

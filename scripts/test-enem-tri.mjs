@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { buildVersionTri, compactDataset, eapTheta, ENEM_AREAS, ENEM_SCALE, expandDataset, matchVersion, parseItensProva, provaSequence } from '../src/lib/enemTri.js'
-import { computeTriScores, triClassIds } from '../src/lib/tri.js'
+import { computeTriScores, enemItemGroup, triClassIds } from '../src/lib/tri.js'
+import { calculateQuestionResults } from '../src/lib/results.js'
 
 const dataset = parseItensProva(readFileSync('data/enem/2025/itens.csv', 'utf8'), 2025)
 const bundled = expandDataset(JSON.parse(readFileSync('src/data/enem2025.json', 'utf8')))
@@ -64,5 +65,29 @@ assert.equal(groups[0].scored, 2)
 const pending = computeTriScores({ ...assessment, tri: { ...assessment.tri, enem: null } }, [sheet('s1', 'c1', 40)])
 assert.equal(pending.scores.size, 0)
 assert.equal(pending.groups[0].status, 'unmatched')
+
+// 4. Cores juntadas pela questão oficial (análise por questão).
+const chAzul = byCo.get('1447')
+const azulIng = [...keyOf(lcAzul, 0), ...keyOf(chAzul, 0)]
+const amarelaEsp = [...keyOf(byCo.get('1460'), 1), ...keyOf(chAmarela, 0)]
+const versionsDef = [{ id: 'azul', label: 'Azul inglês', answerKey: azulIng }, { id: 'amarela', label: 'Amarela espanhol', answerKey: amarelaEsp }]
+const multi = {
+  id: 'multi', classIds: ['c1'], questionCount: 90, answerKey: azulIng, answerKeyVersions: versionsDef,
+  questionAreas: Array.from({ length: 90 }, (_, index) => index < 45 ? ENEM_AREAS.LC : ENEM_AREAS.CH),
+  tri: { enabled: true, mode: 'enem', enem: { versions: versionsDef.map((version) => ({ versionId: version.id, label: version.label, keySignature: JSON.stringify(version.answerKey), ...buildVersionTri(version.answerKey, dataset) })) } },
+}
+// O aluno da azul acerta só a 1ª questão de Humanas da azul; a da amarela acerta a mesma questão oficial, que está em outra posição.
+const firstCh = multi.tri.enem.versions[0].items[45].item
+const amarelaPosition = multi.tri.enem.versions[1].items.findIndex((item) => item?.item === firstCh)
+const multiSheet = (id, version, correctAt) => ({ id, assessmentId: 'multi', classId: 'c1', answerKeyVersionId: version, answers: Array.from({ length: 90 }, (_, index) => ({ status: index === correctAt ? 'correct' : 'wrong' })) })
+const unified = enemItemGroup(multi, [multiSheet('x1', 'azul', 45), multiSheet('x2', 'amarela', amarelaPosition)])
+assert.equal(unified.referenceLabel, 'Azul inglês')
+assert.equal(unified.excluded, 5, 'as 5 de língua estrangeira ficam fora')
+assert.equal(unified.questions.length, 85)
+const chIndex = unified.questions.findIndex((question) => question.code === firstCh)
+assert.equal(unified.questions[chIndex].number, 46, 'numeração da azul')
+assert.deepEqual(unified.submissions.map((submission) => submission.answers[chIndex].status), ['correct', 'correct'])
+const chart = calculateQuestionResults([multi], [multiSheet('x1', 'azul', 45), multiSheet('x2', 'amarela', amarelaPosition)])
+assert.equal(chart.find((item) => item.number === 46).score, 100, 'gráfico por questão junta as cores')
 
 console.log(`ENEM TRI: ${checked} notas oficiais reproduzidas (diferença máx. ${worst.toFixed(2)}), versões e turmas ok`)
