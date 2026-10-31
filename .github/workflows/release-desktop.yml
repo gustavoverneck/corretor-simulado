@@ -35,7 +35,15 @@ jobs:
         id: version
         shell: bash
         run: |
-          VERSION="0.2.${{ github.run_number }}"
+          # Versão = major.minor do package.json + número da execução a partir
+          # de RUN_OFFSET. A 1.0 começou na execução 13 (a 12 publicou a v0.2.12).
+          # Ao subir major/minor no package.json, atualize RUN_OFFSET para o
+          # número da próxima execução, para o patch voltar a 0.
+          RUN_OFFSET=13
+          BASE=$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")
+          PATCH=$(( ${{ github.run_number }} - RUN_OFFSET ))
+          if [ "$PATCH" -lt 0 ]; then PATCH=0; fi
+          VERSION="$BASE.$PATCH"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 

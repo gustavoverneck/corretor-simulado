@@ -148,7 +148,7 @@ export function buildVersionTri(answerKey, dataset) {
   segments.forEach((segment) => {
     segment.sequence.forEach((item, index) => {
       if (item.abandoned || item.a === null || item.b === null || item.c === null) return
-      items[segment.offset + index] = { area: segment.prova.area, a: item.a, b: item.b, c: item.c, ...(item.item ? { item: item.item } : {}) }
+      items[segment.offset + index] = { area: segment.prova.area, a: item.a, b: item.b, c: item.c, ...(item.item ? { item: item.item } : {}), ...(item.skill ? { skill: Number(item.skill) } : {}) }
     })
   })
   return {
