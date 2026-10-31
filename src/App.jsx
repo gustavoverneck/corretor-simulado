@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutDashboard, UsersRound, ClipboardList, ScanLine, BarChart3, Upload,
   Settings, Search, ChevronDown, GraduationCap, Menu, X, HelpCircle, HardDrive,
-  PanelLeftClose, PanelLeftOpen, GitCompare, AlertTriangle, Download, UserRound,
+  PanelLeftClose, PanelLeftOpen, GitCompare, AlertTriangle, Download,
 } from 'lucide-react'
 import { createInitialState } from './data'
 import { DashboardPage } from './pages/DashboardPage'
@@ -13,7 +13,6 @@ import { SegesImportPage } from './pages/SegesImportPage'
 import { ResultsPage } from './pages/ResultsPage'
 import { CorrelationPage } from './pages/CorrelationPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { StudentsReportPage } from './pages/StudentsReportPage'
 import { Button, Toast } from './components/ui'
 import { cn, formatDateTime } from './lib/utils'
 import { getQuestionAreas } from './lib/knowledgeAreas'
@@ -29,7 +28,6 @@ const navigation = [
   { id: 'assessments', label: 'Simulados', icon: ClipboardList },
   { id: 'correction', label: 'Correção', icon: ScanLine },
   { id: 'results', label: 'Resultados', icon: BarChart3 },
-  { id: 'students', label: 'Alunos', icon: UserRound },
   { id: 'correlation', label: 'Análise', icon: GitCompare },
   { id: 'import', label: 'Importar SEGES', icon: Upload },
 ]
@@ -40,7 +38,6 @@ const titles = {
   assessments: ['Simulados', 'Crie, aplique e acompanhe seus instrumentos avaliativos.'],
   correction: ['Central de correção', 'Digitalize folhas e revise marcações com segurança.'],
   results: ['Resultados', 'Transforme respostas em decisões pedagógicas.'],
-  students: ['Relatório do aluno', 'Notas por simulado e por área, evolução e boletim de cada aluno.'],
   correlation: ['Análise', 'Entenda o desempenho das questões, das áreas e dos alunos em cada simulado.'],
   import: ['Importar do SEGES', 'Atualize alunos e turmas a partir de um relatório oficial.'],
   settings: ['Configurações', 'Ajuste a escola, a leitura óptica e o banco de dados local.'],
@@ -240,7 +237,6 @@ function Workspace({ initialData, backend }) {
           {page === 'assessments' && <AssessmentsPage {...context} />}
           {page === 'correction' && <CorrectionPage {...context} />}
           {page === 'results' && <ResultsPage {...context} />}
-          {page === 'students' && <StudentsReportPage {...context} />}
           {page === 'correlation' && <CorrelationPage {...context} />}
           {page === 'import' && <SegesImportPage {...context} />}
           {page === 'settings' && <SettingsPage {...context} />}

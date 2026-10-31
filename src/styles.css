@@ -1407,3 +1407,7 @@ td.is-advanced strong, td.is-advanced { color: #2f6a59; }
   .students-report-page { grid-template-columns: 1fr; }
   .students-report-list { position: static; max-height: 420px; }
 }
+.student-report-link { padding: 0; border: 0; display: block; color: #283730; background: transparent; font-size: 10.5px; font-weight: 700; text-align: left; cursor: pointer; }
+.student-report-link:hover { color: #3f665b; text-decoration: underline; }
+.class-open-actions { display: flex; gap: 14px; }
+.class-open-actions .class-open:first-child { width: auto; justify-content: flex-start; }

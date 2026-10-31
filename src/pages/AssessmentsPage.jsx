@@ -192,7 +192,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
 
   function toggleTri(enabled) {
     setData((current) => ({ ...current, assessments: current.assessments.map((item) => item.id === assessment.id ? setTriEnabled(item, enabled) : item) }))
-    notify(enabled ? 'Nota TRI ativada' : 'Nota TRI desativada', enabled ? 'A nota TRI aparece ao lado da nota atual na aba Alunos e no boletim. As notas e exportações atuais não mudam.' : 'A nota TRI deixou de ser mostrada para este simulado.')
+    notify(enabled ? 'Nota TRI ativada' : 'Nota TRI desativada', enabled ? 'A nota TRI aparece ao lado da nota atual no relatório do aluno e no boletim. As notas e exportações atuais não mudam.' : 'A nota TRI deixou de ser mostrada para este simulado.')
   }
   const submissionsByStudent = useMemo(
     () => indexAssessmentSubmissions(data.submissions, assessment.id),

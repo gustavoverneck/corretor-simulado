@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Award, FileDown, Search, Target, TrendingDown, TrendingUp, UserRound, UsersRound, X } from 'lucide-react'
-import { Badge, Button, EmptyState, StatCard } from '../components/ui'
-import { StudentResultModal } from '../components/StudentResultModal'
+import { Badge, Button, EmptyState, StatCard } from './ui'
+import { StudentResultModal } from './StudentResultModal'
 import { ATTENTION_DROP, ATTENTION_SCORE, buildClassBenchmarks, buildStudentReport } from '../lib/studentReport'
 import { createStudentReportPdf, formatDelta, STATUS_LABELS, studentReportFilename } from '../lib/studentReportPdf'
 import { calculateSubmissionMetrics } from '../lib/resultsMetrics'
@@ -52,12 +52,12 @@ function EvolutionChart({ report }) {
   )
 }
 
-export function StudentsReportPage({ data, notify }) {
+export function StudentsReport({ data, notify, initialClassId = null, initialStudentId = null }) {
   const classes = useMemo(() => [...data.classes].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true })), [data.classes])
-  const [classId, setClassId] = useState(() => classes[0]?.id || '')
+  const [classId, setClassId] = useState(() => initialClassId || classes[0]?.id || '')
   const [search, setSearch] = useState('')
   const [onlyAttention, setOnlyAttention] = useState(false)
-  const [studentId, setStudentId] = useState(null)
+  const [studentId, setStudentId] = useState(initialStudentId)
   const [openAssessmentId, setOpenAssessmentId] = useState(null)
   const [exporting, setExporting] = useState(false)
 
