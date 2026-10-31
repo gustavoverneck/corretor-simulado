@@ -26,6 +26,7 @@ function flushWindow(window) {
 function createWindow() {
   const mainWindow = new BrowserWindow({
     title: appName,
+    icon: path.join(__dirname, 'icon.png'),
     width: 1440,
     height: 900,
     minWidth: 980,

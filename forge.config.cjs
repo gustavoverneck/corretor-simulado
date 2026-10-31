@@ -3,6 +3,8 @@ module.exports = {
     asar: true,
     executableName: 'CorretorSimulados',
     appBundleId: 'br.com.luma.corretorsimulados',
+    // Ícone do executável (Windows usa build/icon.ico; macOS, build/icon.icns se houver)
+    icon: './build/icon',
   },
   makers: [
     {
@@ -12,6 +14,9 @@ module.exports = {
         name: 'CorretorSimulados',
         authors: 'Luma',
         description: 'Aplicativo local para criação, impressão e correção de simulados.',
+        // Ícone do instalador e de "Aplicativos instalados" no Windows
+        setupIcon: './build/icon.ico',
+        iconUrl: 'https://raw.githubusercontent.com/gustavoverneck/corretor-simulado/main/build/icon.ico',
       },
     },
     {
