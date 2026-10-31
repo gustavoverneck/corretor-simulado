@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { UploadCloud, FileSpreadsheet, Database, CheckCircle2, AlertTriangle, Download, ArrowRight, RefreshCw, ShieldCheck, Clock3, FileCheck2, Info, X } from 'lucide-react'
+import { ArrowLeft, UploadCloud, FileSpreadsheet, Database, CheckCircle2, AlertTriangle, Download, ArrowRight, RefreshCw, ShieldCheck, Clock3, FileCheck2, Info, X } from 'lucide-react'
 import { Badge, Button } from '../components/ui'
 import { autoMapHeaders, fieldDefinitions, importSegesRows, isSegesRowEligible, mappingSources, readSegesFile, resolveSegesValue, sampleCsv, validateMapping } from '../lib/seges'
 import { cn, downloadBlob, formatDateTime } from '../lib/utils'
@@ -68,6 +68,7 @@ export function SegesImportPage({ data, setData, setPage, notify }) {
 
   return (
     <div className="page-stack seges-page">
+      <div><Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => setPage('people')}>Voltar para Turmas e alunos</Button></div>
       <div className="seges-intro">
         <div className="seges-logo"><Database size={25} /><span>ES</span></div>
         <div><div className="eyebrow">IMPORTAÇÃO LOCAL</div><h2>Relatório de alunos do SEGES</h2><p>Importe a planilha ou o PDF de alunos por turma exportado do Sistema Estadual de Gestão Escolar. O Sistema de Avaliações organiza matrículas e cria as turmas automaticamente.</p></div>
