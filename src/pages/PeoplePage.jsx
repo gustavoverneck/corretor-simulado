@@ -10,6 +10,7 @@ import { classColors } from '../data'
 import { readPastedTable, readSegesFile } from '../lib/seges'
 import { cn, downloadBlob, initials, nextStudentRegistration, normalize, uid } from '../lib/utils'
 import { StudentsReport } from '../components/StudentsReport'
+import { ClassReport } from '../components/ClassReport'
 
 function suggestStudentNameColumn(headers) {
   return headers.find((header) => {
@@ -23,7 +24,8 @@ export function PeoplePage({ data, setData, setPage, notify, initialSearch }) {
   const rememberedSearch = sessionStorage.getItem('luma-search') || ''
   const [search, setSearch] = useState(rememberedSearch || initialSearch || '')
   const [selectedClass, setSelectedClass] = useState('all')
-  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') === 'report' ? 'report' : 'students')
+  const [tab, setTab] = useState(() => { const value = new URLSearchParams(window.location.search).get('tab'); return value === 'report' || value === 'class-report' ? value : 'students' })
+  const [classReportTarget, setClassReportTarget] = useState({ classId: null, key: 0 })
   const [reportTarget, setReportTarget] = useState({ classId: null, studentId: null, key: 0 })
   const [studentModal, setStudentModal] = useState(false)
   const [editingStudent, setEditingStudent] = useState(null)
@@ -393,22 +395,30 @@ export function PeoplePage({ data, setData, setPage, notify, initialSearch }) {
     setTab('report')
   }
 
+  function openClassReport(classId) {
+    setClassReportTarget((current) => ({ classId, key: current.key + 1 }))
+    setTab('class-report')
+  }
+
   return (
     <div className="page-stack">
       <div className="page-actions-row">
         <div className="segmented-tabs">
           <button className={cn(tab === 'students' && 'active')} onClick={() => setTab('students')}>Alunos <span>{data.students.length}</span></button>
           <button className={cn(tab === 'classes' && 'active')} onClick={() => setTab('classes')}>Turmas <span>{data.classes.length}</span></button>
+          <button className={cn(tab === 'class-report' && 'active')} onClick={() => setTab('class-report')}>Relatório da turma</button>
           <button className={cn(tab === 'report' && 'active')} onClick={() => setTab('report')}>Relatório do aluno</button>
         </div>
         <div className="right-actions">
           <Button variant="secondary" icon={Download} onClick={exportStudents}>Exportar</Button>
           <Button variant="secondary" icon={Database} onClick={() => setPage('import')}>Importar SEGES</Button>
-          {tab !== 'report' && <Button icon={tab === 'students' ? UserPlus : Plus} onClick={() => tab === 'students' ? openNewStudentModal() : openNewClassModal()}>{tab === 'students' ? 'Adicionar aluno' : 'Nova turma'}</Button>}
+          {tab !== 'report' && tab !== 'class-report' && <Button icon={tab === 'students' ? UserPlus : Plus} onClick={() => tab === 'students' ? openNewStudentModal() : openNewClassModal()}>{tab === 'students' ? 'Adicionar aluno' : 'Nova turma'}</Button>}
         </div>
       </div>
 
-      {tab === 'report' ? (
+      {tab === 'class-report' ? (
+        <ClassReport key={classReportTarget.key} data={data} initialClassId={classReportTarget.classId} onOpenStudent={(student) => openReport(student.classId, student.id)} />
+      ) : tab === 'report' ? (
         <StudentsReport key={reportTarget.key} data={data} notify={notify} initialClassId={reportTarget.classId} initialStudentId={reportTarget.studentId} />
       ) : tab === 'students' ? (
         <section className="panel people-panel">
@@ -484,7 +494,7 @@ export function PeoplePage({ data, setData, setPage, notify, initialSearch }) {
                 <h3>{classroom.name}</h3><p>{classroom.grade} · {classroom.shift}</p>
                 <div className="class-stats"><span><strong>{members.length}</strong> alunos ativos</span><span><strong>{assessments.length}</strong> simulados</span></div>
                 <div className="avatar-stack">{members.slice(0, 5).map((student) => <i key={student.id}>{initials(student.name)}</i>)}{members.length > 5 && <em>+{members.length - 5}</em>}</div>
-                <div className="class-open-actions"><button className="class-open" onClick={() => openReport(classroom.id, null)}>Relatório</button><button className="class-open" onClick={() => { setTab('students'); setSelectedClass(classroom.id) }}>Ver alunos <ChevronRight size={16} /></button></div>
+                <div className="class-open-actions"><button className="class-open" onClick={() => openClassReport(classroom.id)}>Relatório da turma</button><button className="class-open" onClick={() => { setTab('students'); setSelectedClass(classroom.id) }}>Ver alunos <ChevronRight size={16} /></button></div>
               </article>
             )
           })}
