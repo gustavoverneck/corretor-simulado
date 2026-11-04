@@ -3,6 +3,7 @@ const path = require('node:path')
 const scanArchive = require('./scanArchive.cjs')
 const autoBackup = require('./autoBackup.cjs')
 const updater = require('./updater.cjs')
+const { createLanShare } = require('./lanShare.cjs')
 
 if (require('electron-squirrel-startup')) app.quit()
 
@@ -118,18 +119,32 @@ function registerAutoBackup() {
   })
 }
 
+// Compartilhamento somente leitura na rede local (desligado a cada abertura do app).
+let lanShare = null
+function registerLanShare() {
+  lanShare = createLanShare({ distDir: path.join(__dirname, '..', 'dist'), userDataPath: app.getPath('userData') })
+  ipcMain.handle('lan-share:status', () => lanShare.getStatus())
+  ipcMain.handle('lan-share:start', () => lanShare.start())
+  ipcMain.handle('lan-share:stop', () => lanShare.stop())
+  ipcMain.handle('lan-share:regenerate-code', () => lanShare.regenerateCode())
+  ipcMain.handle('lan-share:publish', (_event, json) => lanShare.publish(json))
+}
+
 app.setName(appName)
 
 app.whenReady().then(() => {
   registerScanArchive()
   registerAutoBackup()
   registerUpdates()
+  registerLanShare()
   createWindow()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+
+app.on('will-quit', () => { lanShare?.stop() })
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

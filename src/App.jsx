@@ -2,9 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutDashboard, UsersRound, ClipboardList, ScanLine, BarChart3,
   Settings, Search, ChevronDown, GraduationCap, Menu, X, HelpCircle, HardDrive,
-  PanelLeftClose, PanelLeftOpen, GitCompare, AlertTriangle, Download,
+  PanelLeftClose, PanelLeftOpen, GitCompare, AlertTriangle, Download, Wifi,
 } from 'lucide-react'
-import { createInitialState } from './data'
 import { DashboardPage } from './pages/DashboardPage'
 import { PeoplePage } from './pages/PeoplePage'
 import { AssessmentsPage } from './pages/AssessmentsPage'
@@ -15,12 +14,13 @@ import { CorrelationPage } from './pages/CorrelationPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { Button, Toast } from './components/ui'
 import { cn, formatDateTime } from './lib/utils'
-import { getQuestionAreas } from './lib/knowledgeAreas'
 import { getPendingReviewSubmissions } from './lib/assessment'
 import { backupReminder, getStorageStatus, isQuotaError, loadStoredState, readBackupMeta, recordBackup, requestPersistentStorage, saveStoredState, snoozeBackupReminder } from './lib/storage'
 import { downloadBackup } from './lib/backup'
 import { createAutoBackupScheduler, getAutoBackupFolder, writeAutoBackup } from './lib/autoBackup'
-import { normalizeSubmissionVoid } from './lib/voidedSubmission'
+import { normalizeState } from './lib/normalizeState'
+import { createLanPublisher, getLanShareStatus, isLanShareSupported, regenerateLanShareCode, startLanShare, stopLanShare } from './lib/lanShare'
+import { LanShareModal } from './components/LanShareModal'
 
 const SAVE_DELAY_MS = 400
 
@@ -45,15 +45,6 @@ const titles = {
   correlation: ['Análise', 'Entenda o desempenho das questões, das áreas e dos alunos em cada simulado.'],
   import: ['Importar do SEGES', 'Atualize alunos e turmas a partir de um relatório oficial.'],
   settings: ['Configurações', 'Ajuste a escola, a leitura óptica e o banco de dados local.'],
-}
-
-function normalizeState(parsed) {
-  if (!parsed) return createInitialState()
-  const assessments = Array.isArray(parsed?.assessments)
-    ? parsed.assessments.map((assessment) => ({ ...assessment, questionAreas: getQuestionAreas(assessment) }))
-    : parsed.assessments
-  const submissions = Array.isArray(parsed?.submissions) ? parsed.submissions.map(normalizeSubmissionVoid) : parsed.submissions
-  return { ...parsed, assessments, submissions }
 }
 
 function formatBytes(bytes) {
@@ -96,6 +87,11 @@ function Workspace({ initialData, backend }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [toast, setToast] = useState(null)
   const [globalSearch, setGlobalSearch] = useState('')
+  const [lanShareOpen, setLanShareOpen] = useState(false)
+  const [lanShare, setLanShare] = useState(null)
+  const [lanShareBusy, setLanShareBusy] = useState(false)
+  const [lanShareError, setLanShareError] = useState(null)
+  const lanPublisher = useRef(null)
 
   const pendingSave = useRef(null)
   const firstRender = useRef(true)
@@ -155,6 +151,40 @@ function Workspace({ initialData, backend }) {
     pendingSave.current = null
     await Promise.all([snapshot ? persist(snapshot) : null, autoBackupScheduler.current?.flush()])
   }), [persist])
+
+  // Compartilhamento somente leitura na rede local (só no desktop).
+  useEffect(() => { if (isLanShareSupported()) getLanShareStatus().then(setLanShare).catch(() => {}) }, [])
+  const lanShareEnabled = Boolean(lanShare?.enabled)
+  useEffect(() => {
+    if (!lanShareEnabled) return undefined
+    const publisher = createLanPublisher({ onError: (error) => setLanShareError(error.message) })
+    lanPublisher.current = publisher
+    publisher.now(latestData.current).then(() => getLanShareStatus().then(setLanShare).catch(() => {}))
+    const timer = window.setInterval(() => getLanShareStatus().then(setLanShare).catch(() => {}), 15000)
+    return () => { window.clearInterval(timer); publisher.cancel(); lanPublisher.current = null }
+  }, [lanShareEnabled])
+  useEffect(() => { lanPublisher.current?.changed(data) }, [data])
+  useEffect(() => {
+    if (lanShareOpen && lanShareEnabled) getLanShareStatus().then(setLanShare).catch(() => {})
+  }, [lanShareOpen, lanShareEnabled])
+
+  async function toggleLanShare() {
+    setLanShareBusy(true)
+    setLanShareError(null)
+    try {
+      setLanShare(await (lanShareEnabled ? stopLanShare() : startLanShare()))
+    } catch (error) {
+      setLanShareError(error.message)
+    } finally {
+      setLanShareBusy(false)
+    }
+  }
+
+  async function regenerateLanCode() {
+    if (!window.confirm('Gerar um novo código? Quem está consultando agora precisará digitar o novo código.')) return
+    setLanShareBusy(true)
+    try { setLanShare(await regenerateLanShareCode()) } catch (error) { setLanShareError(error.message) } finally { setLanShareBusy(false) }
+  }
 
   useEffect(() => {
     if (!toast || toast.tone === 'loading') return undefined
@@ -256,7 +286,7 @@ function Workspace({ initialData, backend }) {
             <kbd>⌘ K</kbd>
           </div>
           <div className="top-actions">
-            <div className="local-mode"><HardDrive size={16} /><span><strong>Modo local</strong><small>Dados neste dispositivo</small></span></div>
+            <button type="button" className={cn('local-mode', lanShareEnabled && 'is-sharing')} onClick={() => setLanShareOpen(true)} title="Compartilhar resultados na rede local">{lanShareEnabled ? <Wifi size={16} /> : <HardDrive size={16} />}<span><strong>{lanShareEnabled ? 'Compartilhando na rede' : 'Modo local'}</strong><small>{lanShareEnabled ? `${lanShare.viewers || 0} ${lanShare.viewers === 1 ? 'professor consultando' : 'professores consultando'}` : 'Dados neste dispositivo'}</small></span></button>
           </div>
         </header>
 
@@ -277,6 +307,7 @@ function Workspace({ initialData, backend }) {
         </section>
       </main>
 
+      <LanShareModal open={lanShareOpen} onClose={() => setLanShareOpen(false)} status={lanShare} busy={lanShareBusy} error={lanShareError} onToggle={toggleLanShare} onRegenerate={regenerateLanCode} />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   )
