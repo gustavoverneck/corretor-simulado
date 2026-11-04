@@ -15,6 +15,7 @@ import { describeVoid, isSubmissionVoided } from '../lib/voidedSubmission'
 import { MultiFilter } from '../components/MultiFilter'
 import { ResultsReportModal } from '../components/ResultsReportModal'
 import { StudentResultModal } from '../components/StudentResultModal'
+import { PERCENT_BIN_WIDTH, ScoreHistogram } from '../components/ScoreHistogram'
 import { calculateSubmissionMetrics, calculateAreaResults, calculateQuestionResults, resolveSelection } from '../lib/results'
 
 const areaColors = ['#47776a', '#a47245', '#6b6682', '#52718a', '#a65f5a', '#748b5f', '#8b6d48', '#5d7180']
@@ -40,82 +41,6 @@ function toggleChartSelection(selected, value, allValues) {
   if (!selected.includes(value)) return [...selected, value]
   const next = selected.filter((item) => item !== value)
   return next.length ? next : allValues
-}
-
-// Histograma das notas em intervalos de 5 pontos, sem agrupar nas faixas pedagógicas.
-const SCORE_BIN_WIDTH = 5
-const scoreBins = Array.from({ length: 100 / SCORE_BIN_WIDTH }, (_, index) => {
-  const min = index * SCORE_BIN_WIDTH
-  const max = min + SCORE_BIN_WIDTH
-  const last = max === 100
-  return { min, max: last ? 101 : max, label: `${min}–${last ? 100 : max - 1}%`, color: performanceBands.find((band) => min >= band.min && min < band.max)?.color || '#7b9b72' }
-})
-
-function scoreBinIndex(score) {
-  return Math.min(scoreBins.length - 1, Math.max(0, Math.floor(Number(score) / SCORE_BIN_WIDTH)))
-}
-
-function median(values) {
-  if (!values.length) return null
-  const sorted = [...values].sort((first, second) => first - second)
-  const middle = Math.floor(sorted.length / 2)
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
-}
-
-function ScoreHistogram({ rows, classes, byClass, percent }) {
-  const [hover, setHover] = useState(null)
-  const countBins = (items) => {
-    const counts = scoreBins.map(() => 0)
-    items.forEach((item) => { counts[scoreBinIndex(item.score)] += 1 })
-    return counts.map((count) => ({ count, percent: items.length ? count / items.length * 100 : 0 }))
-  }
-  const general = countBins(rows)
-  const series = byClass ? classes.map(({ classroom, color }) => ({ classroom, color, bins: countBins(rows.filter((item) => item.classId === classroom.id)) })).filter((item) => item.bins.some((bin) => bin.count)) : []
-  const value = (bin) => percent ? bin.percent : bin.count
-  const max = Math.max(1, ...(byClass ? series.flatMap((item) => item.bins.map(value)) : general.map(value)))
-  const size = { width: 640, height: 230, left: 30, right: 10, top: 22, bottom: 34 }
-  const plotWidth = size.width - size.left - size.right
-  const slot = plotWidth / scoreBins.length
-  const y = (v) => size.top + (1 - v / max) * (size.height - size.top - size.bottom)
-  const xScore = (score) => size.left + Math.min(100, Math.max(0, score)) / 100 * plotWidth
-  const scores = rows.map((item) => Number(item.score))
-  const mean = scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null
-  const middle = median(scores)
-  const format = (bin) => percent ? `${Math.round(bin.percent)}%` : bin.count
-  const ticks = [...new Set([0, 0.5, 1].map((share) => percent ? share * max : Math.round(share * max)))]
-  if (!rows.length) return <p className="student-chart-empty">Nenhuma correção no recorte.</p>
-  return (
-    <div className="student-chart score-histogram">
-      <div className="student-chart-legend">
-        {byClass && series.map((item) => <span key={item.classroom.id}><i style={{ borderTopColor: item.color }} /> {item.classroom.name}</span>)}
-        <span><i className="is-mean" /> Média {mean.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</span>
-        <span><i className="is-median" /> Mediana {middle.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</span>
-      </div>
-      <svg viewBox={`0 0 ${size.width} ${size.height}`} role="img" aria-label={`Distribuição das notas em intervalos de ${SCORE_BIN_WIDTH} pontos`} onMouseLeave={() => setHover(null)}>
-        {ticks.map((tick) => <g key={tick}><line x1={size.left} x2={size.width - size.right} y1={y(tick)} y2={y(tick)} className="grid" /><text x={size.left - 6} y={y(tick) + 3} textAnchor="end">{percent ? `${Math.round(tick)}%` : tick}</text></g>)}
-        {scoreBins.map((bin, index) => {
-          const x = size.left + index * slot
-          const data = general[index]
-          return <g key={bin.min} onMouseEnter={() => setHover(index)}>
-            <rect x={x} y={size.top} width={slot} height={y(0) - size.top} fill={hover === index ? '#eef3f0' : 'transparent'} />
-            {!byClass && data.count > 0 && <rect x={x + slot * 0.1} y={y(value(data))} width={slot * 0.8} height={Math.max(0, y(0) - y(value(data)))} rx="3" fill={bin.color} opacity=".9" />}
-            {!byClass && data.count > 0 && <text x={x + slot / 2} y={y(value(data)) - 5} textAnchor="middle" className="value-label">{format(data)}</text>}
-          </g>
-        })}
-        {series.map((item) => <polyline key={item.classroom.id} points={item.bins.map((bin, index) => `${size.left + (index + 0.5) * slot},${y(value(bin))}`).join(' ')} fill="none" stroke={item.color} strokeWidth="2" strokeLinejoin="round" pointerEvents="none" />)}
-        {series.map((item) => item.bins.map((bin, index) => bin.count > 0 && <circle key={`${item.classroom.id}-${index}`} cx={size.left + (index + 0.5) * slot} cy={y(value(bin))} r="3" fill={item.color} stroke="#fff" strokeWidth="1.5" pointerEvents="none" />))}
-        <line x1={xScore(middle)} x2={xScore(middle)} y1={size.top - 8} y2={y(0)} className="line-median" pointerEvents="none" />
-        <line x1={xScore(mean)} x2={xScore(mean)} y1={size.top - 8} y2={y(0)} className="line-mean" pointerEvents="none" />
-        {[0, 20, 40, 60, 80, 100].map((tick) => <text key={tick} x={xScore(tick)} y={size.height - 18} textAnchor="middle">{tick}%</text>)}
-        {performanceBands.map((band) => <rect key={band.id} x={xScore(band.min)} width={xScore(Math.min(100, band.max)) - xScore(band.min)} y={y(0) + 2} height="4" fill={band.color} opacity=".55" />)}
-        <text x={size.left + plotWidth / 2} y={size.height - 3} textAnchor="middle">Nota (% de acertos)</text>
-      </svg>
-      {hover !== null && <div className="student-chart-tooltip" style={{ left: `${(size.left + (hover + 0.5) * slot) / size.width * 100}%` }}>
-        <strong>{scoreBins[hover].label}</strong>
-        {byClass ? series.map((item) => <span key={item.classroom.id}>{item.classroom.name}: {item.bins[hover].count} aluno{item.bins[hover].count !== 1 ? 's' : ''} ({Math.round(item.bins[hover].percent)}% da turma)</span>) : <span>{general[hover].count} aluno{general[hover].count !== 1 ? 's' : ''} ({Math.round(general[hover].percent)}%)</span>}
-      </div>}
-    </div>
-  )
 }
 
 function ClassChartLegend({ classes }) {
@@ -571,8 +496,8 @@ export function ResultsPage({ data, notify }) {
       <div className="results-grid">
         <section className="panel class-comparison"><header className="panel-header"><div><h3>Comparativo por turma</h3><p>Clique para isolar uma turma; continue clicando para combinar outras</p></div></header><div className="horizontal-chart">{classResults.map((item) => <button type="button" className={cn(selectedClassIds.includes(item.classroom.id) && selectedClassIds.length < assessmentClasses.length && 'selected')} aria-pressed={selectedClassIds.includes(item.classroom.id) && selectedClassIds.length < assessmentClasses.length} key={item.classroom.id} onClick={() => toggleClass(item.classroom.id)}><span><strong>{item.classroom.name}</strong><small>{item.count} {multipleAssessments ? 'correções' : 'participantes'}</small></span><span><i style={{ width: `${item.avg}%`, background: item.classroom.color }} /><em>{item.avg}%</em></span></button>)}</div></section>
         <section className="panel distribution-panel">
-          <header className="panel-header"><div><h3>Distribuição de desempenho</h3><p>{distributionGrouping === 'bands' ? 'Clique para isolar uma faixa; continue clicando para combinar outras' : `Todas as notas em intervalos de ${SCORE_BIN_WIDTH} pontos · passe o mouse para ver os alunos em cada intervalo`}</p></div><div className="chart-panel-actions"><div className="chart-view-toggle" role="group" aria-label="Agrupamento da distribuição"><button type="button" className={distributionGrouping === 'bands' ? 'active' : ''} aria-pressed={distributionGrouping === 'bands'} title="Alunos agrupados nas faixas de desempenho" onClick={() => setDistributionGrouping('bands')}>Faixas</button><button type="button" className={distributionGrouping === 'scores' ? 'active' : ''} aria-pressed={distributionGrouping === 'scores'} title={`Distribuição de todas as notas, em intervalos de ${SCORE_BIN_WIDTH} pontos`} onClick={() => setDistributionGrouping('scores')}>Notas</button></div><div className="chart-view-toggle" role="group" aria-label="Valores da distribuição"><button type="button" className={!showDistributionPercent ? 'active' : ''} aria-pressed={!showDistributionPercent} title={distributionGrouping === 'bands' ? 'Número de alunos em cada faixa' : 'Número de alunos em cada intervalo'} onClick={() => setDistributionValueMode('count')}>Nº de alunos</button><button type="button" className={showDistributionPercent ? 'active' : ''} aria-pressed={showDistributionPercent} title={distributionChartMode === 'class' ? 'Percentual dos alunos de cada turma' : 'Percentual do total de alunos'} onClick={() => setDistributionValueMode('percent')}>% de alunos</button></div><div className="chart-view-toggle" role="group" aria-label="Visualização da distribuição"><button type="button" className={distributionChartMode === 'general' ? 'active' : ''} aria-pressed={distributionChartMode === 'general'} onClick={() => setDistributionChartMode('general')}>Geral</button><button type="button" className={distributionChartMode === 'class' ? 'active' : ''} aria-pressed={distributionChartMode === 'class'} onClick={() => setDistributionChartMode('class')}>Por turma</button></div></div></header>
-          {distributionGrouping === 'scores' ? <ScoreHistogram rows={classScopedRows} classes={chartClasses} byClass={distributionChartMode === 'class'} percent={showDistributionPercent} /> : <>{distributionChartMode === 'class' && <ClassChartLegend classes={chartClasses} />}
+          <header className="panel-header"><div><h3>Distribuição de desempenho</h3><p>{distributionGrouping === 'bands' ? 'Clique para isolar uma faixa; continue clicando para combinar outras' : `Todas as notas em intervalos de ${PERCENT_BIN_WIDTH} pontos · passe o mouse para ver os alunos em cada intervalo`}</p></div><div className="chart-panel-actions"><div className="chart-view-toggle" role="group" aria-label="Agrupamento da distribuição"><button type="button" className={distributionGrouping === 'bands' ? 'active' : ''} aria-pressed={distributionGrouping === 'bands'} title="Alunos agrupados nas faixas de desempenho" onClick={() => setDistributionGrouping('bands')}>Faixas</button><button type="button" className={distributionGrouping === 'scores' ? 'active' : ''} aria-pressed={distributionGrouping === 'scores'} title={`Distribuição de todas as notas, em intervalos de ${PERCENT_BIN_WIDTH} pontos`} onClick={() => setDistributionGrouping('scores')}>Notas</button></div><div className="chart-view-toggle" role="group" aria-label="Valores da distribuição"><button type="button" className={!showDistributionPercent ? 'active' : ''} aria-pressed={!showDistributionPercent} title={distributionGrouping === 'bands' ? 'Número de alunos em cada faixa' : 'Número de alunos em cada intervalo'} onClick={() => setDistributionValueMode('count')}>Nº de alunos</button><button type="button" className={showDistributionPercent ? 'active' : ''} aria-pressed={showDistributionPercent} title={distributionChartMode === 'class' ? 'Percentual dos alunos de cada turma' : 'Percentual do total de alunos'} onClick={() => setDistributionValueMode('percent')}>% de alunos</button></div><div className="chart-view-toggle" role="group" aria-label="Visualização da distribuição"><button type="button" className={distributionChartMode === 'general' ? 'active' : ''} aria-pressed={distributionChartMode === 'general'} onClick={() => setDistributionChartMode('general')}>Geral</button><button type="button" className={distributionChartMode === 'class' ? 'active' : ''} aria-pressed={distributionChartMode === 'class'} onClick={() => setDistributionChartMode('class')}>Por turma</button></div></div></header>
+          {distributionGrouping === 'scores' ? <ScoreHistogram rows={classScopedRows.map((item) => ({ value: Number(item.score), classId: item.classId }))} classes={chartClasses} byClass={distributionChartMode === 'class'} percent={showDistributionPercent} /> : <>{distributionChartMode === 'class' && <ClassChartLegend classes={chartClasses} />}
           <div className={cn('distribution-chart', distributionChartMode === 'class' && 'by-class')}>{distribution.map((item) => <button type="button" className={cn(selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length && 'selected')} aria-pressed={selectedBandIds.includes(item.id) && selectedBandIds.length < performanceBands.length} style={distributionChartMode === 'class' ? { minWidth: `${Math.max(92, chartClasses.length * 24 + 16)}px` } : undefined} key={item.id} onClick={() => toggleBand(item.id)}><span className={cn('distribution-bar', distributionChartMode === 'class' && 'grouped')}>{distributionChartMode === 'general' ? <i title={`${item.count} aluno${item.count !== 1 ? 's' : ''} (${Math.round(item.percent)}%)`} style={{ height: item.count ? `${Math.max(7, distributionValue(item) / maxDistribution * 100)}%` : 0, background: item.color }}><span>{formatDistributionValue(item)}</span></i> : item.classes.map((classResult) => <i key={classResult.classroom.id} title={`${classResult.classroom.name}: ${classResult.count} aluno${classResult.count !== 1 ? 's' : ''} (${Math.round(classResult.percent)}% da turma)`} style={{ height: classResult.count ? `${Math.max(7, distributionValue(classResult) / maxClassDistribution * 100)}%` : 0, background: classResult.color }}><span>{formatDistributionValue(classResult)}</span></i>)}</span><span className="distribution-label"><small>{item.label}</small><strong>{item.name}</strong></span></button>)}</div></>}
         </section>
       </div>
