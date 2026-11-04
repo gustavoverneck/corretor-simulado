@@ -1484,3 +1484,8 @@ td.is-advanced strong, td.is-advanced { color: #2f6a59; }
 }
 .class-skill-filters { padding: 12px 18px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .class-skill-filters .students-report-check { display: flex; align-items: center; gap: 7px; color: #55645e; font-size: 9px; cursor: pointer; }
+.score-histogram { padding: 8px 14px 6px; }
+.score-histogram .student-chart-legend { flex-wrap: wrap; row-gap: 4px; }
+.student-chart-legend i.is-mean { border-top: 2px solid #2f4a42; }
+.score-histogram .student-chart-legend i.is-median { border-top: 2px dotted #c69558; }
+.student-chart svg .line-mean { stroke: #2f4a42; stroke-width: 1.5; stroke-dasharray: 5 3; }
