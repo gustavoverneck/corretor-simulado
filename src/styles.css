@@ -1489,3 +1489,13 @@ td.is-advanced strong, td.is-advanced { color: #2f6a59; }
 .student-chart-legend i.is-mean { border-top: 2px solid #2f4a42; }
 .score-histogram .student-chart-legend i.is-median { border-top: 2px dotted #c69558; }
 .student-chart svg .line-mean { stroke: #2f4a42; stroke-width: 1.5; stroke-dasharray: 5 3; }
+.class-boxplot .student-chart-legend { flex-wrap: wrap; row-gap: 4px; }
+.class-boxplot .student-chart-legend i.is-box { height: 8px; border: 1.5px solid #47776a; background: rgba(71,119,106,.22); border-radius: 2px; }
+.class-boxplot .student-chart-legend i.is-median { border-top: 2.5px solid #c69558; }
+.class-boxplot .student-chart-legend i.is-dot { width: 7px; height: 7px; border: 0; border-radius: 50%; background: #2f4a42; }
+.student-chart svg .axis-label { fill: #475a52; font-weight: 700; }
+.student-chart-legend i.is-blank { border-top: 2px dashed #b9675f; }
+.student-chart svg .line-blank { fill: none; stroke: #b9675f; stroke-width: 1.5; stroke-dasharray: 4 3; }
+.chart-view-toggle button:disabled { opacity: .45; cursor: not-allowed; }
+.scores-panel .chart-panel-actions { flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 720px) { .scores-panel .panel-header { align-items: stretch; flex-direction: column; gap: 9px; } .scores-panel .chart-view-toggle { width: 100%; } .scores-panel .chart-view-toggle button { flex: 1; } }
