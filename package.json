@@ -48,6 +48,7 @@
     "test:auto-backup": "node scripts/test-auto-backup.mjs",
     "test:voided-submission": "node scripts/test-voided-submission.mjs",
     "test:enem-tri": "node scripts/test-enem-tri.mjs",
+    "test:lan-share": "node scripts/test-lan-share.mjs",
     "build:enem-params": "node scripts/build-enem-params.mjs"
   },
   "dependencies": {

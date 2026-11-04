@@ -36,3 +36,12 @@ contextBridge.exposeInMainWorld('desktopUpdates', {
     return () => ipcRenderer.removeListener('updates:state', listener)
   },
 })
+
+// Compartilhamento somente leitura na rede local.
+contextBridge.exposeInMainWorld('desktopLanShare', {
+  getStatus: () => ipcRenderer.invoke('lan-share:status'),
+  start: () => ipcRenderer.invoke('lan-share:start'),
+  stop: () => ipcRenderer.invoke('lan-share:stop'),
+  regenerateCode: () => ipcRenderer.invoke('lan-share:regenerate-code'),
+  publish: (json) => ipcRenderer.invoke('lan-share:publish', json),
+})
