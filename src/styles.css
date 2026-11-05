@@ -1552,3 +1552,23 @@ td.is-advanced strong, td.is-advanced { color: #2f6a59; }
 .viewer-topbar-note strong { font-size: 11px; }
 .viewer-topbar-note small { margin-top: 2px; color: #7c8c86; font-size: 9.5px; }
 .viewer-topbar-actions { margin-left: auto; }
+
+/* Cor e idioma na folha */
+.version-marking { padding: 0 15px 15px; display: grid; gap: 14px; }
+.version-marking-empty { padding: 13px 15px; color: #64716c; font-size: 9.5px; line-height: 1.5; }
+.version-marking section { display: grid; gap: 10px; }
+.version-marking section > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.version-marking section > header > div:first-child { display: grid; gap: 3px; max-width: 620px; }
+.version-marking section > header strong { font-size: 11px; color: #26312d; }
+.version-marking section > header small { font-size: 9px; color: #6a756f; line-height: 1.45; }
+.version-marking section > header > div:last-child { display: flex; gap: 6px; flex-wrap: wrap; }
+.version-marking-hint { margin: 0; font-size: 9.5px; color: #6a756f; }
+.version-marking-field { display: grid; grid-template-columns: minmax(140px, 220px) minmax(200px, 1fr) auto; gap: 8px; align-items: end; }
+.version-marking-field label { display: grid; gap: 4px; font-size: 9px; font-weight: 700; color: #5d6964; }
+.version-marking-field input { height: 32px; padding: 0 9px; border: 1px solid #d6ddda; border-radius: 7px; font-size: 10.5px; }
+.version-marking-remove { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid #e3d6d4; border-radius: 7px; background: #fff; color: #9e5751; cursor: pointer; }
+.version-marking-error { grid-column: 1 / -1; color: #9e5751; font-size: 9px; }
+.version-marking-preview { width: 100%; max-width: 760px; height: auto; border: 1px dashed #d6ddda; border-radius: 8px; background: #fff; }
+.version-marking-versions select { height: 28px; min-width: 120px; border: 1px solid #d6ddda; border-radius: 6px; font-size: 10px; }
+.version-marking-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+@media (max-width: 640px) { .version-marking-field { grid-template-columns: 1fr auto; } .version-marking-field label:first-child { grid-column: 1 / -1; } }

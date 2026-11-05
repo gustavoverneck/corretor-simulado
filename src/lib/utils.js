@@ -1,4 +1,5 @@
 import { validateSheetFormat, SHEET_FORMAT_ID } from './sheetFormat.js'
+import { decodeMarkingGrid, encodeMarkingGrid } from './versionMarking.js'
 export function cn(...values) {
   return values.filter(Boolean).join(' ')
 }
@@ -65,11 +66,14 @@ export function crc32(text) {
   return ((crc ^ -1) >>> 0).toString(36).toUpperCase()
 }
 
-export function qrPayload(studentId, assessmentId, sheetFormat) {
+// v5 = v4 + campos de tipo de prova (cor, idioma…) impressos na folha; o
+// último campo antes do CRC guarda quantas opções cada campo tem ("4.2").
+export function qrPayload(studentId, assessmentId, sheetFormat, markingGrid = null) {
   if (!validateSheetFormat(sheetFormat)) throw new Error('Metadados da folha inválidos.')
   const { format, questionCount, optionCount } = sheetFormat
-  const version = format === SHEET_FORMAT_ID ? 4 : 3
-  const body = `LUMA|${version}|${studentId ?? ''}|${assessmentId}|${format}|${questionCount}|${optionCount}`
+  const grid = format === SHEET_FORMAT_ID ? encodeMarkingGrid(markingGrid) : ''
+  const version = grid ? 5 : format === SHEET_FORMAT_ID ? 4 : 3
+  const body = `LUMA|${version}|${studentId ?? ''}|${assessmentId}|${format}|${questionCount}|${optionCount}${grid ? `|${grid}` : ''}`
   return `${body}|${crc32(body)}`
 }
 
@@ -80,6 +84,13 @@ export function parseQrPayload(payload) {
   if ([1, 2].includes(version)) {
     if (parts.length !== 5 || crc32(parts.slice(0, 4).join('|')) !== parts[4]) return null
     return { studentId: parts[2] || null, assessmentId: parts[3], version }
+  }
+  if (version === 5) {
+    if (parts.length !== 9 || crc32(parts.slice(0, 8).join('|')) !== parts[8]) return null
+    const sheetFormat = { format: parts[4], questionCount: Number(parts[5]), optionCount: Number(parts[6]) }
+    const markingGrid = decodeMarkingGrid(parts[7])
+    if (!validateSheetFormat(sheetFormat) || sheetFormat.format !== SHEET_FORMAT_ID || !markingGrid) return null
+    return { studentId: parts[2] || null, assessmentId: parts[3], version, sheetFormat, markingGrid }
   }
   if (![3, 4].includes(version) || parts.length !== 8 || crc32(parts.slice(0, 7).join('|')) !== parts[7]) return null
   const sheetFormat = { format: parts[4], questionCount: Number(parts[5]), optionCount: Number(parts[6]) }

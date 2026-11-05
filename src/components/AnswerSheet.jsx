@@ -4,16 +4,22 @@ import { layoutBubbleCenter, MARKERS, SHEET } from '../lib/omr'
 import { getSheetLayout, getSheetFormat } from '../lib/sheetFormat'
 import { qrPayload } from '../lib/utils'
 import { getAssessmentForStudent } from '../lib/assessment'
+import { getVersionMarking, markingGridForSheet, markingLayout } from '../lib/versionMarking'
 
 const options = ['A', 'B', 'C', 'D', 'E']
 const governmentLogo = `${import.meta.env.BASE_URL}assets/brasao-governo-es-horizontal.png`
 
-export function AnswerSheet({ student, assessment, classroom, school }) {
-  assessment = getAssessmentForStudent(assessment, student)
+export function AnswerSheet({ student, assessment: baseAssessment, classroom, school }) {
+  const assessment = getAssessmentForStudent(baseAssessment, student)
   const isBlank = !student
   const sheetFormat = getSheetFormat(assessment.questionCount, assessment.optionCount)
   const markers = MARKERS
-  const payload = useMemo(() => qrPayload(student?.id, assessment.id, sheetFormat), [student?.id, assessment.id, assessment.questionCount, assessment.optionCount])
+  // Campos de tipo de prova (cor, idioma…) só quando a turma tem versões a escolher.
+  const markingGrid = markingGridForSheet(baseAssessment, student, assessment.questionCount)
+  const markingFields = markingGrid ? getVersionMarking(baseAssessment).fields : []
+  const marking = markingGrid ? markingLayout(markingGrid) : null
+  const markingKey = markingGrid ? markingGrid.join('.') : ''
+  const payload = useMemo(() => qrPayload(student?.id, assessment.id, sheetFormat, markingGrid), [student?.id, assessment.id, assessment.questionCount, assessment.optionCount, markingKey])
   const schoolLocation = [school.address, school.city && school.state ? `${school.city} – ${school.state}.` : school.city || school.state]
     .filter(Boolean)
     .join(', ')
@@ -53,6 +59,7 @@ export function AnswerSheet({ student, assessment, classroom, school }) {
       <circle cx="81" cy="126.5" r="3.5" fill="#527468" />
       <text x="94" y="130" fontFamily="Arial, sans-serif" fontSize="9" fontWeight="700" fill="#48685e" letterSpacing=".9">SISTEMA DE AVALIAÇÕES</text>
       <text x="692" y="130" textAnchor="end" fontFamily="Arial, sans-serif" fontSize="9" fontWeight="700" fill="#48685e" letterSpacing=".9">FOLHA DE RESPOSTAS</text>
+      {marking && <text x="410" y="129.5" textAnchor="middle" fontFamily="Arial, sans-serif" fontSize="7.5" fill="#424c48">Caneta azul ou preta · preencha toda a bolha · uma opção por linha · não rasure nem dobre</text>}
 
       <svg x="50" y="139" width="156" height="156" viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges">
         <rect width={qr.size} height={qr.size} fill="white" />
@@ -73,11 +80,27 @@ export function AnswerSheet({ student, assessment, classroom, school }) {
       <text x="216" y="266" fontFamily="Arial" fontSize="9" fontWeight="700" fill="#6a736f">SIMULADO</text>
       <text x="216" y="286" fontFamily="Arial" fontSize="13" fontWeight="700" fill="#17221e">{assessment.title}</text>
 
-      <rect x="65" y="311" width="643" height="52" rx="7" fill="#f1f4f2" />
-      <circle cx="86" cy="329" r="6" fill="none" stroke="#52615b" strokeWidth="1.5" />
-      <circle cx="86" cy="347" r="6" fill="#52615b" />
-      <text x="101" y="332" fontFamily="Arial" fontSize="9" fill="#424c48">Use caneta azul ou preta e preencha completamente apenas uma alternativa.</text>
-      <text x="101" y="350" fontFamily="Arial" fontSize="9" fill="#424c48">Não rasure, não dobre a folha e mantenha visíveis os marcadores ao redor das respostas.</text>
+      {!marking && <g>
+        <rect x="65" y="311" width="643" height="52" rx="7" fill="#f1f4f2" />
+        <circle cx="86" cy="329" r="6" fill="none" stroke="#52615b" strokeWidth="1.5" />
+        <circle cx="86" cy="347" r="6" fill="#52615b" />
+        <text x="101" y="332" fontFamily="Arial" fontSize="9" fill="#424c48">Use caneta azul ou preta e preencha completamente apenas uma alternativa.</text>
+        <text x="101" y="350" fontFamily="Arial" fontSize="9" fill="#424c48">Não rasure, não dobre a folha e mantenha visíveis os marcadores ao redor das respostas.</text>
+      </g>}
+      {marking && <g>
+        <rect x={marking.box.left} y={marking.box.top} width={marking.box.width} height={marking.box.height} rx="7" fill="#f1f4f2" />
+        {marking.rows.map((row, field) => (
+          <g key={field}>
+            <text x={marking.labelX} y={row.y + 3.2} fontFamily="Arial" fontSize="8.5" fontWeight="700" fill="#26312d" letterSpacing=".4">{markingFields[field].label.toUpperCase().slice(0, 22)}</text>
+            {row.bubbles.map((bubble, option) => (
+              <g key={option}>
+                <circle cx={bubble.x} cy={bubble.y} r={marking.radius} fill="white" stroke="#4b5651" strokeWidth="1.2" />
+                <text x={bubble.x + marking.radius + 4} y={row.y + 3.2} fontFamily="Arial" fontSize="9" fill="#26312d">{markingFields[field].options[option].slice(0, 14)}</text>
+              </g>
+            ))}
+          </g>
+        ))}
+      </g>}
 
       {Array.from({ length: layout.columns }, (_, column) => (
         <g key={column}>

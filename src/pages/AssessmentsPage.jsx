@@ -17,6 +17,8 @@ import { average, cn, downloadBlob, formatDate, initials, uid } from '../lib/uti
 import { createAnswerKeyPdf, createAttendancePdf, printDocumentFilename } from '../lib/printDocuments'
 import { computeTriScores, isTriEnabled, setTriEnabled } from '../lib/tri'
 import { TriSettings } from '../components/TriSettings'
+import { VersionMarkingSettings } from '../components/VersionMarkingSettings'
+import { getVersionMarking } from '../lib/versionMarking'
 import { assessmentToLatex, createPrintableVersions, createStudentPrintableVersions, emptyQuestion, resizeQuestions } from '../lib/fullAssessment'
 
 const subjectOptions = ['Língua Portuguesa', 'Matemática', 'Ciências da Natureza', 'Ciências Humanas', 'Linguagens']
@@ -533,7 +535,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       <div className="assessment-detail-progress"><div><span>{closed ? 'Participação final registrada' : 'Andamento da correção'}</span><strong>{submissions.length} de {totalStudents}</strong></div><div className="wide-progress"><i style={{ width: `${progress}%` }} /></div></div>
 
       <div className="segmented-tabs assessment-detail-tabs" role="tablist" aria-label="Seções do simulado">
-        {[['students', 'Alunos e resultados', versionedStudents.length], ['keys', 'Turmas e gabaritos', assessment.classIds.length], ['areas', 'Áreas', areaCount], ['tri', 'Nota TRI', triEnabled ? 'ativada' : null]].map(([id, label, count]) => <button type="button" role="tab" key={id} aria-selected={detailTab === id} className={cn(detailTab === id && 'active')} onClick={() => setDetailTab(id)}>{label}{count !== null && count !== undefined && <span>{count}</span>}</button>)}
+        {[['students', 'Alunos e resultados', versionedStudents.length], ['keys', 'Turmas e gabaritos', assessment.classIds.length], ['areas', 'Áreas', areaCount], ['marking', 'Cor e idioma na folha', getVersionMarking(assessment) ? 'ativo' : null], ['tri', 'Nota TRI', triEnabled ? 'ativada' : null]].map(([id, label, count]) => <button type="button" role="tab" key={id} aria-selected={detailTab === id} className={cn(detailTab === id && 'active')} onClick={() => setDetailTab(id)}>{label}{count !== null && count !== undefined && <span>{count}</span>}</button>)}
       </div>
 
       {detailTab === 'students' && <>
@@ -625,6 +627,15 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
           </div>
           <div className="assessment-area-actions"><Button variant="ghost" size="sm" icon={X} onClick={cancelEditingAreas}>Cancelar</Button><Button size="sm" icon={CheckCircle2} onClick={saveQuestionAreas}>Salvar áreas</Button></div>
         </div>}
+      </section>
+      </>}
+
+      {detailTab === 'marking' && <>
+      <section className="assessment-detail-areas">
+        <header>
+          <div><h3>Cor e idioma na folha</h3><p>Quando a turma tem mais de uma versão (cores do ENEM, idioma, tipo A/B), a folha de respostas ganha bolhas para o aluno marcar a prova que recebeu. A correção usa a versão marcada, sem depender do cadastro.</p></div>
+        </header>
+        <VersionMarkingSettings assessment={assessment} setData={setData} notify={notify} closed={closed} />
       </section>
       </>}
 

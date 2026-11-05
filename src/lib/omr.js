@@ -3,6 +3,7 @@ import { getSheetLayout, getSheetFormat, getLegacySheetLayout, validateSheetForm
 import { CANCELLED_ANSWER, summarizeAnswers } from './assessment.js'
 import { parseQrPayload } from './utils.js'
 import { resolveOmrSettings } from './omrSettings.js'
+import { markingLayout } from './versionMarking.js'
 
 export const SHEET = { width: 794, height: 1123 }
 export const MARKERS = {
@@ -308,7 +309,7 @@ function sampleLight(imageData, center, half) {
 // shadow edge crosses the bubble, its centre is compared with the shaded paper
 // instead of reading the shade as ink. A single sector (a stroke that left the
 // outline, a neighbouring mark) cannot set the value on its own.
-function samplePaper(imageData, center, radius, innerRadius) {
+function samplePaper(imageData, center, radius, innerRadius, ratio = 0.75) {
   const { width, height, data } = imageData
   const sums = new Float64Array(8)
   const counts = new Uint32Array(8)
@@ -324,7 +325,7 @@ function samplePaper(imageData, center, radius, innerRadius) {
   }
   const sectors = []
   for (let sector = 0; sector < 8; sector += 1) if (counts[sector]) sectors.push(sums[sector] / counts[sector])
-  return percentile(sectors, 0.75)
+  return percentile(sectors, ratio)
 }
 
 function sampleColorInk(imageData, center, radius) {
@@ -718,6 +719,63 @@ export function analyzeMarks(imageData, assessment, answerKey, corners = MARKERS
   }
 }
 
+// Campos de tipo de prova (cor, idioma…) acima da grade de respostas. Cada
+// linha é ajustada inteira às bordas impressas das bolhas e lida contra o
+// papel em volta de cada bolha; a bolha mais escura só conta se se destacar
+// das demais da mesma linha.
+export function analyzeVersionMarks(imageData, corners, markingGrid, settings = {}, templateMarkers = MARKERS) {
+  const layout = markingLayout(markingGrid)
+  if (!layout) return null
+  const templateWidth = templateMarkers.topRight.x - templateMarkers.topLeft.x
+  const templateHeight = templateMarkers.bottomLeft.y - templateMarkers.topLeft.y
+  const sheetScale = Math.min(distance(corners.topLeft, corners.topRight) / templateWidth, distance(corners.topLeft, corners.bottomLeft) / templateHeight)
+  const radius = layout.radius * sheetScale
+  const colorThreshold = Number(settings.colorThreshold ?? 0.065)
+  const step = radius / 4
+  return layout.rows.map((row) => {
+    const projected = row.bubbles.map((bubble) => project(bubble, corners, templateMarkers))
+    const rowScore = (dx, dy) => projected.reduce((sum, center) => sum + outlineContrast(imageData, { x: center.x + dx, y: center.y + dy }, radius), 0)
+    let best = { dx: 0, dy: 0, score: rowScore(0, 0) }
+    const kept = best.score
+    for (let dy = -4; dy <= 4; dy += 1) {
+      for (let dx = -4; dx <= 4; dx += 1) {
+        const score = rowScore(dx * step, dy * step)
+        if (score > best.score) best = { dx: dx * step, dy: dy * step, score }
+      }
+    }
+    if (best.score <= kept + 0.03 * projected.length) best = { dx: 0, dy: 0 }
+    const measured = projected.map((center, option) => {
+      const moved = { x: center.x + best.dx, y: center.y + best.dy }
+      const interior = sampleDarkness(imageData, moved, radius * 0.8)
+      const paper = samplePaper(imageData, moved, radius * 1.5, radius * 1.25, 0.5)
+      return { option, center: moved, ink: interior - paper, color: sampleColorInk(imageData, moved, radius * 0.76) }
+    })
+    const lightest = Math.min(...measured.map((item) => item.ink))
+    const colorBaseline = percentile(measured.map((item) => item.color), 0.5)
+    measured.forEach((item) => {
+      item.contrast = item.ink - lightest
+      item.colorContrast = item.color - colorBaseline
+    })
+    const strong = measured.filter((item) => item.ink >= 0.45
+      || (item.ink >= 0.2 && item.contrast >= 0.18)
+      || (item.color >= colorThreshold && item.colorContrast >= 0.025 && item.contrast >= 0.08))
+    const possible = measured.filter((item) => !strong.includes(item) && (
+      (item.ink >= 0.04 && item.contrast >= 0.08)
+      || (item.color >= colorThreshold * 0.78 && item.colorContrast >= 0.018)))
+    const status = strong.length > 1 ? 'multiple'
+      : strong.length === 1 && !possible.length ? 'marked'
+      : strong.length || possible.length ? 'uncertain'
+      : 'blank'
+    return {
+      status,
+      selected: status === 'marked' ? strong[0].option : null,
+      candidates: [...strong, ...possible].map((item) => item.option).sort((a, b) => a - b),
+      scores: measured.map((item) => Number(item.ink.toFixed(3))),
+      positions: measured.map((item) => ({ x: item.center.x, y: item.center.y, radius: radius * 1.3 })),
+    }
+  })
+}
+
 // How clearly the evidence supports the reading, from 0 to 1: the gap
 // between the strongest and second strongest option for one mark, the
 // distance from any ink for a blank, the second mark for a double one.
@@ -836,8 +894,8 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
   const qrIdentity = requireCurrentQr(qr?.data)
   const identity = { ...qrIdentity, studentId: qrIdentity.studentId || fallbackIdentity.studentId || null }
   const resolved = resolveContext?.(identity) || {}
-  const activeAssessment = resolved.assessment || assessment
-  const activeAnswerKey = resolved.answerKey || activeAssessment.answerKey
+  let activeAssessment = resolved.assessment || assessment
+  let activeAnswerKey = resolved.answerKey || activeAssessment.answerKey
 
   if (qrIdentity && qrIdentity.assessmentId !== activeAssessment.id) throw new Error('O simulado identificado pelo QR não foi encontrado.')
 
@@ -849,6 +907,16 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
   if (gridAlignment !== null && gridAlignment < MIN_GRID_ALIGNMENT) detectedMarkers = null
   const corners = detectedMarkers?.corners || estimatedCorners
   const markersFound = detectedMarkers ? 4 : 0
+  // Tipo de prova marcado na folha (cor, idioma…). Sem os quatro marcadores a
+  // posição é só estimada, então nada é considerado marcado.
+  const versionMarks = qrIdentity.markingGrid
+    ? detectedMarkers
+      ? analyzeVersionMarks(data, corners, qrIdentity.markingGrid, settings)
+      : qrIdentity.markingGrid.map(() => ({ status: 'uncertain', selected: null, candidates: [], scores: [], positions: [] }))
+    : null
+  const markedVersion = versionMarks ? resolved.resolveMarkedVersion?.(versionMarks.map((field) => field.selected), sheetFormat) || null : null
+  if (markedVersion?.assessment) activeAssessment = markedVersion.assessment
+  if (markedVersion?.answerKey) activeAnswerKey = markedVersion.answerKey
   let marks = qrIdentity.version === 2
     ? analyzeMarks(data, activeAssessment, activeAnswerKey, corners, settings, MARKERS, getLegacySheetLayout(activeAssessment.questionCount))
     : analyzePrintedSheet(data, activeAssessment, activeAnswerKey, corners, settings, MARKERS, sheetFormat)
@@ -871,6 +939,7 @@ export function analyzeSheetImage(data, assessment, fallbackIdentity = {}, setti
     qrCorners: qr?.location ? { topLeft: qr.location.topLeftCorner, topRight: qr.location.topRightCorner } : null,
     markerLayout: CURRENT_MARKER_LAYOUT,
     alignmentMode: detectedMarkers ? 'answer-grid-markers' : 'estimated',
+    ...(versionMarks ? { versionMarks, markedVersionId: markedVersion?.version?.id || null } : {}),
     gridAlignment: gridAlignment === null ? null : Number(gridAlignment.toFixed(3)),
     ...marks,
     previewWidth: data.width,
