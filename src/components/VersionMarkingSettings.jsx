@@ -36,7 +36,7 @@ function MarkingPreview({ fields }) {
   )
 }
 
-export function VersionMarkingSettings({ assessment, setData, notify, closed }) {
+export function VersionMarkingSettings({ assessment, assessments = [], setData, notify, closed }) {
   const versions = getAnswerKeyVersions(assessment).filter((version) => version.id !== 'default')
   const saved = getVersionMarking(assessment)?.fields || []
   const [draft, setDraft] = useState(() => fieldsToDraft(saved))
@@ -66,6 +66,29 @@ export function VersionMarkingSettings({ assessment, setData, notify, closed }) 
     }
     setDraft(fieldsToDraft(suggested))
     setValues(Object.fromEntries(versions.map((version) => [version.id, guessMarkingValues({ label: version.label }, suggested)])))
+  }
+
+  // Outros simulados que já têm campos configurados, para não refazer à mão.
+  const sources = assessments.filter((item) => item.id !== assessment.id && getVersionMarking(item))
+
+  function copyFromAssessment(sourceId) {
+    const source = sources.find((item) => item.id === sourceId)
+    if (!source) return
+    const copied = getVersionMarking(source).fields.map((field) => ({ ...field }))
+    const sourceVersions = getAnswerKeyVersions(source)
+    const normalized = (label) => String(label || '').trim().toLowerCase()
+    setDraft(fieldsToDraft(copied))
+    setValues(Object.fromEntries(versions.map((version) => {
+      const twin = sourceVersions.find((item) => normalized(item.label) === normalized(version.label))
+      const values = twin?.markingValues ? Object.fromEntries(Object.entries(twin.markingValues).filter(([fieldId, option]) => copied.some((field) => field.id === fieldId && option < field.options.length))) : {}
+      return [version.id, Object.keys(values).length ? values : guessMarkingValues({ label: version.label }, copied)]
+    })))
+    notify('Campos copiados', `Campos de ${source.title} copiados. Confira as opções de cada versão e salve.`)
+  }
+
+  function copyFromVersion(versionId, sourceVersionId) {
+    if (!sourceVersionId) return
+    setValues((current) => ({ ...current, [versionId]: { ...(current[sourceVersionId] || {}) } }))
   }
 
   function addField() {
@@ -141,6 +164,7 @@ export function VersionMarkingSettings({ assessment, setData, notify, closed }) 
         <header>
           <div><strong>Campos na folha</strong><small>Até {MAX_MARKING_FIELDS} campos, com {MIN_MARKING_OPTIONS} a {MAX_MARKING_OPTIONS} opções cada. Escreva as opções separadas por vírgula.</small></div>
           <div>
+            {sources.length > 0 && <select className="version-marking-copy" value="" disabled={closed} onChange={(event) => copyFromAssessment(event.target.value)} aria-label="Copiar campos de outro simulado"><option value="">Copiar de outro simulado…</option>{sources.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select>}
             <Button type="button" variant="secondary" size="sm" icon={Sparkles} disabled={closed} onClick={suggest}>Sugerir pelos nomes das versões</Button>
             {draft.length < MAX_MARKING_FIELDS && <Button type="button" variant="secondary" size="sm" icon={Plus} disabled={closed} onClick={addField}>Adicionar campo</Button>}
           </div>
@@ -162,7 +186,7 @@ export function VersionMarkingSettings({ assessment, setData, notify, closed }) 
         </header>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Versão</th>{fields.map((field) => <th key={field.id}>{field.label}</th>)}</tr></thead>
+            <thead><tr><th>Versão</th>{fields.map((field) => <th key={field.id}>{field.label}</th>)}<th>Copiar de</th></tr></thead>
             <tbody>{versions.map((version) => <tr key={version.id}>
               <td><strong>{version.label}</strong></td>
               {fields.map((field) => <td key={field.id}>
@@ -171,6 +195,7 @@ export function VersionMarkingSettings({ assessment, setData, notify, closed }) 
                   {field.options.map((option, optionIndex) => <option value={optionIndex} key={optionIndex}>{option}</option>)}
                 </select>
               </td>)}
+              <td><select value="" disabled={closed} onChange={(event) => copyFromVersion(version.id, event.target.value)} aria-label={`Copiar marcações para ${version.label}`}><option value="">Outra versão…</option>{versions.filter((item) => item.id !== version.id).map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></td>
             </tr>)}</tbody>
           </table>
         </div>

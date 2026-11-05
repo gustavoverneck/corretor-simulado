@@ -1572,3 +1572,4 @@ td.is-advanced strong, td.is-advanced { color: #2f6a59; }
 .version-marking-versions select { height: 28px; min-width: 120px; border: 1px solid #d6ddda; border-radius: 6px; font-size: 10px; }
 .version-marking-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 @media (max-width: 640px) { .version-marking-field { grid-template-columns: 1fr auto; } .version-marking-field label:first-child { grid-column: 1 / -1; } }
+.version-marking-copy { height: 32px; padding: 0 8px; border: 1px solid #d6ddda; border-radius: 7px; font-size: 10px; background: #fff; }

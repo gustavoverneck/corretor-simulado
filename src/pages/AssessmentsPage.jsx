@@ -635,7 +635,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
         <header>
           <div><h3>Cor e idioma na folha</h3><p>Quando a turma tem mais de uma versão (cores do ENEM, idioma, tipo A/B), a folha de respostas ganha bolhas para o aluno marcar a prova que recebeu. A correção usa a versão marcada, sem depender do cadastro.</p></div>
         </header>
-        <VersionMarkingSettings assessment={assessment} setData={setData} notify={notify} closed={closed} />
+        <VersionMarkingSettings assessment={assessment} assessments={data.assessments} setData={setData} notify={notify} closed={closed} />
       </section>
       </>}
 
