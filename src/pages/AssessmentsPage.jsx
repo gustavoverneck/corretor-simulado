@@ -17,6 +17,8 @@ import { average, cn, downloadBlob, formatDate, initials, uid } from '../lib/uti
 import { createAnswerKeyPdf, createAttendancePdf, printDocumentFilename } from '../lib/printDocuments'
 import { computeTriScores, isTriEnabled, setTriEnabled } from '../lib/tri'
 import { TriSettings } from '../components/TriSettings'
+import { VersionMarkingSettings } from '../components/VersionMarkingSettings'
+import { getVersionMarking } from '../lib/versionMarking'
 import { assessmentToLatex, createPrintableVersions, createStudentPrintableVersions, emptyQuestion, resizeQuestions } from '../lib/fullAssessment'
 
 const subjectOptions = ['Língua Portuguesa', 'Matemática', 'Ciências da Natureza', 'Ciências Humanas', 'Linguagens']
@@ -533,7 +535,7 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
       <div className="assessment-detail-progress"><div><span>{closed ? 'Participação final registrada' : 'Andamento da correção'}</span><strong>{submissions.length} de {totalStudents}</strong></div><div className="wide-progress"><i style={{ width: `${progress}%` }} /></div></div>
 
       <div className="segmented-tabs assessment-detail-tabs" role="tablist" aria-label="Seções do simulado">
-        {[['students', 'Alunos e resultados', versionedStudents.length], ['keys', 'Turmas e gabaritos', assessment.classIds.length], ['areas', 'Áreas', areaCount], ['tri', 'Nota TRI', triEnabled ? 'ativada' : null]].map(([id, label, count]) => <button type="button" role="tab" key={id} aria-selected={detailTab === id} className={cn(detailTab === id && 'active')} onClick={() => setDetailTab(id)}>{label}{count !== null && count !== undefined && <span>{count}</span>}</button>)}
+        {[['students', 'Alunos e resultados', versionedStudents.length], ['keys', 'Turmas e gabaritos', assessment.classIds.length], ['areas', 'Áreas', areaCount], ['marking', 'Cor e idioma na folha', getVersionMarking(assessment) ? 'ativo' : null], ['tri', 'Nota TRI', triEnabled ? 'ativada' : null]].map(([id, label, count]) => <button type="button" role="tab" key={id} aria-selected={detailTab === id} className={cn(detailTab === id && 'active')} onClick={() => setDetailTab(id)}>{label}{count !== null && count !== undefined && <span>{count}</span>}</button>)}
       </div>
 
       {detailTab === 'students' && <>
@@ -625,6 +627,15 @@ function AssessmentDetails({ assessment, data, setData, notify }) {
           </div>
           <div className="assessment-area-actions"><Button variant="ghost" size="sm" icon={X} onClick={cancelEditingAreas}>Cancelar</Button><Button size="sm" icon={CheckCircle2} onClick={saveQuestionAreas}>Salvar áreas</Button></div>
         </div>}
+      </section>
+      </>}
+
+      {detailTab === 'marking' && <>
+      <section className="assessment-detail-areas">
+        <header>
+          <div><h3>Cor e idioma na folha</h3><p>Quando a turma tem mais de uma versão (cores do ENEM, idioma, tipo A/B), a folha de respostas ganha bolhas para o aluno marcar a prova que recebeu. A correção usa a versão marcada, sem depender do cadastro.</p></div>
+        </header>
+        <VersionMarkingSettings assessment={assessment} assessments={data.assessments} setData={setData} notify={notify} closed={closed} />
       </section>
       </>}
 
@@ -1231,6 +1242,47 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
     setQuestionCountInput(String(questionCount))
   }
 
+  // Versão B igual à A (ex.: outro idioma): copia gabarito, áreas, questões e
+  // turmas; depois só se alteram as questões que mudam.
+  function duplicateActiveAnswerKeyVersion() {
+    const source = activeAnswerKeyVersion
+    const usedLabels = new Set(answerKeyVersions.map((version) => version.label))
+    let label = `${source.label} (cópia)`.slice(0, 32)
+    for (let index = 2; usedLabels.has(label); index += 1) label = `${source.label} (cópia ${index})`.slice(0, 32)
+    const id = uid('version')
+    const { markingValues: _marking, ...rest } = source
+    const version = {
+      ...rest,
+      id,
+      label,
+      answerKey: [...(source.answerKey || answerKey)],
+      questionCount,
+      questionAreas: [...questionAreas],
+      subject,
+      questions: resizeQuestions(questions, questionCount, optionCount),
+      classIds: [...(source.classIds || [])],
+    }
+    setAnswerKeyVersions((current) => [...current, version])
+    setActiveAnswerKeyVersionId(id)
+    setQuestionCountInput(String(questionCount))
+    notify('Versão duplicada', `${label} começou igual a ${source.label}, com as mesmas turmas. Altere o nome e só as respostas que mudam.`)
+  }
+
+  function copyAnswerKeyFromVersion(sourceId) {
+    const source = answerKeyVersions.find((version) => version.id === sourceId)
+    if (!source || source.id === activeAnswerKeyVersionId) return
+    setAnswerKeyVersions((current) => current.map((version) => version.id !== activeAnswerKeyVersionId ? version : {
+      ...version,
+      answerKey: [...source.answerKey],
+      questionCount: source.questionCount,
+      questionAreas: source.questionAreas ? [...source.questionAreas] : version.questionAreas,
+      subject: source.subject ?? version.subject,
+      ...(source.questions ? { questions: source.questions.map((question) => ({ ...question, alternatives: [...(question.alternatives || [])] })) } : {}),
+    }))
+    setQuestionCountInput(String(source.questionCount ?? baseQuestionCount))
+    notify('Gabarito copiado', `${activeAnswerKeyVersion.label} recebeu o gabarito de ${source.label}. Agora altere só as respostas que mudam.`)
+  }
+
   function removeAnswerKeyVersion(versionId) {
     if (answerKeyVersions.length === 1) return
     const remaining = answerKeyVersions.filter((version) => version.id !== versionId)
@@ -1742,11 +1794,11 @@ export function AssessmentsPage({ data, setData, setPage, notify }) {
               </>}
 
               {(creationMode !== 'full' || versionAssignmentMode === 'shared') && <div className="answer-key-version-manager">
-                <header><div className="answer-key-version-heading"><strong>Versões {creationMode === 'full' ? 'da prova' : 'do gabarito'}</strong><small>Cada versão tem sua quantidade de questões, componentes e gabarito. Escolha as turmas que receberão cada uma.</small></div><div className="answer-key-version-actions">{creationMode === 'key' && <Button type="button" variant="ghost" size="sm" icon={Shuffle} onClick={randomizeActiveAnswerKey}>Aleatorizar {activeAnswerKeyVersion.label}</Button>}<Button type="button" variant="secondary" size="sm" icon={Plus} onClick={addAnswerKeyVersion}>Nova versão</Button></div></header>
+                <header><div className="answer-key-version-heading"><strong>Versões {creationMode === 'full' ? 'da prova' : 'do gabarito'}</strong><small>Cada versão tem sua quantidade de questões, componentes e gabarito. Escolha as turmas que receberão cada uma.</small></div><div className="answer-key-version-actions">{creationMode === 'key' && <Button type="button" variant="ghost" size="sm" icon={Shuffle} onClick={randomizeActiveAnswerKey}>Aleatorizar {activeAnswerKeyVersion.label}</Button>}<Button type="button" variant="secondary" size="sm" icon={Layers3} onClick={duplicateActiveAnswerKeyVersion}>Duplicar {activeAnswerKeyVersion.label}</Button><Button type="button" variant="secondary" size="sm" icon={Plus} onClick={addAnswerKeyVersion}>Nova versão</Button></div></header>
                 <div className="answer-key-version-tabs">
                   {answerKeyVersions.map((version) => <div className={version.id === activeAnswerKeyVersionId ? 'active' : ''} key={version.id}><button type="button" onClick={() => selectAnswerKeyVersion(version.id)}><strong>{version.label}</strong><small>{version.classIds.length ? `${version.classIds.length} turma${version.classIds.length !== 1 ? 's' : ''}` : 'Sem turma'}</small></button>{answerKeyVersions.length > 1 && <button type="button" className="remove-version" aria-label={`Remover ${version.label}`} onClick={() => removeAnswerKeyVersion(version.id)}><X size={13} /></button>}</div>)}
                 </div>
-                <div className="answer-key-version-name"><label htmlFor="active-answer-key-version-name">Nome da versão selecionada</label><input id="active-answer-key-version-name" value={activeAnswerKeyVersion.label} maxLength="32" onChange={(event) => renameActiveAnswerKeyVersion(event.target.value)} /></div>
+                <div className="answer-key-version-name"><label htmlFor="active-answer-key-version-name">Nome da versão selecionada</label><input id="active-answer-key-version-name" value={activeAnswerKeyVersion.label} maxLength="32" onChange={(event) => renameActiveAnswerKeyVersion(event.target.value)} />{answerKeyVersions.length > 1 && <select className="answer-key-copy-from" value="" onChange={(event) => copyAnswerKeyFromVersion(event.target.value)} aria-label={`Copiar gabarito para ${activeAnswerKeyVersion.label}`}><option value="">Copiar gabarito de…</option>{answerKeyVersions.filter((version) => version.id !== activeAnswerKeyVersionId).map((version) => <option value={version.id} key={version.id}>{version.label}</option>)}</select>}</div>
                 <div className="answer-key-version-classes"><span>Aplicar {activeAnswerKeyVersion.label} a:</span><div>{selectedClasses.length ? selectedClasses.map((classId) => { const classroom = data.classes.find((item) => item.id === classId); const checked = activeAnswerKeyVersion.classIds.includes(classId); return <label className={checked ? 'checked' : ''} key={classId}><input type="checkbox" checked={checked} onChange={() => toggleVersionClass(classId)} /><span style={{ background: classroom?.color }} /><strong>{classroom?.name}</strong><CheckCircle2 size={14} /></label> }) : <small>Selecione as turmas participantes na etapa anterior.</small>}</div><p>Quando uma turma recebe mais de uma versão, elas são alternadas automaticamente entre seus alunos.</p></div>
               </div>}
 

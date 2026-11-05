@@ -8,6 +8,7 @@ import {
 import { Badge, Button, EmptyState, Field, Modal } from '../components/ui'
 import { CorrectedSheetPreview } from '../components/CorrectedSheetPreview'
 import { analyzeAnswerSheet } from '../lib/omr'
+import { findMarkedVersion, resolveSheetVersion } from '../lib/versionMarking'
 import { summarizeAnswers, withVersionQuestionAreas, getAssessmentForStudent, getAssessmentForVersion, getAssessmentForSubmission, CANCELLED_ANSWER, getAnswerKeyForClass, getAnswerKeyForStudent, getAnswerKeyVersionForStudent, getAnswerKeyVersionsForClass, getPendingReviewSubmissions, hasCustomAnswerKey, isAssessmentClosed, regradeAnswers, updateAnswerKeyVersionForClass } from '../lib/assessment'
 import { getQuestionAreas, QUESTION_AREA_SUGGESTIONS } from '../lib/knowledgeAreas'
 import { analyzeItems, countAnswerKeyAlerts, MIN_RESPONSES, submissionsForAnswerKey, suspiciousItems } from '../lib/itemAnalysis'
@@ -398,7 +399,7 @@ function ReviewQueue({ data, setData, notify }) {
     <>
       <section className="panel review-queue-panel">
         <header className="panel-header"><div><h3>Fila de revisões</h3><p>Folhas com marcação múltipla ou leitura incerta</p></div><Badge tone={pending.length ? 'ochre' : 'green'}>{pending.length} pendente{pending.length !== 1 ? 's' : ''}</Badge></header>
-        {pending.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>SIMULADO</th><th>OCORRÊNCIAS</th><th>RESULTADO ATUAL</th><th /></tr></thead><tbody>{pending.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span></td><td>{itemAssessment?.title}</td><td><div className="issue-badges">{submission.multiple > 0 && <Badge tone="orange">{submission.multiple} múltipla(s)</Badge>}{submission.uncertain > 0 && <Badge tone="ochre">{submission.uncertain} incerta(s)</Badge>}{!submission.uncertain && !submission.multiple && <Badge tone="ochre">Revisão manual</Badge>}</div></td><td><strong>{submission.score}%</strong><small className="cell-subtitle">{submission.correct}/{validTotal} acertos</small></td><td><Button size="sm" variant="secondary" icon={Eye} onClick={() => openReview(submission)}>Revisar</Button></td></tr> })}</tbody></table></div> : <EmptyState icon={CheckCircle2} title="Tudo revisado" description="Não há marcações ambíguas aguardando conferência." />}
+        {pending.length ? <div className="table-wrap"><table><thead><tr><th>ALUNO</th><th>TURMA</th><th>SIMULADO</th><th>OCORRÊNCIAS</th><th>RESULTADO ATUAL</th><th /></tr></thead><tbody>{pending.map((submission) => { const itemStudent = data.students.find((item) => item.id === submission.studentId); const itemClass = data.classes.find((item) => item.id === itemStudent?.classId); const itemAssessment = data.assessments.find((item) => item.id === submission.assessmentId); const validTotal = submission.gradedTotal ?? Math.max(0, (itemAssessment?.questionCount || 0) - (submission.cancelled || 0)); return <tr key={submission.id}><td><strong>{itemStudent?.name}</strong><small className="cell-subtitle">{itemStudent?.registration}</small></td><td><span className="class-tag" style={{ '--class-color': itemClass?.color }}>{itemClass?.name}</span></td><td>{itemAssessment?.title}</td><td><div className="issue-badges">{submission.multiple > 0 && <Badge tone="orange">{submission.multiple} múltipla(s)</Badge>}{submission.uncertain > 0 && <Badge tone="ochre">{submission.uncertain} incerta(s)</Badge>}{(submission.reviewReasons || []).some((reason) => reason.includes('versão cadastrada')) && <Badge tone="purple">Cor/idioma da folha</Badge>}{!submission.uncertain && !submission.multiple && !(submission.reviewReasons || []).some((reason) => reason.includes('versão cadastrada')) && <Badge tone="ochre">Revisão manual</Badge>}</div></td><td><strong>{submission.score}%</strong><small className="cell-subtitle">{submission.correct}/{validTotal} acertos</small></td><td><Button size="sm" variant="secondary" icon={Eye} onClick={() => openReview(submission)}>Revisar</Button></td></tr> })}</tbody></table></div> : <EmptyState icon={CheckCircle2} title="Tudo revisado" description="Não há marcações ambíguas aguardando conferência." />}
       </section>
 
       <Modal open={Boolean(selected)} onClose={() => setSelectedId(null)} title="Revisar respostas" subtitle={`${student?.name || ''} · ${classroom?.name || ''} · ${assessment?.title || ''}`} size="lg" footer={<><Button variant="ghost" onClick={() => setSelectedId(null)}>Cancelar</Button><OriginalSheetButton scan={selected?.scan} title={student?.name} /><Button icon={Check} onClick={saveReview}>Concluir revisão</Button></>}>
@@ -561,6 +562,13 @@ function ResponsesPanel({ data, setData, notify, initialAssessmentId }) {
   )
 }
 
+// A versão marcada na folha passa a ser a versão cadastrada do aluno, para
+// que relatórios e recorreções usem a mesma prova que ele fez.
+function rememberSheetVersions(assessment, pairs) {
+  if (!pairs.length) return assessment
+  return { ...assessment, answerKeyVersionIdByStudent: { ...assessment.answerKeyVersionIdByStudent, ...Object.fromEntries(pairs) } }
+}
+
 export function CorrectionPage({ data, setData, notify }) {
   const fileInput = useRef(null)
   const cameraInput = useRef(null)
@@ -602,8 +610,10 @@ export function CorrectionPage({ data, setData, notify }) {
   const resultAssessmentClosed = isAssessmentClosed(resultAssessment)
   const resultClassId = result?.classId || detectedStudent?.classId || classId
   const resultClassroom = data.classes.find((item) => item.id === resultClassId)
-  const resultAnswerKeyVersion = detectedStudent ? getAnswerKeyVersionForStudent(resultAssessment, detectedStudent) : null
-  const resultAnswerKey = detectedStudent ? getAnswerKeyForStudent(resultAssessment, detectedStudent) : getAnswerKeyForClass(resultAssessment, resultClassId)
+  // Cor/idioma marcados na folha escolhem a versão; sem marcação válida vale a cadastrada.
+  const resultVersionChoice = detectedStudent ? resolveSheetVersion(baseResultAssessment, detectedStudent, result) : null
+  const resultAnswerKeyVersion = resultVersionChoice?.version || null
+  const resultAnswerKey = resultAnswerKeyVersion?.answerKey || (detectedStudent ? getAnswerKeyForStudent(resultAssessment, detectedStudent) : getAnswerKeyForClass(resultAssessment, resultClassId))
   const resultQuestionAreas = getQuestionAreas(getAssessmentForStudent(resultAssessment, detectedStudent))
   const resultEligibleStudents = data.students.filter((student) => resultAssessment?.classIds.includes(student.classId) && student.status === 'Ativo')
   const resultClassCompatible = Boolean(detectedStudent && resultAssessment?.classIds.includes(detectedStudent.classId))
@@ -629,8 +639,9 @@ export function CorrectionPage({ data, setData, notify }) {
       const pairKey = itemStudent && itemAssessment ? `${itemAssessment.id}:${itemStudent.id}` : ''
       if (!issue && seen.has(pairKey)) issue = 'Folha duplicada no lote'
       if (!issue) seen.add(pairKey)
-      const needsReview = !issue && (!item.qrFound || item.uncertain > 0 || item.markersFound < 4)
-      return { index, item, assessment: getAssessmentForStudent(itemAssessment, itemStudent), student: itemStudent, classroom: itemClass, existingSubmission, issue, pairKey, needsReview, valid: !issue }
+      const versionChoice = !issue ? resolveSheetVersion(itemAssessment, itemStudent, item) : null
+      const needsReview = !issue && (!item.qrFound || item.uncertain > 0 || item.markersFound < 4 || Boolean(versionChoice?.problem))
+      return { index, item, assessment: getAssessmentForStudent(itemAssessment, itemStudent), student: itemStudent, classroom: itemClass, existingSubmission, issue, pairKey, needsReview, versionChoice, valid: !issue }
     })
   }, [batch, data])
   const batchSaveable = batchRows.filter((row) => row.valid)
@@ -687,6 +698,10 @@ export function CorrectionPage({ data, setData, notify }) {
       assessment: blankVersion ? getAssessmentForVersion(recognizedAssessment, blankVersion) : getAssessmentForStudent(recognizedAssessment, recognizedStudent || { classId: recognizedClassId }),
       classId: recognizedClassId,
       answerKey: blankVersion?.answerKey || (recognizedStudent ? getAnswerKeyForStudent(recognizedAssessment, recognizedStudent) : getAnswerKeyForClass(recognizedAssessment, recognizedClassId)),
+      resolveMarkedVersion: (selections, sheetFormat) => {
+        const version = findMarkedVersion(recognizedAssessment, recognizedClassId, selections, sheetFormat?.questionCount)
+        return version ? { version, assessment: getAssessmentForVersion(recognizedAssessment, version), answerKey: version.answerKey } : null
+      },
     }
   }
 
@@ -980,10 +995,11 @@ export function CorrectionPage({ data, setData, notify }) {
       notify('Turma incompatível', 'Este aluno não pertence a uma turma associada ao simulado.', 'warning')
       return
     }
-    const finalVersion = getAnswerKeyVersionForStudent(finalAssessment, finalStudent)
+    const versionChoice = resolveSheetVersion(finalAssessment, finalStudent, result)
+    const finalVersion = versionChoice.version
     const finalKey = finalVersion?.answerKey || getAnswerKeyForClass(finalAssessment, finalStudent.classId)
     const graded = regradeAnswers(result.answers, finalKey)
-    const needsReview = !result.qrFound || graded.multiple > 0 || graded.uncertain > 0 || result.markersFound < 4
+    const needsReview = !result.qrFound || graded.multiple > 0 || graded.uncertain > 0 || result.markersFound < 4 || Boolean(versionChoice.problem)
     const archived = await archiveScans([result.sourceFile], finalAssessment)
     const scan = scanReference(archived.get(result.sourceFile), 1, 'image')
     const submission = {
@@ -995,14 +1011,18 @@ export function CorrectionPage({ data, setData, notify }) {
         ...(result.markersFound < 4 ? ['Marcadores incompletos'] : []),
         ...(graded.multiple > 0 ? ['Marcações múltiplas'] : []),
         ...(graded.uncertain > 0 ? ['Marcações incertas'] : []),
+        ...(versionChoice.problem ? [versionChoice.problem] : []),
       ],
+      ...(versionChoice.reading ? { versionMarking: versionChoice.reading } : {}),
       correctedAt: new Date().toISOString(), filename: fileName,
       ...(scan ? { scan } : {}),
     }
     setData((current) => ({
       ...current,
       submissions: [inheritVoid(submission, current.submissions), ...current.submissions.filter((item) => !(item.assessmentId === finalAssessment.id && item.studentId === finalStudent.id))],
-      assessments: current.assessments.map((item) => item.id === finalAssessment.id && item.status === 'Pronto para aplicar' ? { ...item, status: 'Correção em andamento' } : item),
+      assessments: current.assessments.map((item) => item.id === finalAssessment.id
+        ? rememberSheetVersions({ ...item, ...(item.status === 'Pronto para aplicar' ? { status: 'Correção em andamento' } : {}) }, versionChoice.changed ? [[finalStudent.id, finalVersion.id]] : [])
+        : item),
     }))
     notify(needsReview ? 'Correção salva com ressalvas' : 'Folha corrigida e salva', needsReview ? 'As marcações ambíguas foram enviadas à fila de revisão.' : `${finalStudent.name}: ${graded.correct} acertos com o gabarito de ${data.classes.find((item) => item.id === finalStudent.classId)?.name}.`)
     setResult(null); setStudentId(''); setFileName('')
@@ -1021,8 +1041,9 @@ export function CorrectionPage({ data, setData, notify }) {
     const archivedScan = (item) => batch.sourceType === 'pdf'
       ? scanReference(archived.get(batch.sourceFile), item.pageNumber, 'pdf')
       : scanReference(archived.get(item.sourceFile), 1, 'image')
-    const submissions = batchSaveable.map(({ item, student: finalStudent, assessment: finalAssessment, needsReview }) => {
-      const finalVersion = getAnswerKeyVersionForStudent(finalAssessment, finalStudent)
+    const submissions = batchSaveable.map(({ item, student: finalStudent, needsReview, versionChoice }) => {
+      const finalAssessment = data.assessments.find((entry) => entry.id === item.assessmentId)
+      const finalVersion = versionChoice?.version || getAnswerKeyVersionForStudent(finalAssessment, finalStudent)
       const finalKey = finalVersion?.answerKey || getAnswerKeyForClass(finalAssessment, finalStudent.classId)
       const graded = regradeAnswers(item.answers, finalKey)
       return {
@@ -1044,7 +1065,9 @@ export function CorrectionPage({ data, setData, notify }) {
           ...(item.markersFound < 4 ? ['Marcadores incompletos'] : []),
           ...(graded.multiple > 0 ? ['Marcações múltiplas'] : []),
           ...(graded.uncertain > 0 ? ['Marcações incertas'] : []),
+          ...(versionChoice?.problem ? [versionChoice.problem] : []),
         ],
+        ...(versionChoice?.reading ? { versionMarking: versionChoice.reading } : {}),
         correctedAt,
         filename: batch.sourceType === 'images' ? item.pageFilename : `${batch.fileName} · página ${item.pageNumber}`,
         sourceType: batch.sourceType === 'images' ? 'image-batch' : 'pdf',
@@ -1054,18 +1077,25 @@ export function CorrectionPage({ data, setData, notify }) {
     })
     const replacementKeys = new Set(submissions.map((item) => `${item.assessmentId}:${item.studentId}`))
     const touchedAssessments = new Set(submissions.map((item) => item.assessmentId))
+    const sheetVersionChanges = batchSaveable.filter((row) => row.versionChoice?.changed)
     setData((current) => ({
       ...current,
       submissions: [
         ...submissions.map((item) => inheritVoid(item, current.submissions)),
         ...current.submissions.filter((item) => !replacementKeys.has(`${item.assessmentId}:${item.studentId}`)),
       ],
-      assessments: current.assessments.map((item) => touchedAssessments.has(item.id) && item.status === 'Pronto para aplicar' ? { ...item, status: 'Correção em andamento' } : item),
+      assessments: current.assessments.map((item) => touchedAssessments.has(item.id)
+        ? rememberSheetVersions(
+          { ...item, ...(item.status === 'Pronto para aplicar' ? { status: 'Correção em andamento' } : {}) },
+          sheetVersionChanges.filter((row) => row.item.assessmentId === item.id).map((row) => [row.student.id, row.versionChoice.version.id]),
+        )
+        : item),
     }))
+    const versionMessage = sheetVersionChanges.length ? ` ${sheetVersionChanges.length} aluno(s) tiveram a versão trocada pela cor/idioma marcados na folha.` : ''
     const skippedMessage = batchUnresolved ? ` ${batchUnresolved} folha(s) com pendência foram ignoradas.` : ''
     const reviewMessage = batchNeedsReview ? ` ${batchNeedsReview} correção(ões) foram enviadas para revisão.` : ''
     const replacementMessage = batchReplacements ? ` ${batchReplacements} resultado(s) anterior(es) foram atualizado(s).` : ''
-    notify('Lote de correções salvo', `${submissions.length} correção(ões) registradas.${replacementMessage}${reviewMessage}${skippedMessage}`, batchUnresolved ? 'warning' : 'success')
+    notify('Lote de correções salvo', `${submissions.length} correção(ões) registradas.${replacementMessage}${versionMessage}${reviewMessage}${skippedMessage}`, batchUnresolved ? 'warning' : 'success')
     setBatch(null)
     setBatchPreviewIndex(null)
     setFileName('')
@@ -1144,7 +1174,7 @@ export function CorrectionPage({ data, setData, notify }) {
                 <td>{row.classroom ? <span className="class-tag" style={{ '--class-color': row.classroom.color }}>{row.classroom.name}</span> : '—'}</td>
                 <td><strong>{row.assessment?.code || '—'}</strong><small className="cell-subtitle">{row.assessment?.title || ''}</small></td>
                 <td>{row.valid ? <div className="batch-result-cell"><strong>{row.item.score}%</strong><span><b className="is-correct">{row.item.correct} A</b><b className="is-wrong">{row.item.wrong} E</b><b>{row.item.blank} B</b><b className="is-review">{row.item.multiple + row.item.uncertain} R</b>{row.item.cancelled > 0 && <b>{row.item.cancelled} C</b>}</span></div> : '—'}</td>
-                <td>{row.issue ? <Badge tone={row.issue.includes('duplicada') || row.item.error ? 'red' : 'ochre'}>{row.issue}</Badge> : row.needsReview ? <Badge tone="ochre">Revisar marcações</Badge> : row.existingSubmission ? <Badge tone="blue">Atualizará existente</Badge> : <Badge tone="green">Pronta</Badge>}</td>
+                <td>{row.issue ? <Badge tone={row.issue.includes('duplicada') || row.item.error ? 'red' : 'ochre'}>{row.issue}</Badge> : row.needsReview ? <Badge tone="ochre">{row.versionChoice?.problem ? 'Conferir cor/idioma' : 'Revisar marcações'}</Badge> : row.existingSubmission ? <Badge tone="blue">Atualizará existente</Badge> : <Badge tone="green">Pronta</Badge>}</td>
                 <td><button className="icon-button" disabled={!row.item.previewUrl} onClick={() => openBatchPreview(row.index)} aria-label={`Visualizar folha ${row.item.pageNumber}`} title="Ver identificação e respostas"><Eye size={17} /></button></td>
               </tr>
             })}
@@ -1192,7 +1222,8 @@ export function CorrectionPage({ data, setData, notify }) {
           </aside>
         </div>
 
-        <div className="applied-key-banner"><ClipboardList size={17} /><div><strong>Gabarito aplicado: {resultAssessment?.title} · {resultClassroom?.name}</strong><p>{resultAnswerKeyVersion?.label || (hasCustomAnswerKey(resultAssessment, resultClassId) ? 'Versão específica desta turma' : 'Gabarito padrão do simulado')}</p></div><AnswerKeyStrip answerKey={resultAnswerKey} limit={10} compact /></div>
+        <div className="applied-key-banner"><ClipboardList size={17} /><div><strong>Gabarito aplicado: {resultAssessment?.title} · {resultClassroom?.name}</strong><p>{resultAnswerKeyVersion?.label || (hasCustomAnswerKey(resultAssessment, resultClassId) ? 'Versão específica desta turma' : 'Gabarito padrão do simulado')}{resultVersionChoice?.source === 'sheet' && ` · marcado na folha: ${resultVersionChoice.reading}${resultVersionChoice.changed ? ' (diferente da versão cadastrada)' : ''}`}</p></div><AnswerKeyStrip answerKey={resultAnswerKey} limit={10} compact /></div>
+        {resultVersionChoice?.problem && <div className="scan-notice is-warning"><AlertTriangle size={17} /><p><strong>Tipo de prova não lido.</strong> {resultVersionChoice.problem}. Confira a cor/idioma na folha antes de salvar; a correção irá para revisão.</p></div>}
 
         <div className="answer-review-panel panel scan-answer-review">
           <header className="answer-review-heading"><div><h3>Respostas encontradas</h3><p>Filtre os resultados ou clique em uma alternativa para corrigir a leitura.</p></div><Badge tone={result.multiple + result.uncertain ? 'ochre' : 'green'}>{result.answers.length} questões</Badge></header>
@@ -1211,7 +1242,8 @@ export function CorrectionPage({ data, setData, notify }) {
           </div>
 
           {batchPreview.issue && <div className="scan-notice is-error"><AlertTriangle size={17} /><p><strong>Pendência nesta folha.</strong> {batchPreview.issue}. Ela não será salva enquanto a pendência existir.</p></div>}
-          {!batchPreview.issue && batchPreview.needsReview && <div className="scan-notice is-warning"><AlertTriangle size={17} /><p><strong>Esta folha requer revisão.</strong> Confira as marcações múltiplas, incertas ou o enquadramento antes de salvar.</p></div>}
+          {!batchPreview.issue && batchPreview.needsReview && <div className="scan-notice is-warning"><AlertTriangle size={17} /><p><strong>Esta folha requer revisão.</strong> {batchPreview.versionChoice?.problem ? `${batchPreview.versionChoice.problem}.` : 'Confira as marcações múltiplas, incertas ou o enquadramento antes de salvar.'}</p></div>}
+          {!batchPreview.issue && batchPreview.versionChoice?.source === 'sheet' && <div className="scan-notice is-success"><CheckCircle2 size={17} /><p><strong>Versão pela folha: {batchPreview.versionChoice.version.label}.</strong> Marcado: {batchPreview.versionChoice.reading}{batchPreview.versionChoice.changed ? ' — diferente da versão cadastrada; será atualizada ao salvar.' : '.'}</p></div>}
           {!batchPreview.issue && batchPreview.existingSubmission && <div className="scan-notice is-info"><RotateCcw size={17} /><p><strong>Já existe uma correção deste aluno.</strong> O resultado anterior será substituído ao salvar o lote.</p></div>}
 
           {batchPreview.item.answers && <ResultBreakdown result={batchPreview.item} />}
