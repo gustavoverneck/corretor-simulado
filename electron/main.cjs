@@ -1,6 +1,8 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require('electron')
 const path = require('node:path')
 const scanArchive = require('./scanArchive.cjs')
+const scannerInbox = require('./scannerInbox.cjs')
+const windowState = require('./windowState.cjs')
 const autoBackup = require('./autoBackup.cjs')
 const updater = require('./updater.cjs')
 const { createLanShare } = require('./lanShare.cjs')
@@ -25,13 +27,15 @@ function flushWindow(window) {
 }
 
 function createWindow() {
+  const saved = windowState.readState(app.getPath('userData'), screen.getAllDisplays())
   const mainWindow = new BrowserWindow({
     title: appName,
     icon: path.join(__dirname, 'icon.png'),
-    width: 1440,
-    height: 900,
-    minWidth: 980,
-    minHeight: 650,
+    width: saved.width,
+    height: saved.height,
+    ...(saved.x !== undefined ? { x: saved.x, y: saved.y } : { center: true }),
+    minWidth: windowState.MIN_SIZE.width,
+    minHeight: windowState.MIN_SIZE.height,
     show: false,
     backgroundColor: '#f5f7f4',
     webPreferences: {
@@ -47,7 +51,11 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
     if (navigationUrl !== mainWindow.webContents.getURL()) event.preventDefault()
   })
-  mainWindow.once('ready-to-show', () => mainWindow.show())
+  mainWindow.once('ready-to-show', () => {
+    if (saved.maximized) mainWindow.maximize()
+    mainWindow.show()
+  })
+  windowState.trackWindow(mainWindow, app.getPath('userData'))
   mainWindow.on('close', (event) => {
     if (mainWindow.flushed) return
     event.preventDefault()
@@ -83,6 +91,30 @@ function registerScanArchive() {
   })
   ipcMain.handle('scan-archive:reveal', async (_event, relativePath) => {
     shell.showItemInFolder(await scanArchive.fullPath(userData(), relativePath))
+  })
+}
+
+function registerScannerInbox() {
+  const userData = () => app.getPath('userData')
+  ipcMain.handle('scanner-inbox:status', () => scannerInbox.status(userData()))
+  ipcMain.handle('scanner-inbox:choose-folder', async (event) => {
+    const current = await scannerInbox.readConfig(userData())
+    const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+      title: 'Pasta onde o scanner salva os arquivos',
+      buttonLabel: 'Usar esta pasta',
+      defaultPath: current.folder || app.getPath('documents'),
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (result.canceled || !result.filePaths[0]) return scannerInbox.status(userData())
+    return scannerInbox.setFolder(userData(), result.filePaths[0])
+  })
+  ipcMain.handle('scanner-inbox:clear-folder', () => scannerInbox.setFolder(userData(), null))
+  ipcMain.handle('scanner-inbox:set-auto', (_event, auto) => scannerInbox.setAuto(userData(), auto))
+  ipcMain.handle('scanner-inbox:read', (_event, name) => scannerInbox.readFile(userData(), name))
+  ipcMain.handle('scanner-inbox:mark-seen', (_event, keys) => scannerInbox.markSeen(userData(), keys))
+  ipcMain.handle('scanner-inbox:reveal', async () => {
+    const { folder } = await scannerInbox.readConfig(userData())
+    if (folder) await shell.openPath(folder)
   })
 }
 
@@ -134,6 +166,7 @@ app.setName(appName)
 
 app.whenReady().then(() => {
   registerScanArchive()
+  registerScannerInbox()
   registerAutoBackup()
   registerUpdates()
   registerLanShare()
