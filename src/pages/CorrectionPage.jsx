@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   UploadCloud, Camera, ScanLine, CheckCircle2, AlertTriangle, FileImage, RotateCcw,
   Save, MoreHorizontal, QrCode, Focus, CircleDot, ChevronRight, X, ClipboardList,
@@ -16,6 +16,8 @@ import { cn, downloadBlob, formatDateTime, nextStudentRegistration, normalize, u
 import { getAttendance, setStudentsAbsent } from '../lib/attendance'
 import { archiveScanFile, scanReference } from '../lib/scanArchive'
 import { OriginalSheetButton, useScanArchiveFolder } from '../components/OriginalSheet'
+import { ScannerInboxCard, useScannerInbox } from '../components/ScannerInbox'
+import { markScannerFilesSeen, nextScannerJob, readScannerJob } from '../lib/scannerInbox'
 import { activeSubmissions, describeVoid, inheritVoid, isSubmissionVoided, restoreVoidedSubmission, VOID_REASONS, voidSubmission } from '../lib/voidedSubmission'
 
 const answerStatuses = {
@@ -597,6 +599,15 @@ export function CorrectionPage({ data, setData, notify }) {
   const scanArchiveFolder = useScanArchiveFolder()
   const assessment = data.assessments.find((item) => item.id === assessmentId)
   const assessmentClosed = isAssessmentClosed(assessment)
+  const scannerInbox = useScannerInbox(notify)
+  const [scannerBusy, setScannerBusy] = useState(false)
+  const scannerBlockedReason = !assessment
+    ? 'Cadastre um simulado para corrigir.'
+    : assessmentClosed
+      ? 'O simulado selecionado está encerrado: reabra-o ou escolha outro simulado acima.'
+      : result || batch
+        ? 'Eles serão corrigidos quando você salvar ou descartar a correção aberta.'
+        : tab !== 'scan' ? 'Volte para Corrigir folhas para continuar.' : ''
   const pendingReviews = getPendingReviewSubmissions(data.submissions, data.assessments)
   const attendanceOpen = getAttendance(assessment, data.students, data.submissions).pending
   const answerKeyAlerts = useMemo(() => data.assessments.reduce((total, item) => total + countAnswerKeyAlerts(item, activeSubmissions(data.submissions)), 0), [data.assessments, data.submissions])
@@ -791,6 +802,30 @@ export function CorrectionPage({ data, setData, notify }) {
       setProcessingProgress(null)
     }
   }
+
+  // Pasta do scanner: lê o próximo PDF (ou as próximas imagens), marca como
+  // lidos antes de corrigir, para não repetir, e segue o fluxo normal de envio.
+  async function processScannerQueue() {
+    const job = nextScannerJob(scannerInbox.status?.pending)
+    if (!job.length || scannerBusy || processing) return
+    setScannerBusy(true)
+    try {
+      const files = await readScannerJob(job)
+      scannerInbox.setStatus(await markScannerFilesSeen(job.map((item) => item.key)))
+      await processFiles(files)
+    } catch (error) {
+      notify('Pasta do scanner', error.message || 'Não foi possível ler o arquivo do scanner.', 'warning')
+      await markScannerFilesSeen(job.map((item) => item.key)).then(scannerInbox.setStatus).catch(() => {})
+    } finally {
+      setScannerBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!scannerInbox.status?.folder || scannerInbox.status.auto === false || !scannerInbox.status.pending?.length) return
+    if (scannerBlockedReason || scannerBusy || processing) return
+    processScannerQueue()
+  }, [scannerInbox.status, scannerBlockedReason, scannerBusy, processing])
 
   async function processFiles(fileList) {
     if (!assessment || processing) return
@@ -1134,6 +1169,7 @@ export function CorrectionPage({ data, setData, notify }) {
               <input ref={cameraInput} disabled={assessmentClosed} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { processFile(event.target.files[0]); event.target.value = '' }} />
             </div>
             {!assessmentClosed && <details className="manual-identification"><summary>QR Code danificado? Identificar manualmente <ChevronRight size={15} /></summary><div><select value={studentId} onChange={(event) => setStudentId(event.target.value)}><option value="">Selecione o aluno (opcional)</option>{eligibleStudents.map((student) => <option value={student.id} key={student.id}>{student.name} · {student.registration}</option>)}</select></div></details>}
+            <ScannerInboxCard inbox={scannerInbox} busy={scannerBusy} blockedReason={scannerBlockedReason} onProcessNow={processScannerQueue} />
           </section>
 
           <aside className="correction-guide"><h3>Para uma leitura precisa</h3><div><span><Focus size={19} /></span><p><strong>Uma folha por arquivo</strong>Cada imagem ou página do PDF deve conter uma folha completa, sem cortes.</p></div><div><span><CircleDot size={19} /></span><p><strong>Digitalize com nitidez</strong>Prefira 200 ou 300 DPI e mantenha os quatro marcadores visíveis.</p></div><div><span><QrCode size={19} /></span><p><strong>Não cubra o QR Code</strong>Ele identifica o simulado e, nas folhas nominadas, também o aluno.</p></div><div className="privacy-note"><CheckCircle2 size={18} /><p><strong>Processamento privado</strong>As imagens e o PDF são analisados neste dispositivo e não são enviados para servidores.</p></div></aside>
@@ -1144,7 +1180,7 @@ export function CorrectionPage({ data, setData, notify }) {
 
       {batch && <section className="batch-review page-stack">
         <header className="scan-result-header">
-          <div><button className="back-link" onClick={() => { setBatch(null); setBatchPreviewIndex(null); setFileName('') }}><X size={16} /> Descartar lote</button><h2>Revisão do lote</h2><p>{batch.fileName} · {batch.totalPages} {batch.sourceType === 'images' ? 'imagem(ns)' : 'página(s)'} analisada(s){scanArchiveFolder ? ' · uma cópia será guardada na pasta das folhas' : ''}</p></div>
+          <div><button className="back-link" onClick={() => { setBatch(null); setBatchPreviewIndex(null); setFileName('') }}><X size={16} /> Descartar lote</button><h2>Revisão do lote</h2><p>{batch.fileName} · {batch.totalPages} {batch.sourceType === 'images' ? 'imagem(ns)' : 'página(s)'} analisada(s){scanArchiveFolder ? ' · uma cópia será guardada na pasta das folhas' : ''}{scannerInbox.status?.folder && scannerInbox.status.pending?.length ? ` · ${scannerInbox.status.pending.length} arquivo(s) novo(s) aguardando na pasta do scanner` : ''}</p></div>
           <div className="scan-header-actions"><Button variant="secondary" icon={RotateCcw} onClick={() => { setBatch(null); setBatchPreviewIndex(null) }}>Escolher outro arquivo</Button><Button icon={Save} disabled={!batchSaveable.length || archiving} onClick={saveBatchCorrections}>{archiving ? 'Guardando PDF...' : `Salvar ${batchSaveable.length} correção(ões)`}</Button></div>
         </header>
 

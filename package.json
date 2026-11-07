@@ -19,6 +19,7 @@
     "test:seges-pdf": "node scripts/test-seges-pdf.mjs",
     "test:results": "node scripts/test-results.mjs",
     "test:omr": "node scripts/test-omr.mjs",
+    "test:scanner-inbox": "node scripts/test-scanner-inbox.mjs",
     "test:sheet-scan": "node scripts/test-sheet-scan.mjs",
     "test:omr-scan-quality": "node scripts/test-omr-scan-quality.mjs",
     "test:omr-photo-conditions": "node scripts/test-omr-photo-conditions.mjs",

@@ -1574,3 +1574,11 @@ td.is-advanced strong, td.is-advanced { color: #2f6a59; }
 @media (max-width: 640px) { .version-marking-field { grid-template-columns: 1fr auto; } .version-marking-field label:first-child { grid-column: 1 / -1; } }
 .version-marking-copy { height: 32px; padding: 0 8px; border: 1px solid #d6ddda; border-radius: 7px; font-size: 10px; background: #fff; }
 .answer-key-copy-from { height: 34px; padding: 0 8px; color: #3f5149; background: white; border: 1px solid #d8e0dc; border-radius: 7px; font-size: 9px; }
+.scanner-inbox { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px; background: #fafcfb; border: 1px solid #e1e8e4; border-radius: 9px; }
+.scanner-inbox-icon { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; color: #4c776b; background: #e9f2ee; border-radius: 8px; }
+.scanner-inbox-text { flex: 1 1 260px; min-width: 0; }
+.scanner-inbox-text > div { display: flex; align-items: center; gap: 8px; }
+.scanner-inbox-text strong { font-size: 10.5px; }
+.scanner-inbox-text small { display: block; margin-top: 3px; color: #64716c; font-size: 8.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scanner-inbox-text p { margin: 4px 0 0; color: #84908b; font-size: 8.5px; line-height: 1.45; }
+.scanner-inbox-actions { display: flex; flex-wrap: wrap; gap: 6px; }

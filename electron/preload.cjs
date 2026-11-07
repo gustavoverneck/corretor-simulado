@@ -10,6 +10,17 @@ contextBridge.exposeInMainWorld('desktopScanArchive', {
   reveal: (relativePath) => ipcRenderer.invoke('scan-archive:reveal', relativePath),
 })
 
+// Pasta do scanner: arquivos novos são corrigidos sozinhos.
+contextBridge.exposeInMainWorld('desktopScannerInbox', {
+  status: () => ipcRenderer.invoke('scanner-inbox:status'),
+  chooseFolder: () => ipcRenderer.invoke('scanner-inbox:choose-folder'),
+  clearFolder: () => ipcRenderer.invoke('scanner-inbox:clear-folder'),
+  setAuto: (auto) => ipcRenderer.invoke('scanner-inbox:set-auto', auto),
+  read: (name) => ipcRenderer.invoke('scanner-inbox:read', name),
+  markSeen: (keys) => ipcRenderer.invoke('scanner-inbox:mark-seen', keys),
+  reveal: () => ipcRenderer.invoke('scanner-inbox:reveal'),
+})
+
 contextBridge.exposeInMainWorld('desktopAutoBackup', {
   getFolder: () => ipcRenderer.invoke('auto-backup:get-folder'),
   chooseFolder: () => ipcRenderer.invoke('auto-backup:choose-folder'),
